@@ -13,8 +13,17 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24.x'
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: '35.1'
+      - run: go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
+      - run: ./scripts/generate-go.sh && git diff --exit-code
+      - uses: bufbuild/buf-setup-action@v1
+      - run: buf lint
+      - if: github.event_name == 'pull_request'
+        run: buf breaking --against 'https://github.com/torana-edge/torana-plugin-sdk.git#branch=main'
       - run: go test ./...
-      - run: GOOS=wasip1 GOARCH=wasm go build -buildvcs=false -o /tmp/go-logger.wasm ./examples/go-logger
+      - run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -buildvcs=false -o /tmp/go-logger.wasm ./examples/go-logger
   rust:
     runs-on: ubuntu-latest
     steps:
@@ -25,3 +34,11 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - run: cargo test --manifest-path rust/torana-plugin-sdk/Cargo.toml
       - run: cargo build --target wasm32-wasip1 --manifest-path examples/rust-logger/Cargo.toml
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -buildvcs=false -o /tmp/go-logger.wasm ./examples/go-logger
+      - run: go test ./conformance/host
+        env:
+          TORANA_GO_GUEST: /tmp/go-logger.wasm
+          TORANA_RUST_GUEST: examples/rust-logger/target/wasm32-wasip1/debug/torana_rust_logger.wasm

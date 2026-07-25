@@ -64,18 +64,23 @@ func run_before_request(reqID uint64, ptr, size uint32) uint64 {
 	inputBytes := ReadBytes(ptr, size)
 	var req pb.ChatRequest
 	if err := proto.Unmarshal(inputBytes, &req); err != nil {
-		Log("on_chat_request unmarshal err: "+err.Error(), LogLevelInfo)
-		return 0
+		panic("torana sdk: decode run_before_request: " + err.Error())
 	}
 
 	out, err := chatRequestHandler(context.WithValue(context.Background(), "reqID", reqID), &req)
-	if err != nil || out == nil {
+	if err != nil {
+		panic("torana plugin: run_before_request: " + err.Error())
+	}
+	if out == nil {
 		return 0
 	}
 
 	outBytes, err := proto.Marshal(out)
-	if err != nil || len(outBytes) == 0 {
-		return 0
+	if err != nil {
+		panic("torana sdk: encode run_before_request: " + err.Error())
+	}
+	if len(outBytes) == 0 {
+		panic("torana sdk: decode run_after_response: " + err.Error())
 	}
 	return WriteResult(outBytes)
 }
@@ -99,13 +104,19 @@ func run_after_response(reqID uint64, ptr, size uint32) uint64 {
 	}
 
 	out, err := chatResponseHandler(context.WithValue(context.Background(), "reqID", reqID), &resp)
-	if err != nil || out == nil {
+	if err != nil {
+		panic("torana plugin: run_after_response: " + err.Error())
+	}
+	if out == nil {
 		return 0
 	}
 
 	outBytes, err := proto.Marshal(out)
-	if err != nil || len(outBytes) == 0 {
-		return 0
+	if err != nil {
+		panic("torana sdk: encode run_after_response: " + err.Error())
+	}
+	if len(outBytes) == 0 {
+		panic("torana sdk: decode run_on_stream_chunk: " + err.Error())
 	}
 	return WriteResult(outBytes)
 }
@@ -152,12 +163,18 @@ func run_on_stream_chunk(reqID uint64, ptr, size uint32) uint64 {
 	}
 
 	out, err := streamChunkHandler(context.WithValue(context.Background(), "reqID", reqID), &chunk)
-	if err != nil || out == nil || !out.Handled {
+	if err != nil {
+		panic("torana plugin: run_on_stream_chunk: " + err.Error())
+	}
+	if out == nil || !out.Handled {
 		return 0
 	}
 
 	outBytes, err := proto.Marshal(out)
-	if err != nil || len(outBytes) == 0 {
+	if err != nil {
+		panic("torana sdk: encode run_on_stream_chunk: " + err.Error())
+	}
+	if len(outBytes) == 0 {
 		return 0
 	}
 	return WriteResult(outBytes)
@@ -181,17 +198,22 @@ func run_on_http_request(reqID uint64, ptr, size uint32) uint64 {
 	inputBytes := ReadBytes(ptr, size)
 	var req pb.HttpRequest
 	if err := proto.Unmarshal(inputBytes, &req); err != nil {
-		Log("run_on_http_request unmarshal err: "+err.Error(), LogLevelInfo)
-		return 0
+		panic("torana sdk: decode run_on_http_request: " + err.Error())
 	}
 
 	out, err := httpRequestHandler(context.WithValue(context.Background(), "reqID", reqID), &req)
-	if err != nil || out == nil || !out.Handled {
+	if err != nil {
+		panic("torana plugin: run_on_http_request: " + err.Error())
+	}
+	if out == nil || !out.Handled {
 		return 0
 	}
 
 	outBytes, err := proto.Marshal(out)
-	if err != nil || len(outBytes) == 0 {
+	if err != nil {
+		panic("torana sdk: encode run_on_http_request: " + err.Error())
+	}
+	if len(outBytes) == 0 {
 		return 0
 	}
 	return WriteResult(outBytes)

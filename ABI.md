@@ -13,6 +13,11 @@ returned pointer in its high 32 bits and length in its low 32 bits. A zero
 result is pass-through. Hosts own input buffers; guests own output buffers
 until the host calls `dealloc`.
 
+Returning zero is reserved for intentional pass-through. A handler or codec
+error traps the guest call; the host discards that instance and applies the
+operator-approved `failure_mode` (`pass` or `block`). The SDK helpers implement
+this convention so ordinary handler failures cannot resemble success.
+
 Supported v1 hooks are `run_before_request`, `run_after_response`,
 `run_on_stream_chunk`, and `run_on_http_request`. Their protobuf messages are
 defined in [`proto/torana/v1/torana.proto`](proto/torana/v1/torana.proto).
@@ -30,5 +35,5 @@ filesystem, network, environment-variable, clock, or random access.
 
 Additive protobuf fields and new optional host calls are allowed in v1. An
 export signature change, a changed packed-result layout, or a removed field is
-an ABI-major change. `torana plugin test` should run the conformance fixtures
-before publishing an artifact.
+an ABI-major change. Run this repository's conformance suite before publishing
+an artifact.
