@@ -1,0 +1,9 @@
+{
+  "id": "example/rust-logger",
+  "name": "rust-logger",
+  "version": "0.1.0",
+  "abi_version": "v1",
+  "description": "Minimal Rust Torana plugin template",
+  "hooks": [{"name": "run_before_request", "priority": 100}],
+  "permissions": [{"name": "env.log", "description": "Write bounded diagnostic messages"}]
+}
