@@ -28,8 +28,8 @@ jobs:
           grep -q "^version = \"${version}\"$" rust/torana-plugin-sdk/Cargo.toml
           mkdir -p dist
           GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -buildvcs=false -o dist/go-logger.wasm ./examples/go-logger
-          cargo build --release --target wasm32-wasip1 --manifest-path examples/rust-logger/Cargo.toml
-          cp examples/rust-logger/target/wasm32-wasip1/release/torana_rust_logger.wasm dist/rust-logger.wasm
+          cargo build --release --target wasm32-wasip1 --target-dir /tmp/rust-logger-target --manifest-path examples/rust-logger/Cargo.toml
+          cp /tmp/rust-logger-target/wasm32-wasip1/release/torana_rust_logger.wasm dist/rust-logger.wasm
           (cd dist && sha256sum *.wasm > checksums.txt)
       - uses: softprops/action-gh-release@v2
         with:
