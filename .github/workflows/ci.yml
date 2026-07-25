@@ -48,4 +48,4 @@ jobs:
       - run: go test ./conformance/host
         env:
           TORANA_GO_GUEST: /tmp/go-logger.wasm
-          TORANA_RUST_GUEST: /tmp/rust-logger-target/wasm32-wasip1/debug/torana_rust_logger.wasm
+          TORANA_RUST_GUEST: /tmp/rust-logger-target/wasm32-wasip1/debug/torana-rust-logger.wasm
