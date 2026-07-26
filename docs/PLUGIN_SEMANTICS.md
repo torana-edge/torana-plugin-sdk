@@ -181,4 +181,4 @@ source reads need a recent exact window and a deterministic recovery marker;
 economically gated transformations must be assessed as one batch from the
 earliest changed item. Reuse the policy and cache-key helpers in `plugin-sdk`
 rather than inventing plugin-specific matching or call-ID-only keys. See
-[COMPACTION.md](COMPACTION.md) for the public contract.
+[COMPACTION.md](https://github.com/torana-edge/torana-edge/blob/main/docs/COMPACTION.md) for the public contract.

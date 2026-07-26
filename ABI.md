@@ -71,7 +71,7 @@ Use the standard library allocator for your language.
   ```
   Torana's plugins are built with **standard Go**, compiled
   `GOOS=wasip1 GOARCH=wasm -buildmode=c-shared` for the reactor model — see
-  [PLUGIN_IMPLEMENTATION_GUIDE.md](PLUGIN_IMPLEMENTATION_GUIDE.md), which is
+  [docs/PLUGIN_SEMANTICS.md](docs/PLUGIN_SEMANTICS.md), which is
   authoritative on the toolchain. Don't hand-roll this: the
   [torana-plugin-sdk](https://github.com/torana-edge/torana-plugin-sdk) module
   implements the allocator correctly, and getting it wrong returns null bytes
