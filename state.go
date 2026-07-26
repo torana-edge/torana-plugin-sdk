@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 )
 
 // Durable plugin state
@@ -130,4 +131,31 @@ func stateStatus(res string) error {
 
 func isPermissionDenied(res string) bool {
 	return res == `{"status":"error","message":"permission denied"}`
+}
+
+// Now returns the host's wall-clock time in Unix milliseconds.
+//
+// WASI preview1 gives a plugin no clock, deliberately — a sandbox withholds
+// ambient authority, and time is ambient authority. Plugins that reason about
+// elapsed time (cache lifetimes, deadlines, rate windows) need this; those that
+// do not should not request it.
+//
+// Requires the env.now permission, and returns 0 when it is not granted so a
+// caller can degrade rather than trap.
+//
+// DANGER: never write this value, or anything derived from it, into a request.
+// Doing so makes the plugin's output differ between two identical requests,
+// which invalidates the provider's prompt cache on every single turn and
+// multiplies the operator's token spend. Torana's determinism test exists to
+// catch exactly this. Use it to decide *whether* to act, never as content.
+func Now() int64 {
+	res, err := HostCall("env.now", "")
+	if err != nil || res == "" || isPermissionDenied(res) {
+		return 0
+	}
+	ms, err := strconv.ParseInt(res, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return ms
 }
