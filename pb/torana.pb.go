@@ -1112,6 +1112,156 @@ func (x *HttpResponse) GetHandled() bool {
 	return false
 }
 
+// Fired periodically by the host, with no request in flight.
+//
+// Every other hook is reactive: a plugin can only act while a request is
+// passing through it. This one exists so a plugin can act when nothing is
+// happening — refreshing a provider cache before it lapses, emitting a periodic
+// report, expiring its own state.
+//
+// The host attaches no meaning to a tick. It reports that time has passed and
+// nothing else; what to do about it belongs entirely to the plugin.
+//
+// Requires the env.background_tick permission. Running code with no request in
+// flight is a capability an operator should grant deliberately, and a plugin
+// that holds it can act — and spend — outside any request the operator can see.
+type TickRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Monotonically increasing per host process, starting at 1. Useful for
+	// "every Nth tick" without the plugin keeping its own counter.
+	TickId uint64 `protobuf:"varint,1,opt,name=tick_id,json=tickId,proto3" json:"tick_id,omitempty"`
+	// Host wall-clock time. Plugins have no clock of their own: WASI preview1
+	// exposes none, and this is the only time source they get.
+	UnixMillis int64 `protobuf:"varint,2,opt,name=unix_millis,json=unixMillis,proto3" json:"unix_millis,omitempty"`
+	// Configured interval, so a plugin can reason about elapsed time without
+	// assuming a particular cadence.
+	IntervalMs    int64 `protobuf:"varint,3,opt,name=interval_ms,json=intervalMs,proto3" json:"interval_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TickRequest) Reset() {
+	*x = TickRequest{}
+	mi := &file_proto_torana_v1_torana_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TickRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TickRequest) ProtoMessage() {}
+
+func (x *TickRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_torana_v1_torana_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TickRequest.ProtoReflect.Descriptor instead.
+func (*TickRequest) Descriptor() ([]byte, []int) {
+	return file_proto_torana_v1_torana_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *TickRequest) GetTickId() uint64 {
+	if x != nil {
+		return x.TickId
+	}
+	return 0
+}
+
+func (x *TickRequest) GetUnixMillis() int64 {
+	if x != nil {
+		return x.UnixMillis
+	}
+	return 0
+}
+
+func (x *TickRequest) GetIntervalMs() int64 {
+	if x != nil {
+		return x.IntervalMs
+	}
+	return 0
+}
+
+// Result of a run_on_tick invocation.
+//
+// The explicit `handled` flag is required for the same reason as
+// StreamEventResult and HttpResponse: an all-defaults protobuf message
+// marshals to zero bytes, which the host reads as "did nothing". Without it a
+// plugin that acted but reported nothing would be indistinguishable from one
+// that never ran.
+type TickResult struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Handled bool                   `protobuf:"varint,1,opt,name=handled,proto3" json:"handled,omitempty"`
+	// How many actions the plugin took this tick. Surfaced in /stats so an
+	// operator can see background work happening without reading logs.
+	Actions int32 `protobuf:"varint,2,opt,name=actions,proto3" json:"actions,omitempty"`
+	// Short human-readable status for the control plane, e.g. "refreshed 2 of 3
+	// conversations". Not for error reporting — a failing hook should trap.
+	Note          string `protobuf:"bytes,3,opt,name=note,proto3" json:"note,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TickResult) Reset() {
+	*x = TickResult{}
+	mi := &file_proto_torana_v1_torana_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TickResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TickResult) ProtoMessage() {}
+
+func (x *TickResult) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_torana_v1_torana_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TickResult.ProtoReflect.Descriptor instead.
+func (*TickResult) Descriptor() ([]byte, []int) {
+	return file_proto_torana_v1_torana_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *TickResult) GetHandled() bool {
+	if x != nil {
+		return x.Handled
+	}
+	return false
+}
+
+func (x *TickResult) GetActions() int32 {
+	if x != nil {
+		return x.Actions
+	}
+	return 0
+}
+
+func (x *TickResult) GetNote() string {
+	if x != nil {
+		return x.Note
+	}
+	return ""
+}
+
 var File_proto_torana_v1_torana_proto protoreflect.FileDescriptor
 
 const file_proto_torana_v1_torana_proto_rawDesc = "" +
@@ -1201,7 +1351,18 @@ const file_proto_torana_v1_torana_proto_rawDesc = "" +
 	"\x06status\x18\x01 \x01(\x05R\x06status\x12!\n" +
 	"\fheaders_json\x18\x02 \x01(\fR\vheadersJson\x12\x12\n" +
 	"\x04body\x18\x03 \x01(\fR\x04body\x12\x18\n" +
-	"\ahandled\x18\x04 \x01(\bR\ahandledB-Z+github.com/torana-edge/torana-plugin-sdk/pbb\x06proto3"
+	"\ahandled\x18\x04 \x01(\bR\ahandled\"h\n" +
+	"\vTickRequest\x12\x17\n" +
+	"\atick_id\x18\x01 \x01(\x04R\x06tickId\x12\x1f\n" +
+	"\vunix_millis\x18\x02 \x01(\x03R\n" +
+	"unixMillis\x12\x1f\n" +
+	"\vinterval_ms\x18\x03 \x01(\x03R\n" +
+	"intervalMs\"T\n" +
+	"\n" +
+	"TickResult\x12\x18\n" +
+	"\ahandled\x18\x01 \x01(\bR\ahandled\x12\x18\n" +
+	"\aactions\x18\x02 \x01(\x05R\aactions\x12\x12\n" +
+	"\x04note\x18\x03 \x01(\tR\x04noteB-Z+github.com/torana-edge/torana-plugin-sdk/pbb\x06proto3"
 
 var (
 	file_proto_torana_v1_torana_proto_rawDescOnce sync.Once
@@ -1215,7 +1376,7 @@ func file_proto_torana_v1_torana_proto_rawDescGZIP() []byte {
 	return file_proto_torana_v1_torana_proto_rawDescData
 }
 
-var file_proto_torana_v1_torana_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_proto_torana_v1_torana_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_proto_torana_v1_torana_proto_goTypes = []any{
 	(*Message)(nil),           // 0: torana.v1.Message
 	(*ToolCall)(nil),          // 1: torana.v1.ToolCall
@@ -1230,6 +1391,8 @@ var file_proto_torana_v1_torana_proto_goTypes = []any{
 	(*StreamEventResult)(nil), // 10: torana.v1.StreamEventResult
 	(*HttpRequest)(nil),       // 11: torana.v1.HttpRequest
 	(*HttpResponse)(nil),      // 12: torana.v1.HttpResponse
+	(*TickRequest)(nil),       // 13: torana.v1.TickRequest
+	(*TickResult)(nil),        // 14: torana.v1.TickResult
 }
 var file_proto_torana_v1_torana_proto_depIdxs = []int32{
 	1, // 0: torana.v1.Message.tool_calls:type_name -> torana.v1.ToolCall
@@ -1271,7 +1434,7 @@ func file_proto_torana_v1_torana_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_torana_v1_torana_proto_rawDesc), len(file_proto_torana_v1_torana_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

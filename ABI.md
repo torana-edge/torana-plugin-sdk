@@ -19,8 +19,16 @@ operator-approved `failure_mode` (`pass` or `block`). The SDK helpers implement
 this convention so ordinary handler failures cannot resemble success.
 
 Supported v1 hooks are `run_before_request`, `run_after_response`,
-`run_on_stream_chunk`, and `run_on_http_request`. Their protobuf messages are
-defined in [`proto/torana/v1/torana.proto`](proto/torana/v1/torana.proto).
+`run_on_stream_chunk`, `run_on_http_request`, and `run_on_tick`. Their protobuf
+messages are defined in
+[`proto/torana/v1/torana.proto`](proto/torana/v1/torana.proto).
+
+`run_on_tick` is the only hook that fires with no request in flight, so a plugin
+declaring it can act on elapsed time. It requires the `env.background_tick`
+permission, and inside it there is no request: `env.original_request`,
+`env.original_response`, and `env.meta_*` have nothing to read, and no caller
+credential exists. Anything a tick needs must come from the plugin's own durable
+state or from a host call that resolves its own configuration.
 
 ## Imports and grants
 

@@ -113,9 +113,51 @@ If you use these, you must request them in your `plugin.json` under the `permiss
 
 When passing strings TO the host, you don't need to pack them into a 64-bit integer. You just pass the 32-bit `ptr` and `len` as separate arguments.
 
-## 5. Summary Checklist for AI Agents
+## 5. Background Ticks (`run_on_tick`)
+
+Every other hook is reactive — it runs because a request is passing through.
+`run_on_tick` fires on a timer with **no request in flight**, so a plugin can act
+when nothing is happening.
+
+It has the same signature as every other hook,
+`(request_id: i64, ptr: i32, len: i32) -> i64`, taking a `TickRequest` and
+returning a `TickResult`. Two things differ, and both are easy to get wrong:
+
+**There is no request, so most host calls have nothing to answer with.**
+`env.original_request`, `env.original_response`, and `env.meta_*` are all
+request-scoped. On a tick they return empty rather than failing. The caller's
+credential does not exist either. Everything a tick needs must come from the
+plugin's own durable state or from a host call that resolves its own config.
+
+**You must set `handled = true`.** An all-defaults protobuf message encodes to
+zero bytes, and the host reads zero bytes as "did nothing". A plugin that acted
+but left `handled` false is indistinguishable from one that never ran. Return
+`0` (a null pointer) when there genuinely was nothing to do.
+
+Ticks are gated on the `env.background_tick` permission, and an operator must
+approve it against your exact bundle digest before the hook is ever called.
+
+```rust
+// Rust: the SDK macro handles the boundary.
+torana_plugin_sdk::export_tick!(my_tick_handler);
+
+fn my_tick_handler(tick: &pb::TickRequest) -> Result<Option<pb::TickResult>, Box<dyn Error>> {
+    if nothing_to_do() {
+        return Ok(None);            // encodes to a 0 return: "did nothing"
+    }
+    Ok(Some(pb::TickResult {
+        handled: true,              // REQUIRED, or the host cannot tell
+        actions: 2,
+        note: "refreshed 2 conversations".into(),
+    }))
+}
+```
+
+## 6. Summary Checklist for AI Agents
 1. Did I use a real allocator (not a bump allocator)?
 2. Did I implement both `alloc` and `dealloc`?
 3. Did I pack the return pointer and size into a `u64`?
 4. Did I return `0` for passthrough?
 5. Did I parse and serialize Protobuf properly within the memory bounds?
+6. If I implemented `run_on_tick`, did I set `handled = true` on any result I
+   actually meant, and avoid relying on request-scoped host calls?

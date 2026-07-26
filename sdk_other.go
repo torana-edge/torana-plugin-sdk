@@ -23,6 +23,8 @@ func OnStreamChunk(handler func(ctx context.Context, chunk *pb.StreamEvent) (*pb
 }
 func OnHTTPRequest(handler func(ctx context.Context, req *pb.HttpRequest) (*pb.HttpResponse, error)) {
 }
+func OnTick(handler func(ctx context.Context, req *pb.TickRequest) (*pb.TickResult, error)) {
+}
 
 func Pass() *pb.StreamEventResult     { return nil }
 func Suppress() *pb.StreamEventResult { return &pb.StreamEventResult{Handled: true} }

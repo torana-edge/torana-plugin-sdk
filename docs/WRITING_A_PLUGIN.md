@@ -136,7 +136,7 @@ Every plugin directory must contain a `plugin.json` file describing its metadata
 - **`failure_mode`**: Recommended operator policy, `"pass"` or `"block"`.
 - **`repository`**: HTTPS source repository for provenance and support.
 - **`hooks`**: Array of hook definitions:
-  - **`name`**: Hook event type (`run_before_request`, `run_on_stream_chunk`, `run_on_http_request`).
+  - **`name`**: Hook event type (`run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick`).
   - **`priority`**: Execution order priority (`integer`). Lower numbers execute earlier.
 - **`permissions`**: Declared host capabilities required by the plugin:
   - **`name`**: Capability permission string.

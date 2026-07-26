@@ -241,3 +241,27 @@ macro_rules! export_http_request {
         }
     };
 }
+
+/// Exports the `run_on_tick` hook, which the host fires periodically with no
+/// request in flight. Requires the `env.background_tick` permission.
+///
+/// The handler returns `Ok(None)` for "nothing to do this tick". A returned
+/// `TickResult` must have `handled = true`, or the host cannot distinguish it
+/// from doing nothing — an all-defaults message encodes to zero bytes.
+#[macro_export]
+macro_rules! export_tick {
+    ($handler:path) => {
+        #[no_mangle]
+        pub extern "C" fn run_on_tick(_request_id: u64, ptr: u32, len: u32) -> u64 {
+            use $crate::prost::Message;
+            let tick = $crate::pb::TickRequest::decode($crate::input(ptr, len))
+                .expect("torana sdk: decode run_on_tick");
+            let Some(result) = $handler(&tick).expect("torana plugin: run_on_tick") else {
+                return 0;
+            };
+            let mut out = Vec::new();
+            result.encode(&mut out).expect("torana sdk: encode run_on_tick");
+            $crate::result(&out)
+        }
+    };
+}

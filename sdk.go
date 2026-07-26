@@ -80,7 +80,10 @@ func run_before_request(reqID uint64, ptr, size uint32) uint64 {
 		panic("torana sdk: encode run_before_request: " + err.Error())
 	}
 	if len(outBytes) == 0 {
-		panic("torana sdk: decode run_after_response: " + err.Error())
+		// A degenerate all-defaults request marshals to nothing. Pass through
+		// rather than trap: zero is the ABI's pass-through signal, and the
+		// host will send the caller's original bytes.
+		return 0
 	}
 	return WriteResult(outBytes)
 }
@@ -116,7 +119,8 @@ func run_after_response(reqID uint64, ptr, size uint32) uint64 {
 		panic("torana sdk: encode run_after_response: " + err.Error())
 	}
 	if len(outBytes) == 0 {
-		panic("torana sdk: decode run_on_stream_chunk: " + err.Error())
+		// See run_before_request: zero means pass-through, not failure.
+		return 0
 	}
 	return WriteResult(outBytes)
 }
@@ -212,6 +216,55 @@ func run_on_http_request(reqID uint64, ptr, size uint32) uint64 {
 	outBytes, err := proto.Marshal(out)
 	if err != nil {
 		panic("torana sdk: encode run_on_http_request: " + err.Error())
+	}
+	if len(outBytes) == 0 {
+		return 0
+	}
+	return WriteResult(outBytes)
+}
+
+var tickHandler func(ctx context.Context, req *pb.TickRequest) (*pb.TickResult, error)
+
+// OnTick registers the handler for the run_on_tick hook, which the host fires
+// periodically with no request in flight. It requires the env.background_tick
+// permission in the manifest.
+//
+// This is the only hook that runs when nothing is happening, which makes it the
+// only place a plugin can act on elapsed time. Note what is NOT available here:
+// there is no request, so env.original_request, env.original_response and
+// env.meta_* have nothing to read, and the caller's credential does not exist.
+// Anything a tick needs must come from the plugin's own durable state or from a
+// host call that resolves its own configuration.
+//
+// The returned *pb.TickResult MUST have Handled=true for the host to record it;
+// an all-defaults message is indistinguishable from doing nothing. Returning nil
+// is the correct way to say "nothing to do this tick".
+func OnTick(handler func(ctx context.Context, req *pb.TickRequest) (*pb.TickResult, error)) {
+	tickHandler = handler
+}
+
+//go:wasmexport run_on_tick
+func run_on_tick(reqID uint64, ptr, size uint32) uint64 {
+	if tickHandler == nil {
+		return 0
+	}
+	inputBytes := ReadBytes(ptr, size)
+	var req pb.TickRequest
+	if err := proto.Unmarshal(inputBytes, &req); err != nil {
+		panic("torana sdk: decode run_on_tick: " + err.Error())
+	}
+
+	out, err := tickHandler(context.WithValue(context.Background(), "reqID", reqID), &req)
+	if err != nil {
+		panic("torana plugin: run_on_tick: " + err.Error())
+	}
+	if out == nil || !out.Handled {
+		return 0
+	}
+
+	outBytes, err := proto.Marshal(out)
+	if err != nil {
+		panic("torana sdk: encode run_on_tick: " + err.Error())
 	}
 	if len(outBytes) == 0 {
 		return 0
