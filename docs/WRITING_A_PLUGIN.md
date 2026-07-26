@@ -95,8 +95,15 @@ func init() {
 ### SDK Hook Signatures
 
 - `sdk.OnBeforeRequest(fn func(ctx context.Context, req *pb.ChatRequest) (*pb.ChatRequest, error))`
+- `sdk.OnAfterResponse(fn func(ctx context.Context, resp *pb.ChatRequest) (*pb.ChatRequest, error))`
 - `sdk.OnStreamChunk(fn func(ctx context.Context, chunk *pb.StreamEvent) (*pb.StreamEventResult, error))`
 - `sdk.OnHTTPRequest(fn func(ctx context.Context, req *pb.HttpRequest) (*pb.HttpResponse, error))`
+- `sdk.OnTick(fn func(ctx context.Context, tick *pb.TickRequest) (*pb.TickResult, error))`
+
+Returning `nil` means pass-through in every case. For hooks whose result type
+has a `Handled` field (`StreamEventResult`, `HttpResponse`, `TickResult`) you
+must set it on any result you mean — an all-defaults protobuf message encodes to
+zero bytes, which the host reads as "did nothing".
 
 ---
 
@@ -159,15 +166,86 @@ intend to run, grant the minimum requested subset, and prefer `failure_mode:
 
 ### Available Capability Strings
 
-| Capability | Description |
+Every capability must be requested in `plugin.json` **and** granted by the
+operator against your exact bundle digest. A denied capability does not trap —
+host calls return `{"status":"error","message":"permission denied"}` and SDK
+helpers surface it as an error, so a plugin should degrade rather than assume.
+
+**Verdicts — change what happens to the request**
+
+| Capability | SDK | Description |
+| --- | --- | --- |
+| `env.block_request` | `sdk.BlockRequest` | Reject the request with a provider-shaped error. |
+| `env.respond_request` | `sdk.RespondRequest` | Answer directly without going upstream. |
+| `env.route_request` | `sdk.RouteRequest` | Send the request to a different provider. |
+
+**Reading the request**
+
+| Capability | SDK | Description |
+| --- | --- | --- |
+| `env.original_request` | `sdk.OriginalRequest` | The caller's pristine request, before any plugin ran. Plugins are chained, so this is the only way to see what was actually sent. |
+| `env.original_response` | `sdk.OriginalResponse` | The raw upstream body. Non-streaming only — streams are never buffered. |
+| `env.request_headers` | via `ToranaMeta` | Allowlisted request headers. |
+
+**State — pick the right one; the wrong choice fails silently**
+
+| Capability | SDK | Scope |
+| --- | --- | --- |
+| `env.meta_get` / `env.meta_set` | `sdk.HostCall` | One request, private to your plugin. Gone when the request ends. |
+| `env.cache_get` / `env.cache_set` | `sdk.HostCall` | Across requests, TTL'd, **shared with every other plugin**. Prefix your keys. |
+| `env.state_get` / `env.state_set` / `env.state_keys` | `sdk.StateGet`, `sdk.StateSet`, `sdk.StateKeys` | Across requests **and restarts**, private, never expires. You must delete your own keys. |
+
+**Acting outside a request**
+
+| Capability | SDK | Description |
+| --- | --- | --- |
+| `env.background_tick` | `sdk.OnTick` | Run on a timer with no request in flight. See [PLUGIN_SEMANTICS §5](PLUGIN_SEMANTICS.md) for what is unavailable inside a tick. |
+| `env.host_call.torana_send_request` | `sdk.SendRequest` | Send your own provider request. **Spends the operator's money** — requires a per-plugin budget in `plugins.runtime.egress` or it is refused. |
+| `env.now` | `sdk.Now` | Read the host clock. WASI gives a guest none. **Never write this into a request** — see the determinism warning below. |
+
+**Economics**
+
+| Capability | SDK | Description |
+| --- | --- | --- |
+| `env.host_call.torana_cache_pricing` | `sdk.GetCachePricing` | Cache prices, lifetimes, and the break-even refresh count for a provider/model. |
+| `env.host_call.torana_evaluate_compaction` | `sdk.HostCall` | Ask whether a proposed compaction pays for itself. |
+| `env.host_call.torana_record_savings` | `sdk.HostCall` | Report bytes saved, attributed to your plugin. |
+| `env.host_call.torana_offload_completion` | `sdk.HostCall` | Summarize via the configured cheap model. |
+
+**Observability**
+
+| Capability | SDK | Description |
+| --- | --- | --- |
+| `env.log` | `sdk.Log` | Diagnostic logging. |
+| `env.emit_metric` | `sdk.EmitMetric` | OTel metrics. |
+| `env.host_call.torana_plugin_counter` | `sdk.HostCall` | Named counters that appear in `/stats`. |
+| `env.serve_http` | `sdk.OnHTTPRequest` | Serve pages and JSON under `/_torana/plugin/<name>/`. |
+| `env.plugin_config` | `sdk.PluginConfig` | Read your own `plugins.config.<name>` blob. |
+
+### What the host tells you about a request
+
+Beyond the request itself, Torana publishes routing context in
+`ChatRequest.ToranaMetaJson`. It never reaches the wire and is excluded from the
+determinism check, so it is safe for the host to vary per request.
+
+| Key | Meaning |
 | --- | --- |
-| `env.block_request` | Ability to block request processing with an error response. |
-| `env.respond_request` | Ability to directly return a custom chat response without proxying. |
-| `env.route_request` | Ability to override target upstream routing. |
-| `env.serve_http` | Ability to handle standalone HTTP endpoints on Torana. |
-| `env.emit_metric` | Ability to emit OTel metrics via `sdk.EmitMetric`. |
-| `env.log` | Ability to write diagnostic logs via `sdk.Log`. |
-| `env.host_call.*` | Custom host calls (e.g. `env.cache_get`, `env.cache_set`, `env.meta_get`, `env.meta_set`, `env.host_call.torana_record_savings`). |
+| `_provider` | The provider this request was routed to. You need this to ask about pricing, which is keyed by provider name. |
+| `_conversation_id` | A stable label for the conversation, derived from the canonical IR — not from any harness header, so it works identically across every wire format. |
+| `_path` | The provider-stripped request path. Torana forwards whatever the caller sent rather than synthesizing one, so anything replaying a conversation needs this. |
+| `_response` | On `run_after_response` only: latency, upstream status, and token usage including cache reads and writes. |
+
+```go
+var meta struct {
+    Provider       string `json:"_provider"`
+    ConversationID string `json:"_conversation_id"`
+    Path           string `json:"_path"`
+}
+_ = json.Unmarshal(req.ToranaMetaJson, &meta)
+```
+
+Treat every field as optional. An empty value means the host did not supply it,
+and a plugin that would spend money on the strength of it should decline instead.
 
 ---
 

@@ -141,3 +141,31 @@ func SendRequest(req *pb.ChatRequest, opts SendRequestOptions) (EgressResult, er
 	}
 	return out, nil
 }
+
+// EncodeRequest renders a request as base64 protobuf, for storing in durable
+// plugin state. Protobuf rather than JSON so a stored prefix round-trips
+// byte-exactly — a re-encoding that reorders or drops a field would change the
+// prefix and defeat whatever the plugin was preserving it for.
+func EncodeRequest(req *pb.ChatRequest) (string, error) {
+	if req == nil {
+		return "", fmt.Errorf("torana: request is required")
+	}
+	raw, err := proto.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("torana: encode request: %w", err)
+	}
+	return base64.StdEncoding.EncodeToString(raw), nil
+}
+
+// DecodeRequest is the inverse of EncodeRequest.
+func DecodeRequest(encoded string) (*pb.ChatRequest, error) {
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("torana: decode request: %w", err)
+	}
+	var req pb.ChatRequest
+	if err := proto.Unmarshal(raw, &req); err != nil {
+		return nil, fmt.Errorf("torana: decode request: %w", err)
+	}
+	return &req, nil
+}
