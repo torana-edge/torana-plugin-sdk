@@ -50,6 +50,38 @@ type CachePricing struct {
 
 	ShortestTTLSeconds  int `json:"shortest_ttl_seconds,omitempty"`
 	WarmIntervalSeconds int `json:"warm_interval_seconds,omitempty"`
+
+	// Tiers are the cache lifetimes this provider sells, ascending by TTL.
+	// Use these rather than hard-coding a provider's menu: the marker is
+	// whatever the operator configured, and writing a different one changes the
+	// prefix bytes and invalidates the entry you were trying to keep.
+	Tiers []CacheTier `json:"tiers,omitempty"`
+}
+
+// CacheTier is one purchasable cache lifetime.
+type CacheTier struct {
+	TTLSeconds int `json:"ttl_seconds"`
+	// WriteMultiplier is this tier's write cost relative to the model's base
+	// input rate, so tiers can be compared without knowing the model.
+	WriteMultiplier float64 `json:"write_multiplier,omitempty"`
+	// Marker is the breakpoint value that selects this tier. Place it verbatim.
+	Marker map[string]any `json:"marker,omitempty"`
+}
+
+// LongestTier returns the tier with the largest TTL, or false when the provider
+// declares fewer than two — with nothing to choose between, there is no
+// decision to make.
+func (c CachePricing) LongestTier() (CacheTier, bool) {
+	if len(c.Tiers) < 2 {
+		return CacheTier{}, false
+	}
+	best := c.Tiers[0]
+	for _, t := range c.Tiers[1:] {
+		if t.TTLSeconds > best.TTLSeconds {
+			best = t
+		}
+	}
+	return best, true
 }
 
 // Available reports whether the host could answer. When false, Reason says why,

@@ -139,7 +139,27 @@ func SendRequest(req *pb.ChatRequest, opts SendRequestOptions) (EgressResult, er
 	if out.Status == "error" {
 		return out, fmt.Errorf("torana: %s", out.Message)
 	}
+	// A reached-but-refused provider is a failure, not a success. The host
+	// reports transport success separately from what the provider said, and a
+	// caller that only checked err would count a 401 as a completed request —
+	// burning its budget while achieving nothing and reporting that it worked.
+	//
+	// The most common cause is a provider with no credential of its own: on the
+	// normal request path Torana forwards the caller's, but a plugin-originated
+	// request has no caller, so the provider needs api_key_env or api_key_enc.
+	if out.HTTPStatus < 200 || out.HTTPStatus > 299 {
+		return out, fmt.Errorf("torana: %s returned HTTP %d%s",
+			opts.Provider, out.HTTPStatus, credentialHint(out.HTTPStatus))
+	}
 	return out, nil
+}
+
+func credentialHint(status int) string {
+	if status == 401 || status == 403 {
+		return " — a plugin-originated request cannot borrow the caller's credential, " +
+			"so the provider needs its own api_key_env or api_key_enc"
+	}
+	return ""
 }
 
 // EncodeRequest renders a request as base64 protobuf, for storing in durable
