@@ -1,0 +1,43 @@
+name: proto-drift
+
+# This repo holds the canonical torana.v1 ABI, but torana-edge still carries an
+# in-tree copy at sdk/pb/torana.proto while it migrates to this module. Plugins
+# compile against the descriptors here; the host decodes with its copy. If the
+# two drift, mismatched fields are dropped silently on round-trip.
+#
+# Delete this workflow once torana-edge removes sdk/.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'proto/torana/v1/torana.proto'
+      - '.github/workflows/proto-drift.yml'
+  schedule:
+    - cron: '0 6 * * 1'
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch core's copy of the ABI
+        run: |
+          curl -sfL \
+            https://raw.githubusercontent.com/torana-edge/torana-edge/main/sdk/pb/torana.proto \
+            -o /tmp/core.proto
+      - name: Compare (go_package and blank lines ignored)
+        run: |
+          norm() {
+            grep -vE '^[[:space:]]*option go_package' "$1" \
+              | sed 's/[[:space:]]*$//' | grep -vE '^[[:space:]]*$'
+          }
+          if diff <(norm proto/torana/v1/torana.proto) <(norm /tmp/core.proto); then
+            echo "OK: torana.v1 is identical in both repos."
+          else
+            echo "::error::torana.v1 has drifted between torana-plugin-sdk and torana-edge."
+            echo "Plugins built from this SDK would disagree with the host about the wire"
+            echo "format, and mismatched fields are dropped silently. Reconcile both copies."
+            exit 1
+          fi
