@@ -18,4 +18,14 @@ bindings from the checked-in v1 protobuf contract. Rust builds require
 After changing the ABI, regenerate the checked-in Go bindings with
 `./scripts/generate-go.sh`, then run the conformance suite.
 
-See [ABI.md](ABI.md) for stability and capability rules.
+## Documentation
+
+| Guide | For |
+| --- | --- |
+| [Writing a plugin](docs/WRITING_A_PLUGIN.md) | Start here — scaffold, build, install, activate |
+| [Plugin semantics and gotchas](docs/PLUGIN_SEMANTICS.md) | Hook behaviour, protobuf decoding, prompt-cache and tool-output safety |
+| [ABI v1](ABI.md) | The normative contract, plus what you need to implement an SDK in another language |
+
+Official plugins built on this SDK live in
+[torana-plugins](https://github.com/torana-edge/torana-plugins). The proxy itself is
+[torana-edge](https://github.com/torana-edge/torana-edge).
