@@ -24,7 +24,8 @@ After changing the ABI, regenerate the checked-in Go bindings with
 | --- | --- |
 | [Writing a plugin](docs/WRITING_A_PLUGIN.md) | Start here — scaffold, build, install, activate |
 | [Plugin semantics and gotchas](docs/PLUGIN_SEMANTICS.md) | Hook behaviour, protobuf decoding, prompt-cache and tool-output safety |
-| [ABI v1](ABI.md) | The normative contract, plus what you need to implement an SDK in another language |
+| [Implementing the WASM contract](docs/WASM_PLUGIN_GUIDE.md) | **AI agents and humans** writing a plugin or an SDK from scratch — the boundary, and why every mistake there fails silently |
+| [ABI v1](ABI.md) | The normative contract |
 
 Official plugins built on this SDK live in
 [torana-plugins](https://github.com/torana-edge/torana-plugins). The proxy itself is
