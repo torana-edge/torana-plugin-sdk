@@ -140,22 +140,25 @@ func isPermissionDenied(res string) bool {
 // elapsed time (cache lifetimes, deadlines, rate windows) need this; those that
 // do not should not request it.
 //
-// Requires the env.now permission, and returns 0 when it is not granted so a
-// caller can degrade rather than trap.
+// Requires the env.now permission, and returns an error when it is not granted
+// or when the host clock cannot be read.
 //
 // DANGER: never write this value, or anything derived from it, into a request.
 // Doing so makes the plugin's output differ between two identical requests,
 // which invalidates the provider's prompt cache on every single turn and
 // multiplies the operator's token spend. Torana's determinism test exists to
 // catch exactly this. Use it to decide *whether* to act, never as content.
-func Now() int64 {
+func Now() (int64, error) {
 	res, err := HostCall("env.now", "")
-	if err != nil || res == "" || isPermissionDenied(res) {
-		return 0
+	if err != nil {
+		return 0, err
+	}
+	if res == "" || isPermissionDenied(res) {
+		return 0, errors.New("torana: clock is unavailable (requires env.now permission)")
 	}
 	ms, err := strconv.ParseInt(res, 10, 64)
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("torana: invalid clock reading: %w", err)
 	}
-	return ms
+	return ms, nil
 }
