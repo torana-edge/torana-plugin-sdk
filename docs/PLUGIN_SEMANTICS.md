@@ -124,6 +124,43 @@ path via `run_on_stream_chunk` (mutate events as they flow — see §3), not
 `run_after_response`. Torana logs a heads-up at load time for any plugin that
 declares `run_after_response`, reminding you the streaming mutations are dropped.
 
+## 5. Background Hooks: `run_on_tick` has no request
+
+`run_on_tick` is the only hook that fires when nothing is passing through the
+proxy. That makes it the only place a plugin can act on elapsed time — and it
+means most of what a plugin normally relies on is simply absent.
+
+| Host call | Inside a request | Inside a tick |
+|---|---|---|
+| `env.meta_get` / `env.meta_set` | per-request scratch space | **empty** — there is no request to scope to |
+| `env.original_request` | the caller's pristine request | **empty** |
+| `env.original_response` | the raw upstream body | **empty** |
+| `env.plugin_config` | your config | your config |
+| `env.cache_get` / `env.cache_set` | shared, cross-request | shared, cross-request |
+
+There is also **no caller credential**. Host calls that would normally fall back
+to the caller's own API key have nothing to fall back to, so anything a tick
+sends must be authenticated by provider-level configuration. A tick that assumes
+otherwise fails as a silent 401, not as an error you can see.
+
+The practical consequence: **anything a tick needs must already be in the
+plugin's own durable state**, written there during an earlier request hook, or
+obtainable from a host call that resolves its own configuration.
+
+Two more things:
+
+- **Set `handled = true`** on any `TickResult` you mean. An all-defaults message
+  encodes to zero bytes, which the host reads as "did nothing". Return `nil` when
+  there genuinely is nothing to do.
+- **`failure_mode` does not apply.** It selects whether a failing plugin blocks
+  or passes *the request*, and there is no request. A trapping tick is logged and
+  the other plugins' ticks continue.
+
+Ticks require the `env.background_tick` permission and are off unless the
+operator also sets `plugins.runtime.tick_interval_seconds`. Both are deliberate:
+code running outside any request is work an operator cannot see in a trace, and
+it may spend their money.
+
 ## 6. Prompt-Cache Compliance
 
 Provider prompt caching bills cached input tokens at ~10% of full price — it is
