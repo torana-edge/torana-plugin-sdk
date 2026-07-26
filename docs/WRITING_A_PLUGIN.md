@@ -249,7 +249,87 @@ and a plugin that would spend money on the strength of it should decline instead
 
 ---
 
-## 5. Building the Plugin WASM
+## 5. Describing your configuration (`schema.json`)
+
+Optional. Without it, an operator edits your plugin's settings as raw JSON. With
+it, the control plane renders a form.
+
+It is **JSON Schema** (draft 2020-12), which is what `torana plugin init`
+scaffolds:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "on_error": {
+      "type": "string",
+      "enum": ["block", "allow"],
+      "title": "On Error",
+      "default": "block",
+      "description": "Fail closed or open when the scanner cannot decide."
+    },
+    "max_scan_chars": {
+      "type": "integer",
+      "minimum": 0,
+      "title": "Max Scan Chars",
+      "default": 0,
+      "description": "Character cap for scan input. 0 is unbounded."
+    }
+  }
+}
+```
+
+| JSON Schema | Becomes |
+| --- | --- |
+| `"type": "string"` | text input |
+| `"type": "number"` / `"integer"` | number input |
+| `"type": "boolean"` | checkbox |
+| `"enum": [...]` of strings | select |
+| `title` | the field label (defaults to the key) |
+| `description` | help text under the field |
+| `default` | the value shown when unset |
+
+**Anything else falls through to the raw JSON editor rather than being
+approximated.** An array or a nested object has no scalar control that could
+hold it, and a form that rendered one would corrupt the value on save. Declaring
+such a setting is fine — `keyword_compactor` does — it simply is not rendered.
+
+Values are type-checked against what you declare before they reach your plugin,
+so a string where you said number is rejected at save time rather than
+misbehaving inside the guest. Keys you do *not* declare are passed through
+untouched: `schema.json` describes the form, not the whole accepted config, and
+several official plugins read settings they never declare.
+
+### Live pickers
+
+A string field can offer values from a live host resource:
+
+```json
+"conversations": {
+  "type": "string",
+  "x-torana-source": "conversations",
+  "title": "Conversation IDs"
+}
+```
+
+The control plane fetches the named resource and offers each value beside the
+input. `conversations` is currently the only source. JSON Schema permits unknown
+keywords, so this travels without making the document invalid.
+
+### A note on the older format
+
+Torana also accepts `{"fields": [{"key": …, "type": …}]}`, an earlier
+Torana-specific shape. It still works and it is the only way to control field
+*order* — JSON Schema properties are an object, so derived fields are ordered
+alphabetically. Prefer JSON Schema for anything new: it is standard, it carries
+constraints (`minimum`, `enum`, `required`) that a UI manifest cannot express,
+and it is what the official plugin repository validates.
+
+---
+
+## 6. Building the Plugin WASM
 
 Build the WebAssembly binary targeting WASI (`wasip1`):
 
@@ -265,7 +345,7 @@ torana plugin build . -o plugin.wasm
 
 ---
 
-## 6. Installing and activating
+## 7. Installing and activating
 
 Publish the plugin by pushing it to any git repository — there is no index to
 register with and nothing to publish. Users install it by path:
@@ -292,7 +372,7 @@ not approved:
 The approval binds to the digest. Rebuild the plugin, change a permission, or add
 an `agent.json` and it needs approving again — which is the point.
 
-## 7. Optional agent-facing operations
+## 8. Optional agent-facing operations
 
 Plugins that already vend a page through `run_on_http_request` can also expose
 machine-readable operations. Add a language-neutral `agent.json` descriptor and
