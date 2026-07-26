@@ -149,3 +149,45 @@ message HttpResponse {
   bytes body = 3;
   bool handled = 4;
 }
+
+// Fired periodically by the host, with no request in flight.
+//
+// Every other hook is reactive: a plugin can only act while a request is
+// passing through it. This one exists so a plugin can act when nothing is
+// happening — refreshing a provider cache before it lapses, emitting a periodic
+// report, expiring its own state.
+//
+// The host attaches no meaning to a tick. It reports that time has passed and
+// nothing else; what to do about it belongs entirely to the plugin.
+//
+// Requires the env.background_tick permission. Running code with no request in
+// flight is a capability an operator should grant deliberately, and a plugin
+// that holds it can act — and spend — outside any request the operator can see.
+message TickRequest {
+  // Monotonically increasing per host process, starting at 1. Useful for
+  // "every Nth tick" without the plugin keeping its own counter.
+  uint64 tick_id = 1;
+  // Host wall-clock time. Plugins have no clock of their own: WASI preview1
+  // exposes none, and this is the only time source they get.
+  int64 unix_millis = 2;
+  // Configured interval, so a plugin can reason about elapsed time without
+  // assuming a particular cadence.
+  int64 interval_ms = 3;
+}
+
+// Result of a run_on_tick invocation.
+//
+// The explicit `handled` flag is required for the same reason as
+// StreamEventResult and HttpResponse: an all-defaults protobuf message
+// marshals to zero bytes, which the host reads as "did nothing". Without it a
+// plugin that acted but reported nothing would be indistinguishable from one
+// that never ran.
+message TickResult {
+  bool handled = 1;
+  // How many actions the plugin took this tick. Surfaced in /stats so an
+  // operator can see background work happening without reading logs.
+  int32 actions = 2;
+  // Short human-readable status for the control plane, e.g. "refreshed 2 of 3
+  // conversations". Not for error reporting — a failing hook should trap.
+  string note = 3;
+}

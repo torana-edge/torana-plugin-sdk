@@ -20,3 +20,32 @@ Order to read in:
 If you are writing in **Go or Rust**, use the SDK in this repository rather than
 reimplementing the boundary. It already handles allocation, the packed return,
 and protobuf round-tripping.
+
+## Two failure modes worth naming up front
+
+Both produce a plugin that loads, reports healthy, and is wrong.
+
+**Returning zero means pass-through.** Any result you build must set its
+`handled` flag — `StreamEventResult`, `HttpResponse`, and `TickResult` all have
+one. An all-defaults protobuf message encodes to *zero bytes*, which the host
+cannot distinguish from "this plugin did nothing". If your plugin acts but the
+host ignores it, this is why.
+
+**Anything you write into a request must be deterministic.** The same input must
+produce byte-identical output every time. Writing a timestamp, a random value, or
+the request ID into a request changes the prefix bytes, which invalidates the
+provider's prompt cache and costs the operator money on *every* subsequent turn.
+The proxy enforces this with a test; a plugin that fails it will not ship.
+
+## If you are extending the SDK itself
+
+Adding a hook or host call touches more places than it looks:
+
+- `sdk.go` is `//go:build wasip1`. Every export there needs a matching no-op in
+  `sdk_other.go`, or plugins stop compiling for host-side tests.
+- Regenerate protobuf with `./scripts/generate-go.sh` and commit the result — CI
+  diffs it. Use the exact `protoc-gen-go` version in the generated file header.
+- Proto changes must be additive; CI runs `buf breaking` against `main`.
+- Update `docs/WASM_PLUGIN_GUIDE.md` too. It is the document that makes this SDK
+  usable by weaker models, and a capability missing from its checklist silently
+  makes the guide insufficient.
