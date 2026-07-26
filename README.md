@@ -5,8 +5,15 @@ Go and Rust authoring paths, templates, and portable conformance fixtures.
 
 ```bash
 go test ./...
-GOOS=wasip1 GOARCH=wasm go build -o plugin.wasm ./examples/go-logger
+GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o plugin.wasm ./examples/go-logger
 ```
+
+**`-buildmode=c-shared` is not optional.** Without it Go produces a *command*
+module: the host instantiates it, `main()` runs to completion, the module exits,
+and it is gone before a single hook is called. It builds, it loads, and it does
+nothing — which is the worst way for this to fail. Torana needs a *reactor*
+module that stays resident and waits to be called. See
+[docs/PLUGIN_SEMANTICS.md](docs/PLUGIN_SEMANTICS.md).
 
 Use the Go package as `github.com/torana-edge/torana-plugin-sdk` and the
 protobuf API as `github.com/torana-edge/torana-plugin-sdk/pb`.
