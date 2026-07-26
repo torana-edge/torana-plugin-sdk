@@ -1,0 +1,121 @@
+# Implementing a Torana plugin: the WASM contract
+
+**For AI coding agents and humans.** This document exists because getting the
+WASM boundary right is the part models reliably get wrong — and every mistake
+here fails by returning plausible empty output rather than an error. Null bytes,
+dropped mutations, a silently discarded field. Nothing crashes; the plugin just
+quietly does nothing.
+
+If you are an agent generating or modifying a Torana plugin, read this first and
+check your work against the checklist at the end. If you are writing a Go or Rust
+plugin, the SDK already implements all of this — start at
+[WRITING_A_PLUGIN.md](WRITING_A_PLUGIN.md) and you will not need most of it.
+
+This document is a critical reference for implementing WebAssembly (WASM) plugins in Torana Edge. **AI Coding Agents MUST read this document before generating or modifying Torana WASM plugins.**
+
+## 1. The Core Architecture (Linear Memory)
+WASM plugins in Torana run inside a highly restricted sandbox (using `wazero`). 
+The Go host (Torana) and the guest (the plugin) do NOT share variables, structs, or garbage collection. They only share a single, flat byte array called **Linear Memory**.
+
+To pass a Protobuf byte array from the host to the plugin:
+1. The host calls the plugin's `alloc(size)` function.
+2. The plugin allocates memory and returns a 32-bit pointer.
+3. The host writes the Protobuf byte array into the plugin's memory at that pointer.
+4. The host calls the plugin's hook (e.g., `run_before_request(reqID, ptr, size)`).
+
+## 2. The Golden Rule of Memory Allocation
+**NEVER USE STATIC BUMP ALLOCATORS.**
+
+### ❌ WRONG (Causes OOM Crashes):
+```typescript
+let bump: u32 = 0;
+export function alloc(size: u32): u32 {
+  let ptr = bump;
+  bump += size;
+  return ptr;
+}
+```
+*Why it fails:* The `bump` pointer only goes up. Even if the host calls `dealloc`, the memory is never reused. After a few megabytes of Protobuf requests, the plugin will crash the server.
+
+### ✅ CORRECT:
+Use the standard library allocator for your language.
+* **Go (standard Go, not TinyGo)**:
+  ```go
+  var memory map[uint64][]byte // For tracking allocations
+  // Use standard make([]byte) and return unsafe.Pointer
+  ```
+  Torana's plugins are built with **standard Go**, compiled
+  `GOOS=wasip1 GOARCH=wasm -buildmode=c-shared` for the reactor model — see
+  [PLUGIN_SEMANTICS.md](PLUGIN_SEMANTICS.md), which is
+  authoritative on the toolchain. Don't hand-roll this: the
+  [torana-plugin-sdk](https://github.com/torana-edge/torana-plugin-sdk) module
+  implements the allocator correctly, and getting it wrong returns null bytes
+  rather than an error.
+* **Rust**:
+  ```rust
+  use std::alloc::{alloc, dealloc, Layout};
+  
+  #[no_mangle]
+  pub extern "C" fn alloc(size: u32) -> u32 {
+      let layout = Layout::array::<u8>(size as usize).unwrap();
+      unsafe { alloc(layout) as u32 }
+  }
+  
+  #[no_mangle]
+  pub extern "C" fn dealloc(ptr: u32, size: u32) {
+      let layout = Layout::array::<u8>(size as usize).unwrap();
+      unsafe { dealloc(ptr as *mut u8, layout) }
+  }
+  ```
+* **AssemblyScript**:
+  Export the built-in allocator wrappers.
+  ```typescript
+  export function alloc(size: u32): usize {
+    return __alloc(size);
+  }
+  export function dealloc(ptr: usize): void {
+    __free(ptr);
+  }
+  ```
+
+## 3. The 64-bit Return ABI
+Hooks like `run_before_request(reqID: u64, ptr: u32, size: u32)` must return a **64-bit integer (`u64` or `uint64`)**.
+Because WASM32 only supports 32-bit pointers, we pack the pointer and the length of the response into a single 64-bit integer.
+
+* **Format**: `(pointer << 32) | size`
+* **Pass-Through**: If you don't want to modify the request, return `0`.
+
+**Stream hook return type**: `run_on_stream_chunk` returns a serialized
+`torana.v1.StreamEventResult` (NOT a bare `StreamEvent`):
+```proto
+message StreamEventResult {
+  bool handled = 1;              // must be true for the result to apply
+  repeated StreamEvent events = 2; // empty = suppress, 1 = replace, n = fan-out
+}
+```
+Returning `0` bytes still means pass-through. `handled=true` with zero
+events suppresses the input event — this is how buffering plugins drop
+argument fragments before re-emitting the assembled result at ToolCallEnd.
+
+### Packing Example (Rust):
+```rust
+let out_ptr = alloc(output.len() as u32);
+// ... copy data to out_ptr ...
+return ((out_ptr as u64) << 32) | (output.len() as u64);
+```
+
+## 4. Host Functions (`env.*`)
+Torana exports several functions to the plugin via the `env` module.
+If you use these, you must request them in your `plugin.json` under the `permissions` array, or the host will reject the plugin.
+
+* `env.log(level: i32, ptr: i32, len: i32)`
+* `env.emit_metric(type: i32, ptr: i32, len: i32, value: f64)`
+
+When passing strings TO the host, you don't need to pack them into a 64-bit integer. You just pass the 32-bit `ptr` and `len` as separate arguments.
+
+## 5. Summary Checklist for AI Agents
+1. Did I use a real allocator (not a bump allocator)?
+2. Did I implement both `alloc` and `dealloc`?
+3. Did I pack the return pointer and size into a `u64`?
+4. Did I return `0` for passthrough?
+5. Did I parse and serialize Protobuf properly within the memory bounds?

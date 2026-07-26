@@ -31,6 +31,17 @@ artifact digest before the host exposes the corresponding capability.
 Plugins must tolerate a missing or denied host call. They must not assume
 filesystem, network, environment-variable, clock, or random access.
 
+## Implementing this ABI
+
+The rules above are the contract. Satisfying them correctly — the allocator, the
+packed return, memory ownership across the boundary — is covered in
+[docs/WASM_PLUGIN_GUIDE.md](docs/WASM_PLUGIN_GUIDE.md), which is written for AI
+coding agents and humans implementing a plugin or an SDK from scratch. Every
+failure mode there is silent, so it ends in a checklist worth actually running.
+
+Go and Rust authors do not need it: the SDK in this repository already implements
+the boundary. Start at [docs/WRITING_A_PLUGIN.md](docs/WRITING_A_PLUGIN.md).
+
 ## Compatibility
 
 Additive protobuf fields and new optional host calls are allowed in v1. An
