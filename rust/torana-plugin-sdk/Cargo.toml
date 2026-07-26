@@ -1,6 +1,10 @@
 [package]
 name = "torana-plugin-sdk"
-version = "0.1.0"
+# Must equal the git tag this is released under, without the leading "v".
+# The release workflow asserts it, and a mismatch fails after the tag exists —
+# which is expensive, because module proxies cache a tag's content immutably and
+# it cannot then be moved. See RELEASING.md.
+version = "0.1.3"
 edition = "2021"
 license = "Apache-2.0"
 description = "Versioned Rust SDK for Torana WASI plugins"
