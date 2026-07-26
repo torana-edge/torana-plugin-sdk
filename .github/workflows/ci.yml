@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: '35.1'
+      - run: go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
+      - run: ./scripts/generate-go.sh && git diff --exit-code
+      - uses: bufbuild/buf-setup-action@v1
+      - run: buf lint
+      - if: github.event_name == 'pull_request'
+        run: |
+          if git cat-file -e origin/main:proto/torana/v1/torana.proto 2>/dev/null; then
+            buf breaking --against 'https://github.com/torana-edge/torana-plugin-sdk.git#branch=main'
+          else
+            echo "No ABI baseline exists on main yet; this PR establishes v1."
+          fi
+      - run: go test ./...
+      - run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -buildvcs=false -o /tmp/go-logger.wasm ./examples/go-logger
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+      - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - run: cargo test --manifest-path rust/torana-plugin-sdk/Cargo.toml
+      - run: cargo build --target wasm32-wasip1 --target-dir /tmp/rust-logger-target --manifest-path examples/rust-logger/Cargo.toml
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -buildvcs=false -o /tmp/go-logger.wasm ./examples/go-logger
+      - run: go test ./conformance/host
+        env:
+          TORANA_GO_GUEST: /tmp/go-logger.wasm
+          TORANA_RUST_GUEST: /tmp/rust-logger-target/wasm32-wasip1/debug/torana-rust-logger.wasm

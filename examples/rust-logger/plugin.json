@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "example/rust-logger",
+  "name": "rust-logger",
+  "version": "0.1.0",
+  "abi_version": "v1",
+  "minimum_torana_version": "0.1.0",
+  "failure_mode": "pass",
+  "repository": "https://github.com/torana-edge/torana-plugin-sdk",
+  "description": "Minimal Rust Torana plugin template",
+  "hooks": [{"name": "run_before_request", "priority": 100}],
+  "permissions": [{"name": "env.log", "description": "Write bounded diagnostic messages"}]
+}

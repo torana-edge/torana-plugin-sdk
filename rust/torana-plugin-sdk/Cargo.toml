@@ -1,0 +1,15 @@
+[package]
+name = "torana-plugin-sdk"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Versioned Rust SDK for Torana WASI plugins"
+repository = "https://github.com/torana-edge/torana-plugin-sdk"
+build = "build.rs"
+
+[dependencies]
+prost = "0.13"
+serde_json = "1"
+
+[build-dependencies]
+prost-build = "0.13"
