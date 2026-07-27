@@ -1,2 +1,3 @@
 /rust/torana-plugin-sdk/target/
 /examples/rust-logger/target/
+/conformance/guests/rust-allhooks/target/

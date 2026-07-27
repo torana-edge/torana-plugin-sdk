@@ -25,12 +25,24 @@ fn stream_chunk(_event: &pb::StreamEvent) -> Result<Option<pb::StreamEventResult
     Ok(None)
 }
 
+// These two return a NON-None result on purpose, one with handled=true and one
+// with handled=false, matching the Go guest exactly. Returning None everywhere
+// meant the encode path was never reached and the handled rule was never
+// exercised, so a Go/Rust disagreement about it could not be detected.
 fn http_request(_request: &pb::HttpRequest) -> Result<Option<pb::HttpResponse>, String> {
-    Ok(None)
+    Ok(Some(pb::HttpResponse {
+        handled: true,
+        status: 204,
+        ..Default::default()
+    }))
 }
 
 fn tick(_tick: &pb::TickRequest) -> Result<Option<pb::TickResult>, String> {
-    Ok(None)
+    Ok(Some(pb::TickResult {
+        handled: false,
+        note: "declined".into(),
+        ..Default::default()
+    }))
 }
 
 export_before_request!(before_request);
