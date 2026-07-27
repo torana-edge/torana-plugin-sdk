@@ -64,8 +64,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24.x'
-      - run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -buildvcs=false -o /tmp/go-logger.wasm ./examples/go-logger
+      # The conformance guests export EVERY hook. The examples export only
+      # run_before_request, so an unregistered hook returns 0 before it decodes
+      # anything — which makes them useless for testing decode behaviour, since
+      # "ignored the codec error" and "no handler" look identical from outside.
+      - run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -buildvcs=false -o /tmp/go-allhooks.wasm ./conformance/guests/go-allhooks
+      - run: cargo build --target wasm32-wasip1 --target-dir /tmp/rust-allhooks-target --manifest-path conformance/guests/rust-allhooks/Cargo.toml
       - run: go test ./conformance/host
         env:
-          TORANA_GO_GUEST: /tmp/go-logger.wasm
-          TORANA_RUST_GUEST: /tmp/rust-logger-target/wasm32-wasip1/debug/torana-rust-logger.wasm
+          TORANA_GO_GUEST: /tmp/go-allhooks.wasm
+          TORANA_RUST_GUEST: /tmp/rust-allhooks-target/wasm32-wasip1/debug/torana-rust-allhooks.wasm
