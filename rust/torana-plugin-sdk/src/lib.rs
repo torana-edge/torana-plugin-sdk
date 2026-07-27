@@ -219,8 +219,28 @@ pub fn host_call(command: &str, arguments: &str) -> Option<String> {
     Some(value)
 }
 
+/// The exact envelope the host returns when a capability is refused.
+///
+/// It is valid JSON, so anything that merely parses the host's reply accepts it
+/// as data. Every wrapper that can be denied has to recognise it.
+pub const PERMISSION_DENIED: &str = r#"{"status":"error","message":"permission denied"}"#;
+
+/// Reports whether a host-call reply is the refusal envelope rather than a
+/// result.
+pub fn is_permission_denied(reply: &str) -> bool {
+    reply == PERMISSION_DENIED
+}
+
+/// Returns this plugin's configuration blob, or an empty object when none is
+/// set or `env.plugin_config` was not granted.
 pub fn plugin_config() -> serde_json::Value {
     host_call("env.plugin_config", "")
+        // Without this the refusal envelope parses cleanly and is handed back
+        // AS the configuration: a valid JSON object with none of the plugin's
+        // expected fields, so it silently runs on defaults instead of
+        // reporting a missing grant. The Go SDK checks this and Rust did not,
+        // which made it a divergence rather than a shared gap.
+        .filter(|value| !is_permission_denied(value))
         .and_then(|value| serde_json::from_str(&value).ok())
         .unwrap_or_else(|| serde_json::json!({}))
 }
@@ -335,6 +355,14 @@ macro_rules! export_stream_chunk {
             let Some(response) = $handler(&event).expect("torana plugin: run_on_stream_chunk") else {
                 return 0;
             };
+            // handled=false means "I did not act". The host discards the payload
+            // either way and the Go SDK returns 0 here, so encoding a result
+            // that will be thrown away both wastes an allocation and made the
+            // two SDKs put different bytes on the wire for the same handler
+            // return value.
+            if !response.handled {
+                return 0;
+            }
             let mut out = Vec::new();
             response.encode(&mut out).expect("torana sdk: encode run_on_stream_chunk");
             $crate::__result(&out)
@@ -353,6 +381,14 @@ macro_rules! export_http_request {
             let Some(response) = $handler(&request).expect("torana plugin: run_on_http_request") else {
                 return 0;
             };
+            // handled=false means "I did not act". The host discards the payload
+            // either way and the Go SDK returns 0 here, so encoding a result
+            // that will be thrown away both wastes an allocation and made the
+            // two SDKs put different bytes on the wire for the same handler
+            // return value.
+            if !response.handled {
+                return 0;
+            }
             let mut out = Vec::new();
             response.encode(&mut out).expect("torana sdk: encode run_on_http_request");
             $crate::__result(&out)
@@ -377,6 +413,14 @@ macro_rules! export_tick {
             let Some(result) = $handler(&tick).expect("torana plugin: run_on_tick") else {
                 return 0;
             };
+            // handled=false means "I did not act". The host discards the payload
+            // either way and the Go SDK returns 0 here, so encoding a result
+            // that will be thrown away both wastes an allocation and made the
+            // two SDKs put different bytes on the wire for the same handler
+            // return value.
+            if !result.handled {
+                return 0;
+            }
             let mut out = Vec::new();
             result.encode(&mut out).expect("torana sdk: encode run_on_tick");
             $crate::__result(&out)
@@ -494,6 +538,33 @@ mod tests {
         let (p, len) = copy_to_owned_buffer(&[]);
         assert!(p.is_null());
         assert_eq!(len, 0);
+    }
+
+    // The host signals a refused capability with this exact JSON. It is valid
+    // JSON, so anything that merely parses the reply accepts it as data — which
+    // is how plugin_config came to hand it back as the plugin's configuration.
+    #[test]
+    fn permission_denied_envelope_is_recognised() {
+        assert!(is_permission_denied(PERMISSION_DENIED));
+        assert!(is_permission_denied(
+            r#"{"status":"error","message":"permission denied"}"#
+        ));
+    }
+
+    #[test]
+    fn permission_denied_does_not_over_match() {
+        // Mistaking a plugin's own data for a refusal would discard a
+        // legitimate result.
+        for reply in [
+            "",
+            "{}",
+            r#"{"status":"ok"}"#,
+            r#"{"status":"error","message":"something else"}"#,
+            r#"{"message":"permission denied"}"#,
+            r#"prefix{"status":"error","message":"permission denied"}"#,
+        ] {
+            assert!(!is_permission_denied(reply), "over-matched {reply}");
+        }
     }
 
     #[test]
