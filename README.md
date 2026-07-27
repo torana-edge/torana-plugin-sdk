@@ -9,10 +9,16 @@ GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o plugin.wasm ./examples/g
 ```
 
 **`-buildmode=c-shared` is not optional.** Without it Go produces a *command*
-module: the host instantiates it, `main()` runs to completion, the module exits,
-and it is gone before a single hook is called. It builds, it loads, and it does
-nothing — which is the worst way for this to fail. Torana needs a *reactor*
-module that stays resident and waits to be called. See
+module: the host instantiates it, `main()` runs to completion, and the module
+exits before a single hook is called. The hooks are still exported and
+instantiation still reports success — wazero treats a clean exit as one — so the
+plugin loads and is pooled. Every call against it then fails with
+`module closed with exit_code(0)`, and the operator's `failure_mode` decides
+what happens to the request.
+
+So it is not silent, but it fails on every request with an error that names
+nothing you did wrong. Torana needs a *reactor* module that stays resident and
+waits to be called. See
 [docs/PLUGIN_SEMANTICS.md](docs/PLUGIN_SEMANTICS.md).
 
 Use the Go package as `github.com/torana-edge/torana-plugin-sdk` and the
