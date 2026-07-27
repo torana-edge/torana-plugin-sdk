@@ -45,10 +45,16 @@ pub fn log(message: &str, level: i32) {
 // layout that does not match the allocation is undefined behaviour. Naming the
 // layout in both places removes the coincidence.
 
-/// Allocates `size` bytes and returns a host-visible pointer, or 0 on failure.
+/// Allocates `size` bytes and returns a host-visible pointer.
 ///
 /// The buffer is uninitialised. Hosts call [`dealloc`] with the same size after
 /// consuming a non-zero hook result.
+///
+/// Allocation failure TRAPS rather than returning a sentinel. ABI.md defines no
+/// failure value for `alloc`, and the host treats 0 as a valid pointer — it
+/// would write the payload at linear-memory offset 0, over the guest's own
+/// memory, and then call the hook with `ptr = 0`. Trapping is also what the
+/// previous `Vec::with_capacity` did, via `handle_alloc_error`.
 #[no_mangle]
 pub extern "C" fn alloc(size: u32) -> u32 {
     alloc_bytes(size as usize) as u32
@@ -66,13 +72,24 @@ pub extern "C" fn dealloc(ptr: u32, size: u32) {
 
 fn alloc_bytes(size: usize) -> *mut u8 {
     if size == 0 {
+        // Zero bytes needs no allocation, and a zero-sized layout is UB to
+        // pass to the allocator. No caller dereferences this.
         return ptr::null_mut();
     }
-    match Layout::array::<u8>(size) {
-        // Null is the ABI's failure signal; the host treats 0 as "no buffer".
-        Ok(layout) => unsafe { std::alloc::alloc(layout) },
-        Err(_) => ptr::null_mut(),
+    let Ok(layout) = Layout::array::<u8>(size) else {
+        // Only reachable for a size beyond isize::MAX. Unrecoverable, and
+        // there is no ABI value to report it with.
+        std::process::abort();
+    };
+    let p = unsafe { std::alloc::alloc(layout) };
+    if p.is_null() {
+        // Out of memory. Returning null here would be reported to the host as
+        // a pass-through by __result, which means the plugin's output is
+        // dropped and the ORIGINAL request continues upstream — a redaction
+        // plugin would fail open. Trap so failure_mode applies.
+        std::alloc::handle_alloc_error(layout);
     }
+    p
 }
 
 fn dealloc_bytes(p: *mut u8, size: usize) {
@@ -112,10 +129,14 @@ pub fn __input(ptr: u32, len: u32) -> &'static [u8] {
 /// pointer and length into the u64 the ABI returns.
 #[doc(hidden)]
 pub fn __result(bytes: &[u8]) -> u64 {
-    let (dst, len) = copy_to_owned_buffer(bytes);
-    if dst.is_null() {
+    // Zero is reserved by the ABI for a DELIBERATE pass-through. An empty
+    // payload is the only thing that means, so it is the only thing that
+    // returns 0 here — allocation failure traps inside alloc_bytes rather than
+    // arriving as a null this function could not tell apart from "no change".
+    if bytes.is_empty() {
         return 0;
     }
+    let (dst, len) = copy_to_owned_buffer(bytes);
     pack(dst as u32, len as u32)
 }
 
@@ -128,16 +149,31 @@ fn copy_to_owned_buffer(bytes: &[u8]) -> (*mut u8, usize) {
     if bytes.is_empty() {
         return (ptr::null_mut(), 0);
     }
+    // Non-null: alloc_bytes traps on failure rather than returning null.
     let dst = alloc_bytes(bytes.len());
-    if dst.is_null() {
-        return (ptr::null_mut(), 0);
-    }
     // copy_nonoverlapping rather than building a &mut [u8] first. The buffer is
     // UNINITIALISED, and constructing a reference to uninitialised memory is
     // undefined behaviour even when nothing reads it before the write — which
     // is exactly what `slice::from_raw_parts_mut(..).copy_from_slice(..)` did.
     unsafe { ptr::copy_nonoverlapping(bytes.as_ptr(), dst, bytes.len()) };
     (dst, bytes.len())
+}
+
+// Compatibility shims for the pre-rename names. These are #[doc(hidden)] but
+// `pub`, and under Cargo's 0.x rules a patch bump is a compatible update — so a
+// crate calling them directly would break on `cargo update` with no version
+// signal. Two lines each is cheaper than that.
+
+#[doc(hidden)]
+#[deprecated(note = "renamed to __input: this is ABI plumbing, not API")]
+pub fn input(ptr: u32, len: u32) -> &'static [u8] {
+    __input(ptr, len)
+}
+
+#[doc(hidden)]
+#[deprecated(note = "renamed to __result: this is ABI plumbing, not API")]
+pub fn result(bytes: &[u8]) -> u64 {
+    __result(bytes)
 }
 
 /// Packs a pointer and length into the single u64 an ABI hook returns:
@@ -366,8 +402,11 @@ mod tests {
             let p = alloc_bytes(size);
             assert!(!p.is_null(), "alloc_bytes({size}) returned null");
 
-            // Write every byte: if the layout under-allocated, this is where a
-            // sanitiser or the allocator notices.
+            // Write and read back every byte. This does NOT prove the layout
+            // was large enough — it cannot, since both use the same `size` —
+            // but it does exercise the alloc/write/read/free cycle, and a
+            // dealloc whose layout disagreed with the allocation corrupts the
+            // allocator, which the repeated cycles below surface.
             unsafe { ptr::write_bytes(p, 0xAB, size) };
             let seen = unsafe { slice::from_raw_parts(p, size) };
             assert!(seen.iter().all(|&b| b == 0xAB));
@@ -377,6 +416,32 @@ mod tests {
             // coincidence.
             dealloc_bytes(p, size);
         }
+    }
+
+    // Repeated alloc/free at varying sizes. A dealloc whose Layout disagreed
+    // with the allocation corrupts allocator bookkeeping, and the corruption
+    // shows up on a later allocation rather than at the bad free — so the loop
+    // is the point.
+    #[test]
+    fn repeated_alloc_free_cycles_do_not_corrupt_the_allocator() {
+        for round in 0..64 {
+            let size = 1 + (round * 37) % 4096;
+            let p = alloc_bytes(size);
+            assert!(!p.is_null());
+            unsafe { ptr::write_bytes(p, round as u8, size) };
+            let seen = unsafe { slice::from_raw_parts(p, size) };
+            assert!(seen.iter().all(|&b| b == round as u8), "round {round} readback");
+            dealloc_bytes(p, size);
+        }
+    }
+
+    #[test]
+    fn empty_payload_is_the_only_pass_through() {
+        // The ABI reserves 0 for a deliberate no-op. Anything non-empty must
+        // produce a real buffer; allocation failure traps instead of landing
+        // here as a 0 the host would read as "plugin made no change".
+        assert_eq!(__result(&[]), 0);
+        assert_ne!(__result(&[0u8]), 0);
     }
 
     #[test]
