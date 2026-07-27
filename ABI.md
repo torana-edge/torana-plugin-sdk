@@ -13,13 +13,17 @@ returned pointer in its high 32 bits and length in its low 32 bits. A zero
 result is pass-through. Hosts own input buffers; guests own output buffers
 until the host calls `dealloc`.
 
-The types are **unsigned**. This document said `i64`/`i32` while both SDKs
-export unsigned and `docs/WASM_PLUGIN_GUIDE.md` documented unsigned — and the
-distinction is not cosmetic. A pointer above 2 GiB, reachable inside a 4 GiB
-wasm memory, has its high bit set: read as signed it is negative, and packing
-it with sign extension corrupts the high half of the return value. Anyone
-writing a guest against the signed reading would produce one that works right
-up until a plugin allocates enough memory.
+WebAssembly itself has only `i32` and `i64`, which carry no signedness — a
+`.wat` signature will always read `i32`. What the notation above specifies is
+how those bits must be **interpreted**: as unsigned, in both the guest source
+and the host.
+
+That is not cosmetic. A pointer above 2 GiB is reachable inside a 4 GiB wasm
+memory and has its high bit set. Interpreted as signed it is negative, and
+packing it into the return value sign-extends and corrupts the high half. A
+guest written to the signed reading works right up until a plugin allocates
+enough memory, then fails in a way that looks like memory corruption rather
+than a spec misreading.
 
 Returning zero is reserved for intentional pass-through. A handler or codec
 error traps the guest call; the host discards that instance and applies the

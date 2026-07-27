@@ -12,6 +12,49 @@ import "testing"
 // explicit, which is the point. The residual ambiguity is pinned below so it is
 // a known limitation rather than a surprise.
 
+// TestStateStatusDiscriminatesFromTheOldImplementation covers the cases that
+// actually CHANGED. The rest of this file characterises behaviour that was
+// already correct — useful as documentation, useless as a regression guard,
+// which review caught by running the previous state.go under these tests and
+// finding every one still green.
+//
+// Each case below returns a different result under that implementation.
+func TestStateStatusDiscriminatesFromTheOldImplementation(t *testing.T) {
+	t.Run("malformed envelope is an error, not success", func(t *testing.T) {
+		// Before: the struct decode failed on the non-string message and the
+		// error was swallowed, so a real host error was reported as success.
+		if err := stateStatus(`{"status":"error","message":123}`); err == nil {
+			t.Fatal("a malformed error envelope must not read as success")
+		}
+	})
+
+	t.Run("status of the wrong type is an error", func(t *testing.T) {
+		if err := stateStatus(`{"status":{"nested":true}}`); err == nil {
+			t.Fatal("a non-string status must not read as success")
+		}
+	})
+
+	t.Run("error with no message names the envelope", func(t *testing.T) {
+		// Before: fmt.Errorf("torana: %s", "") produced the useless "torana: ".
+		err := stateStatus(`{"status":"error"}`)
+		if err == nil {
+			t.Fatal("expected an error")
+		}
+		if err.Error() == "torana: " {
+			t.Error("error message is empty; the plugin author learns nothing")
+		}
+	})
+
+	t.Run("case-sensitive, one rule for the whole function", func(t *testing.T) {
+		// Before: the map probe missed "Status" but encoding/json matched it
+		// case-insensitively, so the two halves of one function disagreed.
+		// JSON is case-sensitive and the host emits lowercase.
+		if err := stateStatus(`{"Status":"error","Message":"permission denied"}`); err != nil {
+			t.Errorf("a capitalised key is data, not an envelope: %v", err)
+		}
+	})
+}
+
 func TestStateStatusRecognisesEnvelopes(t *testing.T) {
 	for name, tc := range map[string]struct {
 		res     string
