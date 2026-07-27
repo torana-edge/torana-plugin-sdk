@@ -103,7 +103,12 @@ func run_after_response(reqID uint64, ptr, size uint32) uint64 {
 	inputBytes := ReadBytes(ptr, size)
 	var resp pb.ChatRequest
 	if err := proto.Unmarshal(inputBytes, &resp); err != nil {
-		return 0
+		// Trap, do not return 0. ABI.md reserves zero for a deliberate
+		// pass-through, so reporting a codec failure that way told the host the
+		// plugin had chosen not to act: the instance was kept, failure_mode was
+		// never consulted, and a corrupt payload looked like a healthy no-op.
+		// The other three hooks and every Rust hook already trap here.
+		panic("torana sdk: decode run_after_response: " + err.Error())
 	}
 
 	out, err := chatResponseHandler(context.WithValue(context.Background(), "reqID", reqID), &resp)
@@ -163,7 +168,12 @@ func run_on_stream_chunk(reqID uint64, ptr, size uint32) uint64 {
 	inputBytes := ReadBytes(ptr, size)
 	var chunk pb.StreamEvent
 	if err := proto.Unmarshal(inputBytes, &chunk); err != nil {
-		return 0
+		// Trap, do not return 0. ABI.md reserves zero for a deliberate
+		// pass-through, so reporting a codec failure that way told the host the
+		// plugin had chosen not to act: the instance was kept, failure_mode was
+		// never consulted, and a corrupt payload looked like a healthy no-op.
+		// The other three hooks and every Rust hook already trap here.
+		panic("torana sdk: decode run_on_stream_chunk: " + err.Error())
 	}
 
 	out, err := streamChunkHandler(context.WithValue(context.Background(), "reqID", reqID), &chunk)
@@ -332,7 +342,13 @@ func hostCall(cmdPtr uint32, cmdLen uint32, argsPtr uint32, argsLen uint32) uint
 // permission is missing. Callers should tolerate absent/zero fields.
 func PluginConfig() string {
 	res, err := HostCall("env.plugin_config", "")
-	if err != nil || res == "" {
+	// Without the isPermissionDenied check this returned the host's refusal
+	// envelope AS the config blob, so a plugin missing env.plugin_config parsed
+	// {"status":"error","message":"permission denied"} and saw a config with no
+	// recognised fields — silently running on defaults instead of reporting a
+	// missing grant. Every other host-call wrapper checks it; the doc comment
+	// above already promised this behaviour.
+	if err != nil || res == "" || isPermissionDenied(res) {
 		return "{}"
 	}
 	return res

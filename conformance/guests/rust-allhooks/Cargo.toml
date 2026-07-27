@@ -1,0 +1,7 @@
+[package]
+name = "torana-rust-allhooks"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+torana-plugin-sdk = { path = "../../../rust/torana-plugin-sdk" }
