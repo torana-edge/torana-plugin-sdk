@@ -30,10 +30,14 @@ func init() {
 	sdk.OnStreamChunk(func(context.Context, *pb.StreamEvent) (*pb.StreamEventResult, error) {
 		return nil, nil
 	})
+	// The two hooks below return a NON-nil result on purpose, one with
+	// handled=true and one with handled=false. Returning nil everywhere meant
+	// the encode path was never reached and the handled rule was never
+	// exercised — so a Go/Rust disagreement about it could not be detected.
 	sdk.OnHTTPRequest(func(context.Context, *pb.HttpRequest) (*pb.HttpResponse, error) {
-		return nil, nil
+		return &pb.HttpResponse{Handled: true, Status: 204}, nil
 	})
 	sdk.OnTick(func(context.Context, *pb.TickRequest) (*pb.TickResult, error) {
-		return nil, nil
+		return &pb.TickResult{Handled: false, Note: "declined"}, nil
 	})
 }

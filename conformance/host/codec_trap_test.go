@@ -26,13 +26,17 @@ import (
 // is why it lives in the dual-guest harness.
 
 // hooksTakingProtobuf are the hooks whose input is a protobuf message, so a
-// non-protobuf payload must trap. run_on_tick is excluded: it takes no
-// meaningful input.
+// non-protobuf payload must trap.
+//
+// run_on_tick is included. It was excluded on the grounds that it "takes no
+// meaningful input", which is not the same thing: it decodes a TickRequest and
+// both SDKs panic when that fails, so it is subject to the same contract.
 var hooksTakingProtobuf = []string{
 	"run_before_request",
 	"run_after_response",
 	"run_on_stream_chunk",
 	"run_on_http_request",
+	"run_on_tick",
 }
 
 func TestCorruptPayloadTrapsInEveryGuest(t *testing.T) {
@@ -86,7 +90,10 @@ func assertCorruptPayloadTraps(t *testing.T, path, hookName string) {
 
 	hook := module.ExportedFunction(hookName)
 	if hook == nil {
-		t.Skipf("guest does not export %s", hookName)
+		// These guests exist to export every hook. A skip here would make a
+		// guest that LOST an export look like a pass — the same
+		// green-means-nothing failure this harness was built to close.
+		t.Fatalf("guest does not export %s; the conformance guests must export every hook", hookName)
 	}
 	alloc := module.ExportedFunction("alloc")
 	if alloc == nil {
