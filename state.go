@@ -113,12 +113,30 @@ func stateStatus(res string) error {
 	if res == "" {
 		return nil
 	}
+	// Treat the response as an error envelope only when it really is one: a
+	// JSON OBJECT carrying a "status" field. A bare value the host returned as
+	// a legitimate result — a stored string, a number — must not be probed for
+	// error fields, and today unmarshalling one into the struct below silently
+	// succeeds with an empty Status, which reads as success by accident rather
+	// than by decision.
+	//
+	// The residual ambiguity is deliberate and worth stating: a plugin that
+	// stores an object with its own "status" field, set to "error", cannot be
+	// distinguished from a host error. The envelope shares a namespace with
+	// user data, which is the real flaw; changing that is an ABI break.
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(res), &probe); err != nil {
+		return nil // not an object; a bare value is a legitimate result
+	}
+	if _, hasStatus := probe["status"]; !hasStatus {
+		return nil // an object, but not an envelope
+	}
 	var envelope struct {
 		Status  string `json:"status"`
 		Message string `json:"message"`
 	}
 	if err := json.Unmarshal([]byte(res), &envelope); err != nil {
-		return nil // not an envelope; treat as success
+		return nil
 	}
 	if envelope.Status == "error" {
 		if envelope.Message == "permission denied" {

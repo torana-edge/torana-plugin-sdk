@@ -8,10 +8,18 @@ releases.
 ## Guest exports
 
 Every plugin exports `alloc(size) -> ptr` and `dealloc(ptr, size)`. Hooks use
-`(request_id: i64, ptr: i32, len: i32) -> i64`; a non-zero result packs the
+`(request_id: u64, ptr: u32, len: u32) -> u64`; a non-zero result packs the
 returned pointer in its high 32 bits and length in its low 32 bits. A zero
 result is pass-through. Hosts own input buffers; guests own output buffers
 until the host calls `dealloc`.
+
+The types are **unsigned**. This document said `i64`/`i32` while both SDKs
+export unsigned and `docs/WASM_PLUGIN_GUIDE.md` documented unsigned — and the
+distinction is not cosmetic. A pointer above 2 GiB, reachable inside a 4 GiB
+wasm memory, has its high bit set: read as signed it is negative, and packing
+it with sign extension corrupts the high half of the return value. Anyone
+writing a guest against the signed reading would produce one that works right
+up until a plugin allocates enough memory.
 
 Returning zero is reserved for intentional pass-through. A handler or codec
 error traps the guest call; the host discards that instance and applies the
