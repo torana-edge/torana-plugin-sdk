@@ -113,38 +113,55 @@ func stateStatus(res string) error {
 	if res == "" {
 		return nil
 	}
-	// Treat the response as an error envelope only when it really is one: a
-	// JSON OBJECT carrying a "status" field. A bare value the host returned as
-	// a legitimate result — a stored string, a number — must not be probed for
-	// error fields, and today unmarshalling one into the struct below silently
-	// succeeds with an empty Status, which reads as success by accident rather
-	// than by decision.
+	// A response is an error envelope only when it really is one: a JSON OBJECT
+	// carrying a "status" field. A bare value the host returned as a legitimate
+	// result — a stored string, a number — must not be probed for error fields.
+	//
+	// One decode, one matching rule. Probing the map and then re-decoding into
+	// a struct used TWO rules: map lookup is case-sensitive, encoding/json
+	// struct matching is not, so {"Status":"error"} was an envelope to one half
+	// and data to the other. JSON is case-sensitive and the host emits
+	// lowercase, so lowercase-only is the rule, applied once.
 	//
 	// The residual ambiguity is deliberate and worth stating: a plugin that
-	// stores an object with its own "status" field, set to "error", cannot be
+	// stores an object with its own "status" field set to "error" cannot be
 	// distinguished from a host error. The envelope shares a namespace with
 	// user data, which is the real flaw; changing that is an ABI break.
 	var probe map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(res), &probe); err != nil {
 		return nil // not an object; a bare value is a legitimate result
 	}
-	if _, hasStatus := probe["status"]; !hasStatus {
+	rawStatus, hasStatus := probe["status"]
+	if !hasStatus {
 		return nil // an object, but not an envelope
 	}
-	var envelope struct {
-		Status  string `json:"status"`
-		Message string `json:"message"`
+
+	var status string
+	if err := json.Unmarshal(rawStatus, &status); err != nil {
+		// "status" is present but not a string. The probe has already
+		// established this is an envelope, so reporting success here would
+		// swallow a malformed host error rather than surface it.
+		return fmt.Errorf("torana: malformed status envelope: %s", res)
 	}
-	if err := json.Unmarshal([]byte(res), &envelope); err != nil {
+	if status != "error" {
 		return nil
 	}
-	if envelope.Status == "error" {
-		if envelope.Message == "permission denied" {
-			return ErrStateUnavailable
-		}
-		return fmt.Errorf("torana: %s", envelope.Message)
+
+	var message string
+	if raw, ok := probe["message"]; ok {
+		// Best effort: a non-string message is still an error, just an
+		// undescribed one, and the raw envelope below says more than a decode
+		// failure would.
+		_ = json.Unmarshal(raw, &message)
 	}
-	return nil
+	switch {
+	case message == "permission denied":
+		return ErrStateUnavailable
+	case message == "":
+		return fmt.Errorf("torana: host reported an error with no message: %s", res)
+	default:
+		return fmt.Errorf("torana: %s", message)
+	}
 }
 
 func isPermissionDenied(res string) bool {
