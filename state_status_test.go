@@ -28,9 +28,20 @@ func TestStateStatusDiscriminatesFromTheOldImplementation(t *testing.T) {
 		}
 	})
 
-	t.Run("status of the wrong type is an error", func(t *testing.T) {
-		if err := stateStatus(`{"status":{"nested":true}}`); err == nil {
-			t.Fatal("a non-string status must not read as success")
+	t.Run("a non-string status is data, not an envelope", func(t *testing.T) {
+		// The host's status is always a string, so a numeric or structured one
+		// means the plugin stored this. An HTTP-cache-shaped entry is the
+		// obvious case, and returning an error for it would hand the caller an
+		// error instead of their own value.
+		for _, stored := range []string{
+			`{"status":200,"body":"cached"}`,
+			`{"status":true}`,
+			`{"status":["a"]}`,
+			`{"status":{"nested":true}}`,
+		} {
+			if err := stateStatus(stored); err != nil {
+				t.Errorf("stored value %s was rejected as a host error: %v", stored, err)
+			}
 		}
 	})
 

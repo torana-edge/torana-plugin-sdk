@@ -128,10 +128,11 @@ func stateStatus(res string) error {
 	// and data to the other. JSON is case-sensitive and the host emits
 	// lowercase, so lowercase-only is the rule, applied once.
 	//
-	// The residual ambiguity is deliberate and worth stating: a plugin that
-	// stores an object with its own "status" field set to "error" cannot be
-	// distinguished from a host error. The envelope shares a namespace with
-	// user data, which is the real flaw; changing that is an ABI break.
+	// The residual ambiguity is narrow and worth stating precisely: only an
+	// object whose "status" is the STRING "error" is indistinguishable from a
+	// host error. A non-string status is data, and any other string status is
+	// success. The envelope sharing a namespace with user data is the real
+	// flaw; changing that is an ABI break.
 	var probe map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(res), &probe); err != nil {
 		return nil // not an object; a bare value is a legitimate result
@@ -143,10 +144,12 @@ func stateStatus(res string) error {
 
 	var status string
 	if err := json.Unmarshal(rawStatus, &status); err != nil {
-		// "status" is present but not a string. The probe has already
-		// established this is an envelope, so reporting success here would
-		// swallow a malformed host error rather than surface it.
-		return fmt.Errorf("torana: malformed status envelope: %s", res)
+		// "status" is present but not a string, so this is NOT an envelope —
+		// the host's status is always a string. An HTTP-cache-shaped entry
+		// ({"status":200,"body":…}) is an ordinary thing for a plugin to
+		// store, and rejecting it would hand back an error instead of the
+		// caller's own data.
+		return nil
 	}
 	if status != "error" {
 		return nil
