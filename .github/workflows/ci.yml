@@ -59,8 +59,19 @@ jobs:
         with:
           targets: wasm32-wasip1
       - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Crate protobuf matches canonical ABI
+        run: |
+          protoc -I proto --descriptor_set_out=/tmp/canonical.pb proto/torana/v1/torana.proto
+          protoc -I rust/torana-plugin-sdk/proto --descriptor_set_out=/tmp/crate.pb rust/torana-plugin-sdk/proto/torana/v1/torana.proto
+          cmp /tmp/canonical.pb /tmp/crate.pb
+      - run: cargo fmt --manifest-path rust/torana-plugin-sdk/Cargo.toml --check
+      - run: cargo clippy --manifest-path rust/torana-plugin-sdk/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path rust/torana-plugin-sdk/Cargo.toml
+      - run: cargo package --manifest-path rust/torana-plugin-sdk/Cargo.toml --locked
       - run: cargo build --target wasm32-wasip1 --target-dir /tmp/rust-logger-target --manifest-path examples/rust-logger/Cargo.toml
+      - uses: rustsec/audit-check@v2
+        with:
+          working-directory: rust/torana-plugin-sdk
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.x'

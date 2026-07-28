@@ -22,14 +22,23 @@ extern "C" {
     #[link_name = "log"]
     fn host_log(level: i32, ptr: u32, len: u32);
     #[link_name = "emit_metric"]
-    fn host_emit_metric(kind: i32, ptr: u32, len: u32, value: f64, labels_ptr: u32, labels_len: u32);
+    fn host_emit_metric(
+        kind: i32,
+        ptr: u32,
+        len: u32,
+        value: f64,
+        labels_ptr: u32,
+        labels_len: u32,
+    );
     #[link_name = "host_call"]
     fn raw_host_call(cmd_ptr: u32, cmd_len: u32, args_ptr: u32, args_len: u32) -> u64;
 }
 
 /// Logs a bounded diagnostic string when the host granted `env.log`.
 pub fn log(message: &str, level: i32) {
-    if message.is_empty() { return; }
+    if message.is_empty() {
+        return;
+    }
     unsafe { host_log(level, message.as_ptr() as u32, message.len() as u32) }
 }
 
@@ -304,9 +313,13 @@ macro_rules! export_before_request {
             use $crate::prost::Message;
             let mut request = $crate::pb::ChatRequest::decode($crate::__input(ptr, len))
                 .expect("torana sdk: decode run_before_request");
-            if !$handler(&mut request) { return 0; }
+            if !$handler(&mut request) {
+                return 0;
+            }
             let mut out = Vec::new();
-            request.encode(&mut out).expect("torana sdk: encode run_before_request");
+            request
+                .encode(&mut out)
+                .expect("torana sdk: encode run_before_request");
             $crate::__result(&out)
         }
     };
@@ -320,9 +333,13 @@ macro_rules! export_before_request_result {
             use $crate::prost::Message;
             let mut request = $crate::pb::ChatRequest::decode($crate::__input(ptr, len))
                 .expect("torana sdk: decode run_before_request");
-            if !$handler(&mut request).expect("torana plugin: run_before_request") { return 0; }
+            if !$handler(&mut request).expect("torana plugin: run_before_request") {
+                return 0;
+            }
             let mut out = Vec::new();
-            request.encode(&mut out).expect("torana sdk: encode run_before_request");
+            request
+                .encode(&mut out)
+                .expect("torana sdk: encode run_before_request");
             $crate::__result(&out)
         }
     };
@@ -347,9 +364,13 @@ macro_rules! export_after_response {
             use $crate::prost::Message;
             let mut response = $crate::pb::ChatRequest::decode($crate::__input(ptr, len))
                 .expect("torana sdk: decode run_after_response");
-            if !$handler(&mut response).expect("torana plugin: run_after_response") { return 0; }
+            if !$handler(&mut response).expect("torana plugin: run_after_response") {
+                return 0;
+            }
             let mut out = Vec::new();
-            response.encode(&mut out).expect("torana sdk: encode run_after_response");
+            response
+                .encode(&mut out)
+                .expect("torana sdk: encode run_after_response");
             $crate::__result(&out)
         }
     };
@@ -363,7 +384,8 @@ macro_rules! export_stream_chunk {
             use $crate::prost::Message;
             let event = $crate::pb::StreamEvent::decode($crate::__input(ptr, len))
                 .expect("torana sdk: decode run_on_stream_chunk");
-            let Some(response) = $handler(&event).expect("torana plugin: run_on_stream_chunk") else {
+            let Some(response) = $handler(&event).expect("torana plugin: run_on_stream_chunk")
+            else {
                 return 0;
             };
             // handled=false means "I did not act". The host discards the payload
@@ -375,7 +397,9 @@ macro_rules! export_stream_chunk {
                 return 0;
             }
             let mut out = Vec::new();
-            response.encode(&mut out).expect("torana sdk: encode run_on_stream_chunk");
+            response
+                .encode(&mut out)
+                .expect("torana sdk: encode run_on_stream_chunk");
             $crate::__result(&out)
         }
     };
@@ -389,7 +413,8 @@ macro_rules! export_http_request {
             use $crate::prost::Message;
             let request = $crate::pb::HttpRequest::decode($crate::__input(ptr, len))
                 .expect("torana sdk: decode run_on_http_request");
-            let Some(response) = $handler(&request).expect("torana plugin: run_on_http_request") else {
+            let Some(response) = $handler(&request).expect("torana plugin: run_on_http_request")
+            else {
                 return 0;
             };
             // handled=false means "I did not act". The host discards the payload
@@ -401,7 +426,9 @@ macro_rules! export_http_request {
                 return 0;
             }
             let mut out = Vec::new();
-            response.encode(&mut out).expect("torana sdk: encode run_on_http_request");
+            response
+                .encode(&mut out)
+                .expect("torana sdk: encode run_on_http_request");
             $crate::__result(&out)
         }
     };
@@ -433,7 +460,9 @@ macro_rules! export_tick {
                 return 0;
             }
             let mut out = Vec::new();
-            result.encode(&mut out).expect("torana sdk: encode run_on_tick");
+            result
+                .encode(&mut out)
+                .expect("torana sdk: encode run_on_tick");
             $crate::__result(&out)
         }
     };
@@ -485,7 +514,10 @@ mod tests {
             assert!(!p.is_null());
             unsafe { ptr::write_bytes(p, round as u8, size) };
             let seen = unsafe { slice::from_raw_parts(p, size) };
-            assert!(seen.iter().all(|&b| b == round as u8), "round {round} readback");
+            assert!(
+                seen.iter().all(|&b| b == round as u8),
+                "round {round} readback"
+            );
             dealloc_bytes(p, size);
         }
     }

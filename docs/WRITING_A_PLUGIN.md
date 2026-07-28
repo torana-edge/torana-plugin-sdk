@@ -15,6 +15,7 @@ granted to its exact build.
 - **Go 1.24 or newer.** `-buildmode=c-shared` for `wasip1` — which the reactor
   model requires, see [PLUGIN_SEMANTICS.md](PLUGIN_SEMANTICS.md) — does not exist
   before 1.24. Torana itself builds with 1.26.
+- **Rust stable plus `wasm32-wasip1`** for the supported Rust authoring path.
 - **The `torana` binary**, which is both the proxy and the plugin CLI.
 
 ---
@@ -119,11 +120,10 @@ Every plugin directory must contain a `plugin.json` file describing its metadata
   "version": "0.1.0",
   "description": "Redacts sensitive terms from user prompts",
   "abi_version": "v1",
-  "minimum_torana_version": "0.1.0",
   "failure_mode": "block",
   "repository": "https://github.com/your-org/my-custom-plugin",
   "hooks": [
-    { "name": "run_before_request", "priority": 100 }
+    { "name": "run_before_request" }
   ],
   "permissions": [
     { "name": "env.log", "description": "Emit diagnostic logs" }
@@ -139,12 +139,12 @@ Every plugin directory must contain a `plugin.json` file describing its metadata
 - **`version`**: Semantic version string (e.g. `"0.1.0"`).
 - **`description`**: Human-readable description.
 - **`abi_version`**: Torana plugin ABI version. Use `"v1"`.
-- **`minimum_torana_version`**: Oldest compatible Torana release.
 - **`failure_mode`**: Recommended operator policy, `"pass"` or `"block"`.
 - **`repository`**: HTTPS source repository for provenance and support.
 - **`hooks`**: Array of hook definitions:
   - **`name`**: Hook event type (`run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick`).
-  - **`priority`**: Execution order priority (`integer`). Lower numbers execute earlier.
+- **`requires_upstream`**: Optional stable plugin IDs that must be approved and
+  earlier in the operator's configured `plugins.order`.
 - **`permissions`**: Declared host capabilities required by the plugin:
   - **`name`**: Capability permission string.
   - **`description`**: Rationale for requesting the capability.
@@ -156,6 +156,11 @@ is bound to the digest of the exact `plugin.json`, `plugin.wasm`,
 reviewed and approved again.
 The Control Plane shows the digest and requested capabilities before enabling a
 plugin.
+
+Torana Edge is intentionally unversioned. Runtime compatibility is enforced by
+`abi_version`, supported hooks, requested/granted capabilities, and exported
+hook validation. Legacy `minimum_torana_version`, `maximum_torana_version`, and
+hook `priority` fields are accepted with warnings but are not enforced.
 
 Wazero's linear-memory isolation, execution timeout, and memory limit sandbox
 untrusted guest code. Capability approvals separately limit which Torana host
@@ -343,6 +348,44 @@ Or using Torana:
 torana plugin build . -o plugin.wasm
 ```
 
+### Rust
+
+Create a `cdylib` crate:
+
+```toml
+[package]
+name = "my-torana-plugin"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+torana-plugin-sdk = "0.2.1"
+```
+
+Register and export a hook:
+
+```rust
+use torana_plugin_sdk::{export_before_request, pb};
+
+fn before(request: &mut pb::ChatRequest) -> bool {
+    // Return true only when request was changed.
+    false
+}
+
+export_before_request!(before);
+```
+
+Build the bundle:
+
+```bash
+rustup target add wasm32-wasip1
+cargo build --release --target wasm32-wasip1
+cp target/wasm32-wasip1/release/my_torana_plugin.wasm plugin.wasm
+```
+
 ---
 
 ## 7. Installing and activating
@@ -353,6 +396,7 @@ register with and nothing to publish. Users install it by path:
 ```bash
 torana plugin install github.com/you/your-plugins/plugins/foo
 torana plugin install github.com/you/your-plugins/plugins/foo@v1.2.0
+torana plugin install https://gitlab.example.com/group/repo.git//plugins/foo@v1.2.0
 torana plugin install ./foo          # local directory
 ```
 
