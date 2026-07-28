@@ -43,8 +43,13 @@ func StateGet(key string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if isPermissionDenied(res) {
-		return "", ErrStateUnavailable
+	// stateStatus, not just isPermissionDenied. A denial is only one of the
+	// errors the host can report here; checking for it alone meant any OTHER
+	// error envelope — a store that is unavailable, a key that is too large —
+	// was returned to the plugin AS THE STORED VALUE, and StateGetJSON then
+	// decoded it into the caller's struct.
+	if err := stateStatus(res); err != nil {
+		return "", err
 	}
 	return res, nil
 }
@@ -72,8 +77,8 @@ func StateKeys() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if isPermissionDenied(res) {
-		return nil, ErrStateUnavailable
+	if err := stateStatus(res); err != nil {
+		return nil, err
 	}
 	if res == "" {
 		return nil, nil

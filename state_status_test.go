@@ -96,3 +96,29 @@ func TestStateStatusAmbiguityIsKnown(t *testing.T) {
 		t.Error("expected the documented ambiguity: user data shaped like an envelope reads as an error")
 	}
 }
+
+// TestStateGetRejectsErrorEnvelopes — StateGet and StateKeys checked only for a
+// DENIAL, so any other host error envelope was handed back as the stored value.
+// StateGetJSON would then decode {"status":"error","message":"store
+// unavailable"} into the caller's struct, which parses fine and yields a
+// zero-valued result: the plugin sees "no data" rather than "the store failed".
+func TestStateErrorEnvelopesAreNotValues(t *testing.T) {
+	for name, res := range map[string]string{
+		"denial":            `{"status":"error","message":"permission denied"}`,
+		"store unavailable": `{"status":"error","message":"store unavailable"}`,
+		"malformed":         `{"status":"error","message":123}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := stateStatus(res); err == nil {
+				t.Errorf("%s would be returned to the plugin as data", res)
+			}
+		})
+	}
+
+	// And an ordinary stored value must still come back untouched.
+	for _, value := range []string{`{"count":3}`, `"a string"`, `42`, `[1,2]`, ""} {
+		if err := stateStatus(value); err != nil {
+			t.Errorf("stored value %q was rejected as an error envelope: %v", value, err)
+		}
+	}
+}
