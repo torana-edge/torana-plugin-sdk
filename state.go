@@ -162,10 +162,10 @@ func stateStatus(res string) error {
 		// failure would.
 		_ = json.Unmarshal(raw, &message)
 	}
-	switch {
-	case message == "permission denied":
+	switch message {
+	case "permission denied":
 		return ErrStateUnavailable
-	case message == "":
+	case "":
 		return fmt.Errorf("torana: host reported an error with no message: %s", res)
 	default:
 		return fmt.Errorf("torana: %s", message)
