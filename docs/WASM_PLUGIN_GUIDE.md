@@ -140,7 +140,7 @@ Every other hook is reactive — it runs because a request is passing through.
 when nothing is happening.
 
 It has the same signature as every other hook,
-`(request_id: i64, ptr: i32, len: i32) -> i64`, taking a `TickRequest` and
+`(request_id: u64, ptr: u32, len: u32) -> u64`, taking a `TickRequest` and
 returning a `TickResult`. Two things differ, and both are easy to get wrong:
 
 **There is no request, so most host calls have nothing to answer with.**
