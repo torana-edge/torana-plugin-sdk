@@ -19,8 +19,14 @@ GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o plugin.wasm .
 ```
 
 **Plugin binaries are build artifacts and are NEVER committed to git** (`*.wasm`
-is gitignored). Build all in-repo plugins with `make plugins`. Torana logs a
-warning at load time if `plugin.wasm` is older than the plugin's Go sources.
+is gitignored). Torana logs a warning at load time if `plugin.wasm` is older
+than the plugin's Go sources, and tells you to reinstall that plugin.
+
+Where you rebuild depends on which repository you are in: `make testdata` builds
+torana-edge's test fixtures, `./scripts/build.sh <plugin>` builds a bundle in
+torana-plugins, and `torana plugin install` builds from source and prints the
+digest for anything installed. There is no longer a target that builds "all
+plugins" from one place — they live in their own repositories.
 
 ## 2. Protobuf Structure and Torana's Payload
 
