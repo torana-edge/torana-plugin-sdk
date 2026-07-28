@@ -70,6 +70,13 @@ func StateSet(key, value string) error {
 	return stateStatus(res)
 }
 
+// StateDelete releases one durable key. It uses env.state_set with an empty
+// value, so it is ABI-compatible with existing v1 hosts and requires the same
+// env.state_set grant.
+func StateDelete(key string) error {
+	return StateSet(key, "")
+}
+
 // StateKeys lists this plugin's durable keys, sorted. Useful when a plugin
 // stores one key per conversation and must enumerate them on a tick.
 func StateKeys() ([]string, error) {

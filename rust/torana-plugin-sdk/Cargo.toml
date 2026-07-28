@@ -4,16 +4,23 @@ name = "torana-plugin-sdk"
 # The release workflow asserts it, and a mismatch fails after the tag exists —
 # which is expensive, because module proxies cache a tag's content immutably and
 # it cannot then be moved. See RELEASING.md.
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
+rust-version = "1.85"
 license = "Apache-2.0"
 description = "Versioned Rust SDK for Torana WASI plugins"
 repository = "https://github.com/torana-edge/torana-plugin-sdk"
+homepage = "https://github.com/torana-edge/torana-plugin-sdk"
+documentation = "https://docs.rs/torana-plugin-sdk"
+readme = "README.md"
+keywords = ["wasm", "wasi", "llm", "plugin", "proxy"]
+categories = ["api-bindings", "wasm"]
+include = ["src/**", "proto/**", "build.rs", "Cargo.toml", "README.md", "LICENSE"]
 build = "build.rs"
 
 [dependencies]
-prost = "0.13"
+prost = "0.14.4"
 serde_json = "1"
 
 [build-dependencies]
-prost-build = "0.13"
+prost-build = "0.14.4"

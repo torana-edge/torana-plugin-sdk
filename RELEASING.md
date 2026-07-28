@@ -20,7 +20,7 @@ Get it right the first time.
 | Where | What |
 |---|---|
 | the git tag | `vX.Y.Z` — what Go consumers resolve |
-| `rust/torana-plugin-sdk/Cargo.toml` | `version = "X.Y.Z"` — what Rust consumers see |
+| `rust/torana-plugin-sdk/Cargo.toml` | `version = "X.Y.Z"` — what Rust consumers install from crates.io |
 
 Go has no version file, so the tag is its only source of truth. Rust does, so it
 has to be bumped by hand in the same change.
@@ -40,15 +40,17 @@ advertised `0.1.0`.
    library — no `-buildmode=c-shared`, because nothing here is a plugin).
 3. **Tag and push.**
    ```bash
-   git tag -a v0.2.0 -m "…"
-   git push origin v0.2.0
+   git tag -a vX.Y.Z -m "…"
+   git push origin vX.Y.Z
    ```
    Write a real annotation: new hooks, new host calls, behaviour changes, and
    anything a plugin author has to change. It becomes the release notes.
-4. **Watch the release workflow.** It runs both test suites, asserts the version
-   match, builds the example plugins, publishes a GitHub Release with checksums,
-   and attests build provenance. A failure here means there is no release —
-   only a tag.
+4. **Ensure the repository has a `CARGO_REGISTRY_TOKEN` secret** authorized to
+   publish `torana-plugin-sdk`.
+5. **Watch the release workflow.** It runs both test suites, asserts the version
+   match, publishes the Rust crate, builds the example plugins, publishes a
+   GitHub Release with checksums, and attests build provenance. A failure here
+   means the release train is incomplete.
 
 ## Then the downstream repos
 
@@ -60,15 +62,15 @@ gets missed.
 ```bash
 # torana-edge
 cd torana-edge
-GOWORK=off go get github.com/torana-edge/torana-plugin-sdk@v0.2.0
+GOWORK=off go get github.com/torana-edge/torana-plugin-sdk@vX.Y.Z
 GOWORK=off go build ./... && GOWORK=off make testdata  # prove it without the workspace
 
 # torana-plugins — every plugin module pins the SDK separately
 cd ../torana-plugins
-for d in plugins/*/; do (cd "$d" && go get github.com/torana-edge/torana-plugin-sdk@v0.2.0); done
+for d in plugins/*/; do (cd "$d" && go get github.com/torana-edge/torana-plugin-sdk@vX.Y.Z); done
 # SDK_REF is what CI and the release job check the SDK out at — bump it too, or
 # published bundles keep being built against the previous SDK.
-echo v0.2.0 > SDK_REF
+echo vX.Y.Z > SDK_REF
 ./scripts/test.sh
 ```
 

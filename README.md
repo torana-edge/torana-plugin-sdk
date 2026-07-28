@@ -24,9 +24,12 @@ waits to be called. See
 Use the Go package as `github.com/torana-edge/torana-plugin-sdk` and the
 protobuf API as `github.com/torana-edge/torana-plugin-sdk/pb`.
 
-The Rust crate lives in `rust/torana-plugin-sdk`; its build script generates
-bindings from the checked-in v1 protobuf contract. Rust builds require
-`protoc` and the WASI target configured by the caller.
+The Rust crate is packaged as `torana-plugin-sdk` and is published to
+[crates.io](https://crates.io/crates/torana-plugin-sdk) by the version-tag
+release workflow. Its source lives in `rust/torana-plugin-sdk`. The crate
+carries a protobuf copy whose descriptor is checked against the canonical v1
+contract in CI. Rust builds require `protoc` and the WASI target configured by
+the caller.
 
 After changing the ABI, regenerate the checked-in Go bindings with
 `./scripts/generate-go.sh`, then run the conformance suite.
