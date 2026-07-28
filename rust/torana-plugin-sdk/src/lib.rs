@@ -328,6 +328,17 @@ macro_rules! export_before_request_result {
     };
 }
 
+/// Exports `run_after_response`, called with a completed non-streaming response.
+///
+/// The handler receives a `pb::ChatRequest`, which is deliberate rather than a
+/// mistake — there is no `pb::ChatResponse` in the v1 contract. Torana
+/// normalises a provider's reply into the same message shape it uses for a
+/// request: the assistant's turn arrives as `messages`, its tool calls as
+/// `tool_calls`, and provider metadata under `torana_meta_json["_response"]`.
+///
+/// One shape means a plugin that rewrites message content works identically in
+/// both directions, and the host's provider adapters have one target instead of
+/// two. Return `Ok(false)` for pass-through.
 #[macro_export]
 macro_rules! export_after_response {
     ($handler:path) => {
