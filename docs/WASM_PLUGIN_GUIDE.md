@@ -53,20 +53,40 @@ Use the standard library allocator for your language.
   rather than an error.
 * **Rust**:
   ```rust
-  use std::alloc::{alloc, dealloc, Layout};
-  
+  use std::alloc::Layout;
+
   #[no_mangle]
   pub extern "C" fn alloc(size: u32) -> u32 {
+      // A zero-sized layout is undefined behaviour to pass to the allocator,
+      // and zero bytes needs no allocation.
+      if size == 0 {
+          return 0;
+      }
       let layout = Layout::array::<u8>(size as usize).unwrap();
-      unsafe { alloc(layout) as u32 }
+      let p = unsafe { std::alloc::alloc(layout) };
+      if p.is_null() {
+          // The ABI defines no failure value for alloc, and the host reads 0
+          // as a valid pointer (linear-memory offset 0). Trap instead.
+          std::alloc::handle_alloc_error(layout);
+      }
+      p as u32
   }
-  
+
   #[no_mangle]
   pub extern "C" fn dealloc(ptr: u32, size: u32) {
+      if ptr == 0 || size == 0 {
+          return;
+      }
+      // The layout MUST match the one used to allocate. Freeing with a
+      // different layout is undefined behaviour.
       let layout = Layout::array::<u8>(size as usize).unwrap();
-      unsafe { dealloc(ptr as *mut u8, layout) }
+      unsafe { std::alloc::dealloc(ptr as *mut u8, layout) }
   }
   ```
+
+  The imports are qualified at the call site on purpose: `use std::alloc::{alloc,
+  dealloc}` collides with the `#[no_mangle]` functions being defined and does not
+  compile.
 * **AssemblyScript**:
   Export the built-in allocator wrappers.
   ```typescript
