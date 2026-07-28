@@ -36,7 +36,8 @@ advertised `0.1.0`.
 1. **Bump `rust/torana-plugin-sdk/Cargo.toml`** to the version you are about to
    tag, without the `v`. Commit it to `main`.
 2. **Verify** — `go test ./...`, `cargo test --manifest-path rust/torana-plugin-sdk/Cargo.toml`,
-   and a `GOOS=wasip1 GOARCH=wasm go build ./...`.
+   and a `GOOS=wasip1 GOARCH=wasm go build ./...` (a compile check of the SDK
+   library — no `-buildmode=c-shared`, because nothing here is a plugin).
 3. **Tag and push.**
    ```bash
    git tag -a v0.1.3 -m "…"
