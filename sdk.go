@@ -90,7 +90,20 @@ func run_before_request(reqID uint64, ptr, size uint32) uint64 {
 
 var chatResponseHandler func(ctx context.Context, resp *pb.ChatRequest) (*pb.ChatRequest, error)
 
-// OnAfterResponse registers the handler for chat responses.
+// OnAfterResponse registers the handler for a completed, non-streaming response.
+//
+// The parameter is a pb.ChatRequest, and that is deliberate rather than a
+// mistake — there is no pb.ChatResponse in the v1 contract.
+//
+// Torana normalises a provider's reply into the SAME message shape it uses for
+// a request: the assistant's turn arrives as Messages, its tool calls as
+// ToolCalls, and provider metadata under ToranaMetaJson["_response"]. One shape
+// means a plugin that rewrites message content works identically on the way out
+// and on the way in, and the host's four provider adapters have one target
+// instead of two.
+//
+// The host marshals a pb.ChatRequest for this hook and unmarshals the reply as
+// one, so the types match end to end. Returning nil is pass-through.
 func OnAfterResponse(handler func(ctx context.Context, resp *pb.ChatRequest) (*pb.ChatRequest, error)) {
 	chatResponseHandler = handler
 }
