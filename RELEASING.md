@@ -40,8 +40,8 @@ advertised `0.1.0`.
    library — no `-buildmode=c-shared`, because nothing here is a plugin).
 3. **Tag and push.**
    ```bash
-   git tag -a v0.2.1 -m "…"
-   git push origin v0.2.1
+   git tag -a vX.Y.Z -m "…"
+   git push origin vX.Y.Z
    ```
    Write a real annotation: new hooks, new host calls, behaviour changes, and
    anything a plugin author has to change. It becomes the release notes.
@@ -62,15 +62,15 @@ gets missed.
 ```bash
 # torana-edge
 cd torana-edge
-GOWORK=off go get github.com/torana-edge/torana-plugin-sdk@v0.2.1
+GOWORK=off go get github.com/torana-edge/torana-plugin-sdk@vX.Y.Z
 GOWORK=off go build ./... && GOWORK=off make testdata  # prove it without the workspace
 
 # torana-plugins — every plugin module pins the SDK separately
 cd ../torana-plugins
-for d in plugins/*/; do (cd "$d" && go get github.com/torana-edge/torana-plugin-sdk@v0.2.1); done
+for d in plugins/*/; do (cd "$d" && go get github.com/torana-edge/torana-plugin-sdk@vX.Y.Z); done
 # SDK_REF is what CI and the release job check the SDK out at — bump it too, or
 # published bundles keep being built against the previous SDK.
-echo v0.2.1 > SDK_REF
+echo vX.Y.Z > SDK_REF
 ./scripts/test.sh
 ```
 

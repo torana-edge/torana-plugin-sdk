@@ -4,7 +4,7 @@ name = "torana-plugin-sdk"
 # The release workflow asserts it, and a mismatch fails after the tag exists —
 # which is expensive, because module proxies cache a tag's content immutably and
 # it cannot then be moved. See RELEASING.md.
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.85"
 license = "Apache-2.0"

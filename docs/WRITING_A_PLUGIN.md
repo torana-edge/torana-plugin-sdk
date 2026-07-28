@@ -120,6 +120,7 @@ Every plugin directory must contain a `plugin.json` file describing its metadata
   "version": "0.1.0",
   "description": "Redacts sensitive terms from user prompts",
   "abi_version": "v1",
+  "minimum_torana_version": "0.1.0",
   "failure_mode": "block",
   "repository": "https://github.com/your-org/my-custom-plugin",
   "hooks": [
@@ -139,6 +140,8 @@ Every plugin directory must contain a `plugin.json` file describing its metadata
 - **`version`**: Semantic version string (e.g. `"0.1.0"`).
 - **`description`**: Human-readable description.
 - **`abi_version`**: Torana plugin ABI version. Use `"v1"`.
+- **`minimum_torana_version`**: Optional oldest compatible Torana Edge version.
+- **`maximum_torana_version`**: Optional newest compatible Torana Edge version.
 - **`failure_mode`**: Recommended operator policy, `"pass"` or `"block"`.
 - **`repository`**: HTTPS source repository for provenance and support.
 - **`hooks`**: Array of hook definitions:
@@ -157,10 +160,13 @@ reviewed and approved again.
 The Control Plane shows the digest and requested capabilities before enabling a
 plugin.
 
-Torana Edge is intentionally unversioned. Runtime compatibility is enforced by
-`abi_version`, supported hooks, requested/granted capabilities, and exported
-hook validation. Legacy `minimum_torana_version`, `maximum_torana_version`, and
-hook `priority` fields are accepted with warnings but are not enforced.
+Torana Edge currently has no product release version. A development or
+commit-SHA build therefore skips the optional minimum/maximum product-version
+gate and relies on `abi_version`, supported hooks, requested/granted
+capabilities, and exported-hook validation. Once a host reports a semantic
+release version, it enforces any declared minimum and maximum. Hook execution
+order comes only from the operator's `plugins.order`; manifests do not have a
+hook `priority` field.
 
 Wazero's linear-memory isolation, execution timeout, and memory limit sandbox
 untrusted guest code. Capability approvals separately limit which Torana host
@@ -362,7 +368,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-torana-plugin-sdk = "0.2.1"
+torana-plugin-sdk = "0.3"
 ```
 
 Register and export a hook:
