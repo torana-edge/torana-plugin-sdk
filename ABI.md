@@ -8,10 +8,22 @@ releases.
 ## Guest exports
 
 Every plugin exports `alloc(size) -> ptr` and `dealloc(ptr, size)`. Hooks use
-`(request_id: i64, ptr: i32, len: i32) -> i64`; a non-zero result packs the
+`(request_id: u64, ptr: u32, len: u32) -> u64`; a non-zero result packs the
 returned pointer in its high 32 bits and length in its low 32 bits. A zero
 result is pass-through. Hosts own input buffers; guests own output buffers
 until the host calls `dealloc`.
+
+WebAssembly itself has only `i32` and `i64`, which carry no signedness — a
+`.wat` signature will always read `i32`. What the notation above specifies is
+how those bits must be **interpreted**: as unsigned, in both the guest source
+and the host.
+
+That is not cosmetic. A pointer above 2 GiB is reachable inside a 4 GiB wasm
+memory and has its high bit set. Interpreted as signed it is negative, and
+packing it into the return value sign-extends and corrupts the high half. A
+guest written to the signed reading works right up until a plugin allocates
+enough memory, then fails in a way that looks like memory corruption rather
+than a spec misreading.
 
 Returning zero is reserved for intentional pass-through. A handler or codec
 error traps the guest call; the host discards that instance and applies the
