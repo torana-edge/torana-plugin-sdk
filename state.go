@@ -43,8 +43,13 @@ func StateGet(key string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if isPermissionDenied(res) {
-		return "", ErrStateUnavailable
+	// stateStatus, not just isPermissionDenied. A denial is only one of the
+	// errors the host can report here; checking for it alone meant any OTHER
+	// error envelope — a store that is unavailable, a key that is too large —
+	// was returned to the plugin AS THE STORED VALUE, and StateGetJSON then
+	// decoded it into the caller's struct.
+	if err := stateStatus(res); err != nil {
+		return "", err
 	}
 	return res, nil
 }
@@ -72,8 +77,8 @@ func StateKeys() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if isPermissionDenied(res) {
-		return nil, ErrStateUnavailable
+	if err := stateStatus(res); err != nil {
+		return nil, err
 	}
 	if res == "" {
 		return nil, nil
@@ -113,20 +118,58 @@ func stateStatus(res string) error {
 	if res == "" {
 		return nil
 	}
-	var envelope struct {
-		Status  string `json:"status"`
-		Message string `json:"message"`
+	// A response is an error envelope only when it really is one: a JSON OBJECT
+	// carrying a "status" field. A bare value the host returned as a legitimate
+	// result — a stored string, a number — must not be probed for error fields.
+	//
+	// One decode, one matching rule. Probing the map and then re-decoding into
+	// a struct used TWO rules: map lookup is case-sensitive, encoding/json
+	// struct matching is not, so {"Status":"error"} was an envelope to one half
+	// and data to the other. JSON is case-sensitive and the host emits
+	// lowercase, so lowercase-only is the rule, applied once.
+	//
+	// The residual ambiguity is narrow and worth stating precisely: only an
+	// object whose "status" is the STRING "error" is indistinguishable from a
+	// host error. A non-string status is data, and any other string status is
+	// success. The envelope sharing a namespace with user data is the real
+	// flaw; changing that is an ABI break.
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(res), &probe); err != nil {
+		return nil // not an object; a bare value is a legitimate result
 	}
-	if err := json.Unmarshal([]byte(res), &envelope); err != nil {
-		return nil // not an envelope; treat as success
+	rawStatus, hasStatus := probe["status"]
+	if !hasStatus {
+		return nil // an object, but not an envelope
 	}
-	if envelope.Status == "error" {
-		if envelope.Message == "permission denied" {
-			return ErrStateUnavailable
-		}
-		return fmt.Errorf("torana: %s", envelope.Message)
+
+	var status string
+	if err := json.Unmarshal(rawStatus, &status); err != nil {
+		// "status" is present but not a string, so this is NOT an envelope —
+		// the host's status is always a string. An HTTP-cache-shaped entry
+		// ({"status":200,"body":…}) is an ordinary thing for a plugin to
+		// store, and rejecting it would hand back an error instead of the
+		// caller's own data.
+		return nil
 	}
-	return nil
+	if status != "error" {
+		return nil
+	}
+
+	var message string
+	if raw, ok := probe["message"]; ok {
+		// Best effort: a non-string message is still an error, just an
+		// undescribed one, and the raw envelope below says more than a decode
+		// failure would.
+		_ = json.Unmarshal(raw, &message)
+	}
+	switch message {
+	case "permission denied":
+		return ErrStateUnavailable
+	case "":
+		return fmt.Errorf("torana: host reported an error with no message: %s", res)
+	default:
+		return fmt.Errorf("torana: %s", message)
+	}
 }
 
 func isPermissionDenied(res string) bool {

@@ -8,10 +8,22 @@ releases.
 ## Guest exports
 
 Every plugin exports `alloc(size) -> ptr` and `dealloc(ptr, size)`. Hooks use
-`(request_id: i64, ptr: i32, len: i32) -> i64`; a non-zero result packs the
+`(request_id: u64, ptr: u32, len: u32) -> u64`; a non-zero result packs the
 returned pointer in its high 32 bits and length in its low 32 bits. A zero
 result is pass-through. Hosts own input buffers; guests own output buffers
 until the host calls `dealloc`.
+
+WebAssembly itself has only `i32` and `i64`, which carry no signedness — a
+`.wat` signature will always read `i32`. What the notation above specifies is
+how those bits must be **interpreted**: as unsigned, in both the guest source
+and the host.
+
+That is not cosmetic. A pointer above 2 GiB is reachable inside a 4 GiB wasm
+memory and has its high bit set. Interpreted as signed it is negative, and
+packing it into the return value sign-extends and corrupts the high half. A
+guest written to the signed reading works right up until a plugin allocates
+enough memory, then fails in a way that looks like memory corruption rather
+than a spec misreading.
 
 Returning zero is reserved for intentional pass-through. A handler or codec
 error traps the guest call; the host discards that instance and applies the
@@ -22,6 +34,25 @@ Supported v1 hooks are `run_before_request`, `run_after_response`,
 `run_on_stream_chunk`, `run_on_http_request`, and `run_on_tick`. Their protobuf
 messages are defined in
 [`proto/torana/v1/torana.proto`](proto/torana/v1/torana.proto).
+
+| Hook | Input message | Returns |
+|---|---|---|
+| `run_before_request` | `ChatRequest` | `ChatRequest`, or 0 for pass-through |
+| `run_after_response` | **`ChatRequest`** | `ChatRequest`, or 0 for pass-through |
+| `run_on_stream_chunk` | `StreamEvent` | `StreamEventResult`, or 0 |
+| `run_on_http_request` | `HttpRequest` | `HttpResponse`, or 0 |
+| `run_on_tick` | `TickRequest` | `TickResult`, or 0 |
+
+**`run_after_response` takes a `ChatRequest`, and there is no `ChatResponse` in
+this contract.** Torana normalises a provider's reply into the same message
+shape it uses for a request: the assistant's turn arrives as `messages`, its
+tool calls as `tool_calls`, and provider metadata (latency, upstream status,
+token usage) under `torana_meta_json["_response"]`.
+
+One shape is a deliberate choice. A plugin that rewrites message content works
+identically in both directions, and the host's four provider adapters have one
+target to normalise into rather than two. Adding a distinct `ChatResponse` would
+be a v2 change and would duplicate every field.
 
 `run_on_tick` is the only hook that fires with no request in flight, so a plugin
 declaring it can act on elapsed time. It requires the `env.background_tick`

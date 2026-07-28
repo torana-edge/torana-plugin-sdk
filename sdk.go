@@ -90,7 +90,20 @@ func run_before_request(reqID uint64, ptr, size uint32) uint64 {
 
 var chatResponseHandler func(ctx context.Context, resp *pb.ChatRequest) (*pb.ChatRequest, error)
 
-// OnAfterResponse registers the handler for chat responses.
+// OnAfterResponse registers the handler for a completed, non-streaming response.
+//
+// The parameter is a pb.ChatRequest, and that is deliberate rather than a
+// mistake — there is no pb.ChatResponse in the v1 contract.
+//
+// Torana normalises a provider's reply into the SAME message shape it uses for
+// a request: the assistant's turn arrives as Messages, its tool calls as
+// ToolCalls, and provider metadata under ToranaMetaJson["_response"]. One shape
+// means a plugin that rewrites message content works identically on the way out
+// and on the way in, and the host's four provider adapters have one target
+// instead of two.
+//
+// The host marshals a pb.ChatRequest for this hook and unmarshals the reply as
+// one, so the types match end to end. Returning nil is pass-through.
 func OnAfterResponse(handler func(ctx context.Context, resp *pb.ChatRequest) (*pb.ChatRequest, error)) {
 	chatResponseHandler = handler
 }
@@ -103,7 +116,12 @@ func run_after_response(reqID uint64, ptr, size uint32) uint64 {
 	inputBytes := ReadBytes(ptr, size)
 	var resp pb.ChatRequest
 	if err := proto.Unmarshal(inputBytes, &resp); err != nil {
-		return 0
+		// Trap, do not return 0. ABI.md reserves zero for a deliberate
+		// pass-through, so reporting a codec failure that way told the host the
+		// plugin had chosen not to act: the instance was kept, failure_mode was
+		// never consulted, and a corrupt payload looked like a healthy no-op.
+		// The other three hooks and every Rust hook already trap here.
+		panic("torana sdk: decode run_after_response: " + err.Error())
 	}
 
 	out, err := chatResponseHandler(context.WithValue(context.Background(), "reqID", reqID), &resp)
@@ -163,7 +181,12 @@ func run_on_stream_chunk(reqID uint64, ptr, size uint32) uint64 {
 	inputBytes := ReadBytes(ptr, size)
 	var chunk pb.StreamEvent
 	if err := proto.Unmarshal(inputBytes, &chunk); err != nil {
-		return 0
+		// Trap, do not return 0. ABI.md reserves zero for a deliberate
+		// pass-through, so reporting a codec failure that way told the host the
+		// plugin had chosen not to act: the instance was kept, failure_mode was
+		// never consulted, and a corrupt payload looked like a healthy no-op.
+		// The other three hooks and every Rust hook already trap here.
+		panic("torana sdk: decode run_on_stream_chunk: " + err.Error())
 	}
 
 	out, err := streamChunkHandler(context.WithValue(context.Background(), "reqID", reqID), &chunk)
@@ -332,7 +355,13 @@ func hostCall(cmdPtr uint32, cmdLen uint32, argsPtr uint32, argsLen uint32) uint
 // permission is missing. Callers should tolerate absent/zero fields.
 func PluginConfig() string {
 	res, err := HostCall("env.plugin_config", "")
-	if err != nil || res == "" {
+	// Without the isPermissionDenied check this returned the host's refusal
+	// envelope AS the config blob, so a plugin missing env.plugin_config parsed
+	// {"status":"error","message":"permission denied"} and saw a config with no
+	// recognised fields — silently running on defaults instead of reporting a
+	// missing grant. Every other host-call wrapper checks it; the doc comment
+	// above already promised this behaviour.
+	if err != nil || res == "" || isPermissionDenied(res) {
 		return "{}"
 	}
 	return res
