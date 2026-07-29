@@ -494,6 +494,84 @@ func TestContentBlockKindIsTyped(t *testing.T) {
 	}
 }
 
+// The oneof stops a text block carrying tool metadata, but not a tool-call block
+// carrying EMPTY metadata. A block that cannot say which tool it opens cannot be
+// assembled: its deltas have nothing to attach to and its result has nothing to
+// correlate against.
+func TestBlockKindsRequireTheirMetadata(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		start *v2.ContentBlockStart
+		why   string
+	}{
+		{
+			"tool call with no metadata at all",
+			&v2.ContentBlockStart{Block: &v2.ContentBlockStart_ToolCall{ToolCall: &v2.ToolCallRef{}}},
+			"a tool call with neither id nor name is not a tool call",
+		},
+		{
+			"tool call with no id",
+			&v2.ContentBlockStart{Block: &v2.ContentBlockStart_ToolCall{
+				ToolCall: &v2.ToolCallRef{Name: "read"}}},
+			"without an id the result cannot be correlated back to the call",
+		},
+		{
+			"tool call with no name",
+			&v2.ContentBlockStart{Block: &v2.ContentBlockStart_ToolCall{
+				ToolCall: &v2.ToolCallRef{Id: "c1"}}},
+			"without a name nothing knows which tool was invoked",
+		},
+		{
+			"tool call wrapper present but nil",
+			&v2.ContentBlockStart{Block: &v2.ContentBlockStart_ToolCall{}},
+			"the variant is set but carries nothing",
+		},
+		{
+			"provider block with no kind",
+			&v2.ContentBlockStart{Block: &v2.ContentBlockStart_Provider{Provider: &v2.ProviderBlock{}}},
+			"the kind is the only thing that makes a provider block actionable",
+		},
+		{
+			"provider wrapper present but nil",
+			&v2.ContentBlockStart{Block: &v2.ContentBlockStart_Provider{}},
+			"the variant is set but carries nothing",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.start.Validate(); err == nil {
+				t.Errorf("accepted: %s", tc.why)
+			}
+			// And it must be refused when it arrives inside a returned event,
+			// not only when validated directly.
+			ev := &v2.StreamEvent{Event: &v2.StreamEvent_ContentBlockStart{ContentBlockStart: tc.start}}
+			if err := ev.Validate(); err == nil {
+				t.Errorf("accepted inside a stream event: %s", tc.why)
+			}
+			res := &v2.HookResult{
+				Disposition: v2.Disposition_DISPOSITION_REPLACE,
+				Payload: &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{
+					Events: []*v2.StreamEvent{ev},
+				}},
+			}
+			if err := res.ValidateFor(v2.Hook_HOOK_ON_STREAM_CHUNK); err == nil {
+				t.Errorf("accepted inside a REPLACE result: %s", tc.why)
+			}
+		})
+	}
+
+	// Text and thinking blocks need nothing beyond their variant.
+	for _, ok := range []*v2.ContentBlockStart{
+		{Block: &v2.ContentBlockStart_Text{Text: &v2.TextBlock{}}},
+		{Block: &v2.ContentBlockStart_Thinking{Thinking: &v2.ThinkingBlock{}}},
+		{Block: &v2.ContentBlockStart_ToolCall{ToolCall: &v2.ToolCallRef{Id: "c1", Name: "read"}}},
+		{Block: &v2.ContentBlockStart_Provider{Provider: &v2.ProviderBlock{Kind: "redacted"}}},
+	} {
+		if err := ok.Validate(); err != nil {
+			t.Errorf("well-formed block rejected: %v", err)
+		}
+	}
+}
+
 // Tool arguments and tool schemas stay verbatim bytes. Decoding and re-encoding
 // them reorders object keys, which changes the cacheable prompt prefix and
 // costs the operator a cache hit on every request a plugin touches.

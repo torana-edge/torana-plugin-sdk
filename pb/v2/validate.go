@@ -31,9 +31,48 @@ func (x *StreamEvent) Validate() error {
 		if b.ContentBlockStart == nil {
 			return fmt.Errorf("content block start is nil")
 		}
-		if b.ContentBlockStart.Block == nil {
-			return fmt.Errorf("content block start at index %d names no block kind",
-				b.ContentBlockStart.Index)
+		if err := b.ContentBlockStart.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Validate reports whether a content block start names a kind, and carries
+// whatever that kind needs to be assembled.
+//
+// The oneof makes "text carrying tool metadata" unrepresentable, but it does
+// not stop a tool-call block carrying EMPTY metadata. A block that cannot say
+// which tool it opens cannot be assembled — its deltas have nothing to attach
+// to and its results have nothing to correlate against — so it is refused here
+// rather than surfacing later as a tool call with no name.
+func (x *ContentBlockStart) Validate() error {
+	if x == nil {
+		return fmt.Errorf("content block start is nil")
+	}
+	switch b := x.Block.(type) {
+	case nil:
+		return fmt.Errorf("content block start at index %d names no block kind", x.Index)
+
+	case *ContentBlockStart_ToolCall:
+		if b.ToolCall == nil {
+			return fmt.Errorf("tool-call block at index %d carries no tool call", x.Index)
+		}
+		if b.ToolCall.Id == "" {
+			return fmt.Errorf("tool-call block at index %d has no id, so its result "+
+				"cannot be correlated back to it", x.Index)
+		}
+		if b.ToolCall.Name == "" {
+			return fmt.Errorf("tool-call block at index %d has no tool name", x.Index)
+		}
+
+	case *ContentBlockStart_Provider:
+		if b.Provider == nil {
+			return fmt.Errorf("provider block at index %d carries no block", x.Index)
+		}
+		if b.Provider.Kind == "" {
+			return fmt.Errorf("provider block at index %d names no kind, which is the "+
+				"only thing that makes it actionable", x.Index)
 		}
 	}
 	return nil
