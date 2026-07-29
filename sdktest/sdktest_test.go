@@ -5,8 +5,10 @@ package sdktest_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	sdk "github.com/torana-edge/torana-plugin-sdk"
@@ -16,14 +18,13 @@ import (
 
 // reset clears registrations between tests. A real plugin registers once in
 // init(); these tests register per-case, so they have to undo it.
+//
+// It used to set each handler to nil by calling OnBeforeRequest(nil) and
+// friends — which are themselves registrations, and now panic on the second
+// call. Clearing the record is the only correct way to undo a registration.
 func reset(t *testing.T) {
-	t.Cleanup(func() {
-		sdk.OnBeforeRequest(nil)
-		sdk.OnAfterResponse(nil)
-		sdk.OnStreamChunk(nil)
-		sdk.OnHTTPRequest(nil)
-		sdk.OnTick(nil)
-	})
+	sdktest.Reset()
+	t.Cleanup(sdktest.Reset)
 }
 
 // The load-bearing test: the handler must actually run. Before this package
@@ -322,9 +323,17 @@ func TestParallelHarnessesDoNotCrossContaminate(t *testing.T) {
 		return req, nil
 	})
 
+	// Goroutines rather than t.Parallel(): parallel subtests outlive the parent
+	// and interleave with LATER tests, and hook registration is process-global,
+	// so a sibling clearing it mid-flight would break this for reasons that
+	// have nothing to do with harness isolation. Concurrency inside one test
+	// proves the same property without leaking across test boundaries.
+	var wg sync.WaitGroup
+	errs := make(chan string, 64)
 	for _, name := range []string{"A", "B", "C", "D"} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+		wg.Add(1)
+		go func(name string) {
+			defer wg.Done()
 			want := `{"id":"` + name + `"}`
 			h := sdktest.New(t).SetConfig(want)
 
@@ -333,27 +342,29 @@ func TestParallelHarnessesDoNotCrossContaminate(t *testing.T) {
 			for i := 0; i < 100; i++ {
 				res := h.BeforeRequest(&pb.ChatRequest{})
 				if res.Request.Model != want {
-					t.Fatalf("iteration %d saw config %q, want %q — another harness leaked in",
-						i, res.Request.Model, want)
+					errs <- fmt.Sprintf("%s iteration %d saw config %q — another harness leaked in",
+						name, i, res.Request.Model)
+					return
 				}
 			}
-
-			// Captured state must belong to this harness alone.
-			logs := h.Logs()
-			if len(logs) != 100 {
-				t.Fatalf("captured %d logs, want 100", len(logs))
-			}
-			for _, l := range logs {
+			for _, l := range h.Logs() {
 				if l.Message != want {
-					t.Fatalf("captured a log from another harness: %q", l.Message)
+					errs <- fmt.Sprintf("%s captured a log from another harness: %q", name, l.Message)
+					return
 				}
 			}
 			for _, c := range h.Calls() {
 				if c.Command == "env.cache_get" && c.Args != want {
-					t.Fatalf("captured a host call from another harness: %+v", c)
+					errs <- fmt.Sprintf("%s captured a host call from another harness: %+v", name, c)
+					return
 				}
 			}
-		})
+		}(name)
+	}
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		t.Error(e)
 	}
 }
 
@@ -377,6 +388,7 @@ func TestCheckManifestCatchesBothDirections(t *testing.T) {
 	})
 
 	t.Run("registered but not declared", func(t *testing.T) {
+		reset(t)
 		sdk.OnBeforeRequest(func(ctx context.Context, req *pb.ChatRequest) (*pb.ChatRequest, error) {
 			return nil, nil
 		})
@@ -389,6 +401,7 @@ func TestCheckManifestCatchesBothDirections(t *testing.T) {
 	})
 
 	t.Run("matching", func(t *testing.T) {
+		reset(t)
 		sdk.OnBeforeRequest(func(ctx context.Context, req *pb.ChatRequest) (*pb.ChatRequest, error) {
 			return nil, nil
 		})

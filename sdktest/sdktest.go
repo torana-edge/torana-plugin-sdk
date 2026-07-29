@@ -92,6 +92,16 @@ type Harness struct {
 	StateConfigured bool
 }
 
+// Reset clears every registered hook handler.
+//
+// Registering a hook twice panics, deliberately: a plugin registers once at
+// startup, and a silent overwrite loses a handler with no error anywhere. A
+// test suite registers repeatedly, so it has to undo that between cases.
+//
+// New calls this automatically on cleanup, so most tests never need it. Call it
+// directly only when registering more than once inside a single test.
+func Reset() { sdk.ResetRegistrations() }
+
 // New builds a fake host for this test. Registrations made by the plugin's
 // init() are already in place by the time a test runs, so no wiring is needed.
 //
@@ -111,6 +121,11 @@ func New(t testing.TB) *Harness {
 		now:             func() int64 { return time.Now().UnixMilli() },
 		StateConfigured: true,
 	}
+	// Registrations are per-test: a hook may be registered once, and the panic
+	// that enforces that would otherwise make the second test in a file fail
+	// for a reason that has nothing to do with what it asserts.
+	t.Cleanup(sdk.ResetRegistrations)
+
 	h.host = &sdk.TestHost{
 		HostCall: h.hostCall,
 		Log: func(msg string, level int32) {

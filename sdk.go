@@ -53,6 +53,7 @@ var chatRequestHandler func(ctx context.Context, req *pb.ChatRequest) (*pb.ChatR
 
 // OnBeforeRequest registers the handler for chat requests.
 func OnBeforeRequest(handler func(ctx context.Context, req *pb.ChatRequest) (*pb.ChatRequest, error)) {
+	claimHook(HookBeforeRequest)
 	chatRequestHandler = handler
 }
 
@@ -105,6 +106,7 @@ var chatResponseHandler func(ctx context.Context, resp *pb.ChatRequest) (*pb.Cha
 // The host marshals a pb.ChatRequest for this hook and unmarshals the reply as
 // one, so the types match end to end. Returning nil is pass-through.
 func OnAfterResponse(handler func(ctx context.Context, resp *pb.ChatRequest) (*pb.ChatRequest, error)) {
+	claimHook(HookAfterResponse)
 	chatResponseHandler = handler
 }
 
@@ -152,6 +154,7 @@ var streamChunkHandler func(ctx context.Context, chunk *pb.StreamEvent) (*pb.Str
 // to drop it, Replace(ev) to substitute it, or Emit(evs...) to fan out
 // multiple events in its place.
 func OnStreamChunk(handler func(ctx context.Context, chunk *pb.StreamEvent) (*pb.StreamEventResult, error)) {
+	claimHook(HookStreamChunk)
 	streamChunkHandler = handler
 }
 
@@ -214,6 +217,7 @@ var httpRequestHandler func(ctx context.Context, req *pb.HttpRequest) (*pb.HttpR
 // the env.serve_http permission in its manifest. The returned *pb.HttpResponse
 // MUST have Handled=true for the host to deliver the response to the caller.
 func OnHTTPRequest(handler func(ctx context.Context, req *pb.HttpRequest) (*pb.HttpResponse, error)) {
+	claimHook(HookHTTPRequest)
 	httpRequestHandler = handler
 }
 
@@ -263,6 +267,7 @@ var tickHandler func(ctx context.Context, req *pb.TickRequest) (*pb.TickResult, 
 // an all-defaults message is indistinguishable from doing nothing. Returning nil
 // is the correct way to say "nothing to do this tick".
 func OnTick(handler func(ctx context.Context, req *pb.TickRequest) (*pb.TickResult, error)) {
+	claimHook(HookTick)
 	tickHandler = handler
 }
 

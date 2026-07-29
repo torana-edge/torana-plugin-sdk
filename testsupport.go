@@ -40,6 +40,13 @@ var (
 
 func testHostOf() *TestHost { return testHostPtr.Load() }
 
+// ResetRegistrations clears every registered hook.
+//
+// Registering a hook twice panics, which is right for a plugin — it registers
+// once at startup — but makes a test suite unusable without this: one test
+// registering a handler would poison every later one.
+func ResetRegistrations() { resetRegistrations() }
+
 // WithTestHost installs h for the duration of fn and restores the previous
 // host afterwards, serializing against any other dispatch.
 //
