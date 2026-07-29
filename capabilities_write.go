@@ -20,12 +20,25 @@ package plugin_sdk
 // definitions. Declaring the narrow thing is only possible if the vocabulary
 // offers it.
 //
-// Reads are deliberately NOT gated. An enabled plugin sees the whole request.
-// The sandbox already stops it telling anyone: no filesystem, no sockets, and
-// no egress without env.host_call.torana_send_request. Gating reads would buy
-// disclosure rather than containment, at the cost of doubling this vocabulary.
+// Reads are NOT gated in this cut, and the reason is scope rather than safety.
+//
+// It would be wrong to claim a plugin cannot disclose what it reads. Several
+// granted capabilities carry data out: env.emit_metric puts arbitrary strings in
+// metric labels, env.log writes to the proxy's output,
+// env.host_call.torana_offload_completion sends content to a model by design,
+// and env.state_set and env.cache_set persist it. A plugin that reads and a
+// plugin that tells are not cleanly separated today.
+//
+// Read grants are deferred because they double this vocabulary, require
+// redaction semantics for what an ungranted plugin sees instead, and — per the
+// pipeline benchmarks — the projection they need costs real work per plugin.
+// Write enforcement closes the escalation that exists; read enforcement is a
+// disclosure control worth doing on its own terms, later, with that cost
+// measured rather than assumed.
 var WritePermissions = []string{
 	"ir.messages.write.assistant",
+	"ir.messages.write.developer",
+	"ir.messages.write.other",
 	"ir.messages.write.system",
 	"ir.messages.write.tool",
 	"ir.messages.write.user",
@@ -47,6 +60,25 @@ const (
 	SectionMessagesSystem    WriteSection = "ir.messages.write.system"
 	SectionMessagesTool      WriteSection = "ir.messages.write.tool"
 
+	// SectionMessagesDeveloper covers OpenAI's "developer" role, which is its
+	// rename of "system". Format adapters pass roles through verbatim — a
+	// transparent proxy must not rewrite "developer" to "system" on the way in,
+	// or it changes the request on the way back out — so the role reaches
+	// plugins as itself and needs a grant of its own.
+	SectionMessagesDeveloper WriteSection = "ir.messages.write.developer"
+
+	// SectionMessagesOther covers any role Torana does not model.
+	//
+	// Adapters cast provider role strings straight into the IR, so a role added
+	// by any provider tomorrow arrives without code changes. Without this, such
+	// a message would be permanently unmutatable: no grant could cover it, and a
+	// plugin that legitimately edited it would have its whole output rejected.
+	//
+	// It is deliberately coarse. A plugin holding it may write any unmodelled
+	// role, which is worse than naming them — so a role that becomes common
+	// should graduate to its own section rather than living here forever.
+	SectionMessagesOther WriteSection = "ir.messages.write.other"
+
 	// SectionTools covers the tool definitions offered to the model. Adding one
 	// is offering the model a capability the caller did not.
 	SectionTools WriteSection = "ir.tools.write"
@@ -60,11 +92,13 @@ const (
 )
 
 // MessageWriteSection returns the grant governing writes to a message of the
-// given role.
+// given role. Every role maps to something: unmodelled roles fall to
+// SectionMessagesOther, which still requires a grant.
 //
-// An unrecognised role maps to no section, and the caller must treat that as
-// ungrantable rather than as unrestricted — a role Torana does not model is
-// exactly the case where guessing is wrong.
+// The second return reports whether the role is one Torana models by name. It
+// is informational — a caller must not treat false as "unrestricted", which is
+// the reading that would turn every new provider role into an unguarded write
+// path.
 func MessageWriteSection(role string) (WriteSection, bool) {
 	switch role {
 	case "user":
@@ -75,8 +109,10 @@ func MessageWriteSection(role string) (WriteSection, bool) {
 		return SectionMessagesSystem, true
 	case "tool":
 		return SectionMessagesTool, true
+	case "developer":
+		return SectionMessagesDeveloper, true
 	}
-	return "", false
+	return SectionMessagesOther, false
 }
 
 // IsWritePermission reports whether name is a write grant.

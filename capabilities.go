@@ -28,9 +28,16 @@ var Hooks = []string{
 	"run_on_tick",
 }
 
-// Permissions a v1 plugin may request. Requesting one is never a grant: an
-// operator approves capabilities against an exact bundle digest.
-var Permissions = []string{
+// Permissions is every capability a plugin may request, including the
+// ir.*.write grants in capabilities_write.go. Requesting one is never a grant:
+// an operator approves capabilities against an exact bundle digest.
+//
+// This is ONE list on purpose. Hosts build their allowlist from it, and an
+// earlier draft kept the write grants in a separate list with a union helper —
+// which meant a plugin could pass `torana plugin lint` (checking IsPermission)
+// and then be refused at load (checking the env-only list). Two lists that must
+// agree will eventually not.
+var Permissions = append([]string{
 	"env.background_tick",
 	"env.block_request",
 	"env.cache_get",
@@ -59,29 +66,13 @@ var Permissions = []string{
 	"env.state_get",
 	"env.state_keys",
 	"env.state_set",
-}
-
-// AllPermissions is every capability a plugin may request: the env.* vocabulary
-// above plus the ir.*.write grants in capabilities_write.go.
-//
-// Hosts validate manifests against this. Keeping the two lists separate keeps
-// their doc comments honest — they answer different questions — while giving
-// callers one list to check.
-func AllPermissions() []string {
-	out := make([]string, 0, len(Permissions)+len(WritePermissions))
-	out = append(out, Permissions...)
-	out = append(out, WritePermissions...)
-	return out
-}
+}, WritePermissions...)
 
 // IsHook reports whether name is a v1 hook.
 func IsHook(name string) bool { return contains(Hooks, name) }
 
-// IsPermission reports whether name is a capability a plugin may request,
-// including the ir.*.write grants.
-func IsPermission(name string) bool {
-	return contains(Permissions, name) || contains(WritePermissions, name)
-}
+// IsPermission reports whether name is a capability a plugin may request.
+func IsPermission(name string) bool { return contains(Permissions, name) }
 
 func contains(list []string, name string) bool {
 	for _, v := range list {

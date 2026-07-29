@@ -10,7 +10,9 @@ import (
 // grant for a role must map back. A role with no grant is a role a plugin can
 // rewrite with no capability — which is the hole this vocabulary closes.
 func TestEveryMessageRoleHasAWriteGrant(t *testing.T) {
-	roles := []string{"user", "assistant", "system", "tool"}
+	// developer is OpenAI's rename of system, and adapters pass roles through
+	// verbatim rather than normalising, so it reaches plugins as itself.
+	roles := []string{"user", "assistant", "system", "tool", "developer"}
 
 	granted := map[WriteSection]bool{}
 	for _, role := range roles {
@@ -24,8 +26,12 @@ func TestEveryMessageRoleHasAWriteGrant(t *testing.T) {
 		granted[section] = true
 	}
 
-	// And each message-role grant is reachable from some role, so the
-	// vocabulary carries nothing an author cannot actually use.
+	// Every message-role grant must be reachable, so the vocabulary carries
+	// nothing an author cannot actually use. The catch-all is reachable only
+	// from roles Torana does not model, so it is checked that way.
+	if s, _ := MessageWriteSection("a_role_torana_does_not_model"); s == SectionMessagesOther {
+		granted[SectionMessagesOther] = true
+	}
 	for _, p := range WritePermissions {
 		if !strings.HasPrefix(p, "ir.messages.write.") {
 			continue
@@ -36,48 +42,78 @@ func TestEveryMessageRoleHasAWriteGrant(t *testing.T) {
 	}
 }
 
-// An unmodelled role must not silently become unrestricted.
-func TestUnknownRoleHasNoWriteGrant(t *testing.T) {
-	for _, role := range []string{"", "developer", "USER", "tool_result"} {
-		if _, ok := MessageWriteSection(role); ok {
-			t.Errorf("role %q resolved to a grant; an unmodelled role must be treated as "+
-				"ungrantable rather than unrestricted", role)
+// A role Torana does not model must still be writable BY GRANT, and must never
+// be unrestricted.
+//
+// Format adapters cast provider role strings straight into the IR, so a role
+// added by any provider tomorrow arrives with no code change. Mapping it to
+// nothing would make such a message permanently unmutatable — a plugin that
+// legitimately edited it would have its entire output rejected — and mapping it
+// to "allowed" would make it an unguarded write path.
+func TestUnmodelledRoleFallsToTheCatchAllGrant(t *testing.T) {
+	for _, role := range []string{"", "USER", "tool_result", "some_future_role"} {
+		section, modelled := MessageWriteSection(role)
+		if modelled {
+			t.Errorf("role %q reported as modelled by name", role)
+		}
+		if section != SectionMessagesOther {
+			t.Errorf("role %q mapped to %q, want the catch-all %q",
+				role, section, SectionMessagesOther)
+		}
+		if !IsWritePermission(string(section)) {
+			t.Errorf("the catch-all %q is not a requestable grant, so nothing could ever "+
+				"write an unmodelled role", section)
 		}
 	}
 }
 
-// A host validates manifests against IsPermission, so a write grant it does not
-// recognise makes every plugin using one unloadable.
-func TestWriteGrantsAreRecognisedPermissions(t *testing.T) {
-	for _, p := range WritePermissions {
-		if !IsPermission(p) {
-			t.Errorf("%q is a write grant but IsPermission rejects it", p)
+// Roles Torana models by name must NOT fall to the catch-all, or the narrow
+// grants would be pointless: one plugin holding ir.messages.write.other could
+// rewrite user prompts.
+func TestModelledRolesDoNotFallToTheCatchAll(t *testing.T) {
+	for _, role := range []string{"user", "assistant", "system", "tool", "developer"} {
+		section, modelled := MessageWriteSection(role)
+		if !modelled {
+			t.Errorf("role %q is not reported as modelled", role)
+		}
+		if section == SectionMessagesOther {
+			t.Errorf("role %q fell to the catch-all", role)
 		}
 	}
+}
+
+// Permissions must CONTAIN the write grants, not sit beside them.
+//
+// Hosts build their allowlist from Permissions, while `torana plugin lint`
+// checks IsPermission. An earlier draft kept the write grants in a separate
+// list with a union helper, so a plugin passed lint and was then refused at
+// load — build succeeded, install succeeded, the plugin never ran. Two lists
+// that must agree will eventually not.
+func TestPermissionsContainsTheWriteGrants(t *testing.T) {
+	in := map[string]bool{}
 	for _, p := range Permissions {
-		if IsWritePermission(p) {
-			t.Errorf("%q appears in both lists", p)
+		in[p] = true
+	}
+	for _, w := range WritePermissions {
+		if !in[w] {
+			t.Errorf("%q is a write grant but is absent from Permissions, which is what "+
+				"hosts build their allowlist from — a plugin requesting it would pass "+
+				"lint and be refused at load", w)
+		}
+		if !IsPermission(w) {
+			t.Errorf("%q is a write grant but IsPermission rejects it", w)
 		}
 	}
 }
 
-// AllPermissions must be exactly the union, with nothing lost or duplicated.
-func TestAllPermissionsIsTheUnion(t *testing.T) {
-	all := AllPermissions()
-	if len(all) != len(Permissions)+len(WritePermissions) {
-		t.Fatalf("AllPermissions has %d entries, want %d", len(all), len(Permissions)+len(WritePermissions))
-	}
+// No duplicates, or an operator sees the same capability twice at approval.
+func TestPermissionsHasNoDuplicates(t *testing.T) {
 	seen := map[string]bool{}
-	for _, p := range all {
+	for _, p := range Permissions {
 		if seen[p] {
-			t.Errorf("%q appears twice", p)
+			t.Errorf("%q appears twice in Permissions", p)
 		}
 		seen[p] = true
-	}
-	for _, p := range append(append([]string{}, Permissions...), WritePermissions...) {
-		if !seen[p] {
-			t.Errorf("%q is missing from AllPermissions", p)
-		}
 	}
 }
 
