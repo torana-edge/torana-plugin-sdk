@@ -14,6 +14,31 @@ import "fmt"
 // interpreting it, because every alternative is a guess about what a
 // misbehaving plugin meant.
 
+// Validate reports whether a stream event carries an actual event.
+//
+// A StreamEvent with no oneof variant set is a well-formed protobuf message
+// that says nothing. Nothing downstream can act on it, and a list of them is
+// indistinguishable in effect from an empty list — so it is a third spelling of
+// SUPPRESS, and refused.
+func (x *StreamEvent) Validate() error {
+	if x == nil {
+		return fmt.Errorf("stream event is nil")
+	}
+	if x.Event == nil {
+		return fmt.Errorf("stream event carries no event")
+	}
+	if b, ok := x.Event.(*StreamEvent_ContentBlockStart); ok {
+		if b.ContentBlockStart == nil {
+			return fmt.Errorf("content block start is nil")
+		}
+		if b.ContentBlockStart.Block == nil {
+			return fmt.Errorf("content block start at index %d names no block kind",
+				b.ContentBlockStart.Index)
+		}
+	}
+	return nil
+}
+
 // HookOf reports which hook an input belongs to, derived from its payload.
 // Returns HOOK_UNSPECIFIED when no payload is set.
 func (x *HookInput) HookOf() Hook {
@@ -139,6 +164,13 @@ func (x *HookResult) ValidateFor(hook Hook) error {
 			if ev.StreamEvents == nil || len(ev.StreamEvents.Events) == 0 {
 				return fmt.Errorf("hook result says REPLACE with no events, which emits " +
 					"nothing; say SUPPRESS instead")
+			}
+			// A list of empty or nil events emits nothing either. Checking the
+			// length alone left two more spellings of SUPPRESS.
+			for i, e := range ev.StreamEvents.Events {
+				if err := e.Validate(); err != nil {
+					return fmt.Errorf("hook result REPLACE event %d: %w", i, err)
+				}
 			}
 		}
 		return nil

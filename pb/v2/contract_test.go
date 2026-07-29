@@ -248,6 +248,43 @@ func TestMalformedResultsAreRejected(t *testing.T) {
 			"same, with the wrapper present but empty",
 		},
 		{
+			"REPLACE with a nil event", v2.Hook_HOOK_ON_STREAM_CHUNK,
+			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
+				Payload: &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{
+					Events: []*v2.StreamEvent{nil},
+				}}},
+			"a list of nothing emits nothing — a third spelling of SUPPRESS",
+		},
+		{
+			"REPLACE with an empty event", v2.Hook_HOOK_ON_STREAM_CHUNK,
+			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
+				Payload: &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{
+					Events: []*v2.StreamEvent{{}},
+				}}},
+			"an event with no variant set says nothing and emits nothing",
+		},
+		{
+			"REPLACE with one good and one empty event", v2.Hook_HOOK_ON_STREAM_CHUNK,
+			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
+				Payload: &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{
+					Events: []*v2.StreamEvent{
+						{Event: &v2.StreamEvent_TextDelta{TextDelta: "x"}},
+						{},
+					},
+				}}},
+			"every event is validated, not just the first",
+		},
+		{
+			"REPLACE with a kindless content block", v2.Hook_HOOK_ON_STREAM_CHUNK,
+			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
+				Payload: &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{
+					Events: []*v2.StreamEvent{{Event: &v2.StreamEvent_ContentBlockStart{
+						ContentBlockStart: &v2.ContentBlockStart{Index: 0},
+					}}},
+				}}},
+			"a block that names no kind cannot be assembled",
+		},
+		{
 			"nil result", v2.Hook_HOOK_BEFORE_REQUEST, nil,
 			"a nil result must not read as a valid answer",
 		},
@@ -275,10 +312,19 @@ func TestWellFormedResultsAreAccepted(t *testing.T) {
 				Payload: &v2.HookResult_ChatRequest{ChatRequest: &v2.ChatRequest{Model: "m"}}}},
 		{"suppress a stream event", v2.Hook_HOOK_ON_STREAM_CHUNK,
 			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_SUPPRESS}},
+		// The fan-out a stream plugin actually performs: emit the assembled
+		// tool-call arguments, then close the block.
 		{"fan out stream events", v2.Hook_HOOK_ON_STREAM_CHUNK,
 			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
 				Payload: &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{
-					Events: []*v2.StreamEvent{{}, {}},
+					Events: []*v2.StreamEvent{
+						{Event: &v2.StreamEvent_ToolCallDelta{ToolCallDelta: &v2.ToolCallDelta{
+							Index: 0, ArgumentsDelta: `{"path":"a.go"}`,
+						}}},
+						{Event: &v2.StreamEvent_ContentBlockStop{
+							ContentBlockStop: &v2.ContentBlockStop{Index: 0},
+						}},
+					},
 				}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -398,6 +444,53 @@ func TestObservationalDispatchIsMarked(t *testing.T) {
 	}
 	if stream.HookOf() != v2.Hook_HOOK_ON_STREAM_CHUNK || !stream.Mutable {
 		t.Fatal("stream chunks are mutable: a plugin replaces, suppresses and fans out events")
+	}
+}
+
+// A block's kind is a oneof, so contradictions like "tool_call with no
+// metadata" or "text carrying tool metadata" cannot be written down. An earlier
+// draft used a kind string beside an optional tool_call field, which allowed
+// both.
+func TestContentBlockKindIsTyped(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		start *v2.ContentBlockStart
+	}{
+		{"text", &v2.ContentBlockStart{Index: 0, Block: &v2.ContentBlockStart_Text{Text: &v2.TextBlock{}}}},
+		{"thinking", &v2.ContentBlockStart{Index: 1, Block: &v2.ContentBlockStart_Thinking{Thinking: &v2.ThinkingBlock{}}}},
+		{"tool_call", &v2.ContentBlockStart{Index: 2, Block: &v2.ContentBlockStart_ToolCall{
+			ToolCall: &v2.ToolCallRef{Id: "c1", Name: "read"}}}},
+		{"provider", &v2.ContentBlockStart{Index: 3, Block: &v2.ContentBlockStart_Provider{
+			Provider: &v2.ProviderBlock{Kind: "redacted"}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// An empty submessage in a oneof must still survive the round trip,
+			// or "text" would be indistinguishable from "no kind set".
+			raw, err := proto.Marshal(&v2.StreamEvent{
+				Event: &v2.StreamEvent_ContentBlockStart{ContentBlockStart: tc.start},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got v2.StreamEvent
+			if err := proto.Unmarshal(raw, &got); err != nil {
+				t.Fatal(err)
+			}
+			block := got.GetContentBlockStart()
+			if block == nil || block.Block == nil {
+				t.Fatalf("block kind lost across the wire: %+v", &got)
+			}
+			if err := got.Validate(); err != nil {
+				t.Fatalf("well-formed block rejected: %v", err)
+			}
+		})
+	}
+
+	// Only a tool-call block can carry tool metadata; there is no way to attach
+	// it to a text block, which is the point.
+	text := &v2.ContentBlockStart{Block: &v2.ContentBlockStart_Text{Text: &v2.TextBlock{}}}
+	if text.GetToolCall() != nil {
+		t.Fatal("a text block must not be able to carry tool metadata")
 	}
 }
 

@@ -178,20 +178,39 @@ message MessageStop {
   string finish_reason = 1;
 }
 
-// ContentBlockStart opens a text, thinking or tool-call block. Deltas that
-// follow belong to it until the matching stop.
+// A block carrying assistant text. Empty today; a message rather than a bare
+// enum so it can gain fields without changing the oneof.
+message TextBlock {}
+
+// A block carrying extended thinking / reasoning text.
+message ThinkingBlock {}
+
+// A block a provider emits that Torana does not model. The kind is passed
+// through verbatim so a plugin written for that provider can still act on it.
+message ProviderBlock {
+  string kind = 1;
+}
+
+// ContentBlockStart opens a block. Deltas that follow belong to it until the
+// matching stop.
 //
 // This is the ONLY block boundary. v1 had ToolCallStart/ToolCallEnd alongside
 // nothing for text or thinking, so a plugin needed one mechanism for tool calls
-// and inference for everything else. Folding tool calls in as a kind means an
-// assembler handles every block the same way.
+// and inference for everything else. Folding every block in here means an
+// assembler handles them all the same way.
+//
+// The kind is a oneof rather than a string with optional metadata beside it.
+// A string would allow "tool_call" with no tool metadata, and "text" carrying
+// some — contradictions a reader would have to know were impossible. A oneof
+// makes them unrepresentable.
 message ContentBlockStart {
   int32 index = 1;
-  // "text", "thinking", "tool_call", or a provider-specific name passed
-  // through verbatim.
-  string kind = 2;
-  // Set when kind is "tool_call"; nil otherwise.
-  ToolCallRef tool_call = 3;
+  oneof block {
+    TextBlock text = 2;
+    ThinkingBlock thinking = 3;
+    ToolCallRef tool_call = 4;
+    ProviderBlock provider = 5;
+  }
 }
 
 message ContentBlockStop {
@@ -203,10 +222,10 @@ message ContentBlockStop {
 // The canonical sequence, which adapters produce and plugins may rely on:
 //
 //   MessageStart{role, id, model}
-//     ContentBlockStart{index, kind}          kind "text" | "thinking"
+//     ContentBlockStart{index, text{} | thinking{}}
 //       TextDelta / ThinkingDelta ...
 //     ContentBlockStop{index}
-//     ContentBlockStart{index, "tool_call", ToolCallRef{id, name}}
+//     ContentBlockStart{index, tool_call{id, name}}
 //       ToolCallDelta{index, arguments_delta} ...
 //     ContentBlockStop{index}
 //   Usage
