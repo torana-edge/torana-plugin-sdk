@@ -157,6 +157,38 @@ message StreamError {
   string message = 2;
 }
 
+// Structural boundaries in a streamed response.
+//
+// v1 emitted deltas and tool-call boundaries and nothing else, so a plugin that
+// needed to know where a message or a content block began had to infer it from
+// the delta sequence. Both stream plugins in the official set reimplemented that
+// inference, ~60 lines each, and it is the single most copy-pasted thing a
+// stream plugin does.
+message MessageStart {
+  // "assistant" for every provider Torana currently speaks, but carried rather
+  // than assumed.
+  string role = 1;
+  string id = 2;
+  string model = 3;
+}
+
+message MessageStop {
+  string finish_reason = 1;
+}
+
+// ContentBlockStart opens a text, thinking or tool-call block. Deltas that
+// follow belong to it until the matching stop.
+message ContentBlockStart {
+  int32 index = 1;
+  // "text", "thinking", "tool_call", or a provider-specific name passed
+  // through verbatim.
+  string kind = 2;
+}
+
+message ContentBlockStop {
+  int32 index = 1;
+}
+
 message StreamEvent {
   oneof event {
     string text_delta = 1;
@@ -170,6 +202,10 @@ message StreamEvent {
     // Opaque provider signature paired with the surrounding block (Gemini
     // thoughtSignature on a standalone text/thought part).
     string signature_delta = 9;
+    MessageStart message_start = 10;
+    MessageStop message_stop = 11;
+    ContentBlockStart content_block_start = 12;
+    ContentBlockStop content_block_stop = 13;
   }
 }
 
@@ -248,13 +284,16 @@ message TickOutcome {
 // Hook envelopes
 // ---------------------------------------------------------------------------
 
-// Hook names the hook a payload belongs to.
+// Hook names a hook. It is NOT carried on the wire: the payload oneof is the
+// sole discriminator, so a frame cannot claim one hook while carrying another's
+// payload. This type exists for host and SDK code to name hooks in signatures
+// and errors.
 //
-// v1 handed each hook a bare message. A payload delivered to the wrong hook
-// therefore decoded as an EMPTY message of the expected type — protobuf treats
-// unknown fields as unknown, not as an error — and every plugin read that as a
-// legitimate empty request. Naming the hook on the wire makes the mismatch an
-// error instead of a silent no-op.
+// An earlier draft put a hook field alongside the payload. That made
+// contradictory frames — HOOK_BEFORE_REQUEST carrying a tick_request — perfectly
+// valid protobuf, so "misdispatch is caught" depended on someone remembering to
+// compare two fields. Deriving the hook from the payload makes the contradiction
+// unrepresentable instead, which is the same lesson as dropping `handled`.
 enum Hook {
   HOOK_UNSPECIFIED = 0;
   HOOK_BEFORE_REQUEST = 1;
@@ -283,27 +322,33 @@ enum Disposition {
   DISPOSITION_SUPPRESS = 3;
 }
 
-// HookInput is what every hook receives.
+// HookInput is what every hook receives. The payload determines which hook this
+// is; there is no separate hook field to contradict it.
 message HookInput {
-  Hook hook = 1;
   // Minor version of the v2 contract the host is speaking. Additive changes
   // bump this; a plugin may use it to detect fields it can rely on.
-  uint32 abi_minor = 2;
+  uint32 abi_minor = 1;
   // Host-assigned request id, stable for the life of one request. Stream hooks
   // for the same response share it.
-  uint64 request_id = 3;
-  // Whether the host will apply a REPLACE. False for observational dispatches —
-  // the streaming and error response paths — so a plugin can tell that its
-  // mutations would be discarded instead of finding out by their having no
-  // effect, which is what v1 offered.
-  bool mutable = 4;
+  uint64 request_id = 2;
+  // Whether the host will apply a REPLACE to this dispatch.
+  //
+  // False only for run_after_response when the response was streamed or was an
+  // upstream error: the bytes have already gone to the caller, or there is no
+  // body to rewrite, so a returned replacement is discarded. run_before_request
+  // and run_on_stream_chunk are always mutable — a stream plugin can and does
+  // replace, suppress and fan out events.
+  //
+  // v1 offered no such signal, so a plugin learned its mutations were being
+  // discarded only by their having no effect.
+  bool mutable = 3;
 
   oneof payload {
-    ChatRequest chat_request = 5;
-    ChatResponse chat_response = 6;
-    StreamEvent stream_event = 7;
-    HttpRequest http_request = 8;
-    TickRequest tick_request = 9;
+    ChatRequest chat_request = 4;
+    ChatResponse chat_response = 5;
+    StreamEvent stream_event = 6;
+    HttpRequest http_request = 7;
+    TickRequest tick_request = 8;
   }
 }
 
@@ -312,16 +357,16 @@ message HookInput {
 // Returning zero bytes still means "pass through" — that is unambiguous at the
 // ABI level, because it is a length rather than a message.
 message HookResult {
-  // Must match the hook that was dispatched. A mismatch is a protocol error.
-  Hook hook = 1;
-  Disposition disposition = 2;
+  Disposition disposition = 1;
 
+  // The payload's type must match the hook that was dispatched. A result
+  // carrying another hook's payload is a protocol error.
   oneof payload {
-    ChatRequest chat_request = 3;
-    ChatResponse chat_response = 4;
-    StreamEvents stream_events = 5;
-    HttpResponse http_response = 6;
-    TickOutcome tick_outcome = 7;
+    ChatRequest chat_request = 2;
+    ChatResponse chat_response = 3;
+    StreamEvents stream_events = 4;
+    HttpResponse http_response = 5;
+    TickOutcome tick_outcome = 6;
   }
 }
 

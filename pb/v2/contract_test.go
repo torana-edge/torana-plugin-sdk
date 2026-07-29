@@ -8,6 +8,51 @@ import (
 	v2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
 
+// The generated oneof wrappers carry unexported methods, so an external test
+// cannot name their interface. Build whole frames instead.
+func inputFor(h v2.Hook) *v2.HookInput {
+	switch h {
+	case v2.Hook_HOOK_BEFORE_REQUEST:
+		return &v2.HookInput{Payload: &v2.HookInput_ChatRequest{ChatRequest: &v2.ChatRequest{Model: "m"}}}
+	case v2.Hook_HOOK_AFTER_RESPONSE:
+		return &v2.HookInput{Payload: &v2.HookInput_ChatResponse{ChatResponse: &v2.ChatResponse{Model: "m"}}}
+	case v2.Hook_HOOK_ON_STREAM_CHUNK:
+		return &v2.HookInput{Payload: &v2.HookInput_StreamEvent{StreamEvent: &v2.StreamEvent{}}}
+	case v2.Hook_HOOK_ON_HTTP_REQUEST:
+		return &v2.HookInput{Payload: &v2.HookInput_HttpRequest{HttpRequest: &v2.HttpRequest{Method: "GET"}}}
+	case v2.Hook_HOOK_ON_TICK:
+		return &v2.HookInput{Payload: &v2.HookInput_TickRequest{TickRequest: &v2.TickRequest{TickId: 1}}}
+	}
+	return &v2.HookInput{}
+}
+
+// replaceFor builds a REPLACE result carrying h's payload type.
+func replaceFor(h v2.Hook) *v2.HookResult {
+	r := &v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE}
+	switch h {
+	case v2.Hook_HOOK_BEFORE_REQUEST:
+		r.Payload = &v2.HookResult_ChatRequest{ChatRequest: &v2.ChatRequest{Model: "m"}}
+	case v2.Hook_HOOK_AFTER_RESPONSE:
+		r.Payload = &v2.HookResult_ChatResponse{ChatResponse: &v2.ChatResponse{Model: "m"}}
+	case v2.Hook_HOOK_ON_STREAM_CHUNK:
+		r.Payload = &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{}}
+	case v2.Hook_HOOK_ON_HTTP_REQUEST:
+		r.Payload = &v2.HookResult_HttpResponse{HttpResponse: &v2.HttpResponse{Status: 200}}
+	case v2.Hook_HOOK_ON_TICK:
+		r.Payload = &v2.HookResult_TickOutcome{TickOutcome: &v2.TickOutcome{}}
+	}
+	return r
+}
+
+// allHooks is every hook the contract defines.
+var allHooks = []v2.Hook{
+	v2.Hook_HOOK_BEFORE_REQUEST,
+	v2.Hook_HOOK_AFTER_RESPONSE,
+	v2.Hook_HOOK_ON_STREAM_CHUNK,
+	v2.Hook_HOOK_ON_HTTP_REQUEST,
+	v2.Hook_HOOK_ON_TICK,
+}
+
 // v2 exists to fix things v1 could only document its way around. Each test here
 // pins one of those fixes to observable behaviour, so the contract is checked
 // rather than merely described.
@@ -16,14 +61,18 @@ import (
 // EMPTY message of the expected type, because protobuf treats unknown fields as
 // unknown rather than as an error. Every plugin then read that as a legitimate
 // empty request.
-func TestMisdispatchedPayloadIsDetectable(t *testing.T) {
-	// A tick payload, encoded as v1 would have sent it: bare, unlabelled.
+//
+// v2 makes the payload the sole discriminator, so a frame cannot claim one hook
+// while carrying another's. An earlier draft of this file carried a hook enum
+// ALONGSIDE the payload, which made HOOK_BEFORE_REQUEST + tick_request perfectly
+// valid protobuf — the guarantee then rested on someone remembering to compare
+// two fields, and this test only observed them.
+func TestPayloadIsTheSoleDiscriminator(t *testing.T) {
+	// The v1 failure, still reproducible with a bare message.
 	bare, err := proto.Marshal(&v2.TickRequest{TickId: 7, UnixMillis: 1234})
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// Decoded as the request hook's payload type — the v1 failure.
 	var asRequest v2.ChatRequest
 	if err := proto.Unmarshal(bare, &asRequest); err != nil {
 		t.Fatalf("v1's failure mode is that this does NOT error: %v", err)
@@ -32,31 +81,56 @@ func TestMisdispatchedPayloadIsDetectable(t *testing.T) {
 		t.Fatal("precondition: the mis-decode should look like an empty request")
 	}
 
-	// v2 labels the payload, so the same mistake is visible.
-	enveloped, err := proto.Marshal(&v2.HookInput{
-		Hook:    v2.Hook_HOOK_ON_TICK,
-		Payload: &v2.HookInput_TickRequest{TickRequest: &v2.TickRequest{TickId: 7}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var in v2.HookInput
-	if err := proto.Unmarshal(enveloped, &in); err != nil {
-		t.Fatal(err)
-	}
-	if in.Hook != v2.Hook_HOOK_ON_TICK {
-		t.Fatalf("hook = %v, want HOOK_ON_TICK", in.Hook)
-	}
-	if _, ok := in.Payload.(*v2.HookInput_ChatRequest); ok {
-		t.Fatal("a tick payload must not present itself as a chat request")
+	// v2: the hook comes from the payload, so there is nothing to contradict.
+	for _, want := range allHooks {
+		t.Run(want.String(), func(t *testing.T) {
+			raw, err := proto.Marshal(inputFor(want))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got v2.HookInput
+			if err := proto.Unmarshal(raw, &got); err != nil {
+				t.Fatal(err)
+			}
+			if h := got.HookOf(); h != want {
+				t.Fatalf("HookOf = %v, want %v", h, want)
+			}
+			if err := got.Validate(); err != nil {
+				t.Fatalf("well-formed input rejected: %v", err)
+			}
+		})
 	}
 }
 
-// An unlabelled envelope must be rejected, or the discriminator buys nothing.
-func TestUnlabelledInputIsInvalid(t *testing.T) {
+// An input with no payload names no hook, and must be rejected rather than
+// dispatched to a guess.
+func TestInputWithoutPayloadIsRejected(t *testing.T) {
 	var in v2.HookInput
-	if in.Hook != v2.Hook_HOOK_UNSPECIFIED {
-		t.Fatal("the zero value of Hook must be HOOK_UNSPECIFIED so an unset hook is detectable")
+	if h := in.HookOf(); h != v2.Hook_HOOK_UNSPECIFIED {
+		t.Fatalf("HookOf on an empty input = %v, want HOOK_UNSPECIFIED", h)
+	}
+	if err := in.Validate(); err == nil {
+		t.Fatal("an input carrying no payload must be rejected")
+	}
+}
+
+// Every hook/payload combination, including all twenty wrong ones. A result
+// carrying another hook's payload is the misdispatch this contract claims to
+// catch, so it is worth enumerating rather than sampling.
+func TestResultPayloadMustMatchTheDispatchedHook(t *testing.T) {
+	for _, dispatched := range allHooks {
+		for _, carried := range allHooks {
+			err := replaceFor(carried).ValidateFor(dispatched)
+			if dispatched == carried {
+				if err != nil {
+					t.Errorf("%v with its own payload rejected: %v", dispatched, err)
+				}
+				continue
+			}
+			if err == nil {
+				t.Errorf("%v accepted a %v payload — misdispatch is not caught", dispatched, carried)
+			}
+		}
 	}
 }
 
@@ -67,7 +141,6 @@ func TestUnlabelledInputIsInvalid(t *testing.T) {
 // rather than a guess.
 func TestSuppressIsDistinguishableFromPassThrough(t *testing.T) {
 	suppress, err := proto.Marshal(&v2.HookResult{
-		Hook:        v2.Hook_HOOK_ON_STREAM_CHUNK,
 		Disposition: v2.Disposition_DISPOSITION_SUPPRESS,
 	})
 	if err != nil {
@@ -89,17 +162,96 @@ func TestSuppressIsDistinguishableFromPassThrough(t *testing.T) {
 	}
 }
 
-// The zero value must be the invalid one, so an under-filled frame is caught
-// rather than silently meaning something.
-func TestUnsetDispositionIsInvalid(t *testing.T) {
-	var r v2.HookResult
-	if r.Disposition != v2.Disposition_DISPOSITION_UNSPECIFIED {
-		t.Fatal("the zero value of Disposition must be UNSPECIFIED")
+// Every way a result can be malformed must be rejected, not interpreted. These
+// used to be two tests that read enum zero values and demonstrated no rejection
+// at all.
+func TestMalformedResultsAreRejected(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		hook   v2.Hook
+		result *v2.HookResult
+		want   string
+	}{
+		{
+			"no disposition", v2.Hook_HOOK_BEFORE_REQUEST,
+			&v2.HookResult{Payload: &v2.HookResult_ChatRequest{ChatRequest: &v2.ChatRequest{Model: "m"}}},
+			"a frame that states no disposition is a protocol error, not a pass-through",
+		},
+		{
+			"unknown disposition", v2.Hook_HOOK_BEFORE_REQUEST,
+			&v2.HookResult{Disposition: v2.Disposition(99),
+				Payload: &v2.HookResult_ChatRequest{ChatRequest: &v2.ChatRequest{Model: "m"}}},
+			"a disposition this build does not know must be refused, not guessed at",
+		},
+		{
+			"REPLACE without payload", v2.Hook_HOOK_BEFORE_REQUEST,
+			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE},
+			"REPLACE with nothing to replace it with is meaningless",
+		},
+		{
+			"PASS with payload", v2.Hook_HOOK_BEFORE_REQUEST,
+			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_PASS,
+				Payload: &v2.HookResult_ChatRequest{ChatRequest: &v2.ChatRequest{Model: "m"}}},
+			"PASS means the host keeps its input, so a payload would be silently dropped",
+		},
+		{
+			"SUPPRESS outside stream", v2.Hook_HOOK_BEFORE_REQUEST,
+			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_SUPPRESS},
+			"only a stream chunk can be suppressed",
+		},
+		{
+			"SUPPRESS with payload", v2.Hook_HOOK_ON_STREAM_CHUNK,
+			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_SUPPRESS,
+				Payload: &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{}}},
+			"suppress emits nothing; carrying events means REPLACE was meant",
+		},
+		{
+			"nil result", v2.Hook_HOOK_BEFORE_REQUEST, nil,
+			"a nil result must not read as a valid answer",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.result.ValidateFor(tc.hook); err == nil {
+				t.Fatalf("accepted: %s", tc.want)
+			}
+		})
 	}
-	// And an all-defaults frame still marshals to nothing, which the ABI reads
-	// as pass-through at the length level — unambiguous, because it is a length
-	// and not a message.
-	raw, err := proto.Marshal(&r)
+}
+
+// The well-formed shapes must all be accepted, or the validation above is just
+// a way to reject everything.
+func TestWellFormedResultsAreAccepted(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		hook   v2.Hook
+		result *v2.HookResult
+	}{
+		{"explicit pass", v2.Hook_HOOK_BEFORE_REQUEST,
+			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_PASS}},
+		{"replace request", v2.Hook_HOOK_BEFORE_REQUEST,
+			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
+				Payload: &v2.HookResult_ChatRequest{ChatRequest: &v2.ChatRequest{Model: "m"}}}},
+		{"suppress a stream event", v2.Hook_HOOK_ON_STREAM_CHUNK,
+			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_SUPPRESS}},
+		{"fan out stream events", v2.Hook_HOOK_ON_STREAM_CHUNK,
+			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
+				Payload: &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{
+					Events: []*v2.StreamEvent{{}, {}},
+				}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.result.ValidateFor(tc.hook); err != nil {
+				t.Fatalf("well-formed result rejected: %v", err)
+			}
+		})
+	}
+}
+
+// A hook that changed nothing returns zero bytes, which the ABI reads as
+// pass-through. That is unambiguous because it is a length rather than a
+// message, and it is why the `handled` bool is gone.
+func TestAllDefaultsResultMarshalsToNothing(t *testing.T) {
+	raw, err := proto.Marshal(&v2.HookResult{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,10 +326,17 @@ func TestChatResponseCarriesResponseFacts(t *testing.T) {
 }
 
 // A plugin must be able to tell that its mutations will be discarded, rather
-// than discovering it by their having no effect — which is what v1 offered on
-// the streaming and error response paths.
+// than discovering it by their having no effect.
+//
+// This applies to run_after_response when the response was streamed or was an
+// upstream error — the bytes have already gone to the caller, or there is no
+// body to rewrite. run_on_stream_chunk is always mutable: replacing, suppressing
+// and fanning out events is the whole point of that hook.
 func TestObservationalDispatchIsMarked(t *testing.T) {
-	in := &v2.HookInput{Hook: v2.Hook_HOOK_AFTER_RESPONSE, Mutable: false}
+	in := &v2.HookInput{
+		Payload: &v2.HookInput_ChatResponse{ChatResponse: &v2.ChatResponse{}},
+		Mutable: false,
+	}
 	raw, err := proto.Marshal(in)
 	if err != nil {
 		t.Fatal(err)
@@ -188,6 +347,15 @@ func TestObservationalDispatchIsMarked(t *testing.T) {
 	}
 	if got.Mutable {
 		t.Fatal("an observational dispatch must report itself as not mutable")
+	}
+
+	// A stream chunk is never observational.
+	stream := &v2.HookInput{
+		Payload: &v2.HookInput_StreamEvent{StreamEvent: &v2.StreamEvent{}},
+		Mutable: true,
+	}
+	if stream.HookOf() != v2.Hook_HOOK_ON_STREAM_CHUNK || !stream.Mutable {
+		t.Fatal("stream chunks are mutable: a plugin replaces, suppresses and fans out events")
 	}
 }
 
