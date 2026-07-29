@@ -28,9 +28,16 @@ var Hooks = []string{
 	"run_on_tick",
 }
 
-// Permissions a v1 plugin may request. Requesting one is never a grant: an
-// operator approves capabilities against an exact bundle digest.
-var Permissions = []string{
+// Permissions is every capability a plugin may request, including the
+// ir.*.write grants in capabilities_write.go. Requesting one is never a grant:
+// an operator approves capabilities against an exact bundle digest.
+//
+// This is ONE list on purpose. Hosts build their allowlist from it, and an
+// earlier draft kept the write grants in a separate list with a union helper —
+// which meant a plugin could pass `torana plugin lint` (checking IsPermission)
+// and then be refused at load (checking the env-only list). Two lists that must
+// agree will eventually not.
+var Permissions = append([]string{
 	"env.background_tick",
 	"env.block_request",
 	"env.cache_get",
@@ -59,12 +66,12 @@ var Permissions = []string{
 	"env.state_get",
 	"env.state_keys",
 	"env.state_set",
-}
+}, WritePermissions...)
 
 // IsHook reports whether name is a v1 hook.
 func IsHook(name string) bool { return contains(Hooks, name) }
 
-// IsPermission reports whether name is a v1 capability string.
+// IsPermission reports whether name is a capability a plugin may request.
 func IsPermission(name string) bool { return contains(Permissions, name) }
 
 func contains(list []string, name string) bool {
