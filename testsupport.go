@@ -4,6 +4,8 @@ package plugin_sdk
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 
 	"github.com/torana-edge/torana-plugin-sdk/pb"
 )
@@ -19,11 +21,40 @@ type TestHost struct {
 	Metric   func(name string, metricType int32, value float64, labels map[string]string)
 }
 
-var testHost *TestHost
+// The installed host has to be ambient: a plugin calls sdk.HostCall() with no
+// host parameter, because on wasip1 the host is the runtime itself. That makes
+// it process-global here, which is only safe if exactly one host is installed
+// at a time.
+//
+// So installation is scoped to a single dispatch and serialized. Two t.Parallel()
+// tests would otherwise overwrite each other's host and race on cleanup —
+// assertions would run against the wrong fake, intermittently.
+//
+// The pointer is atomic rather than mutex-guarded because the handler reads it
+// from inside the dispatch that holds dispatchMu; taking the same lock to read
+// would deadlock.
+var (
+	testHostPtr atomic.Pointer[TestHost]
+	dispatchMu  sync.Mutex
+)
 
-// InstallTestHost routes Log, EmitMetric and HostCall to h. Passing nil
-// restores the inert behaviour.
-func InstallTestHost(h *TestHost) { testHost = h }
+func testHostOf() *TestHost { return testHostPtr.Load() }
+
+// WithTestHost installs h for the duration of fn and restores the previous
+// host afterwards, serializing against any other dispatch.
+//
+// Dispatches from parallel tests serialize rather than interleave. That is the
+// point: the SDK surface a plugin calls has no way to name which host it means.
+func WithTestHost(h *TestHost, fn func()) {
+	dispatchMu.Lock()
+	defer dispatchMu.Unlock()
+
+	prev := testHostPtr.Load()
+	testHostPtr.Store(h)
+	defer testHostPtr.Store(prev)
+
+	fn()
+}
 
 // The registered-handler accessors below let sdktest dispatch a plugin's hooks
 // in-process. They return nil when the plugin did not register that hook,

@@ -304,6 +304,59 @@ func (r *recordingTB) Errorf(format string, args ...any) { r.failed = true }
 func (r *recordingTB) Error(args ...any)                 { r.failed = true }
 func (r *recordingTB) Helper()                           {}
 
+// Two parallel tests must not see each other's host. The installed host is
+// process-global — a plugin calls sdk.HostCall() with no host parameter,
+// because on wasip1 the host is the runtime — so the only safe design is to
+// install it for the duration of one dispatch and serialize.
+//
+// Before that fix, harness B's config leaked into test A and `go test -race`
+// reported concurrent writes on cleanup.
+func TestParallelHarnessesDoNotCrossContaminate(t *testing.T) {
+	reset(t)
+	// One shared handler, as a real plugin has: registration happens once in
+	// init(). Only the host differs per test.
+	sdk.OnBeforeRequest(func(ctx context.Context, req *pb.ChatRequest) (*pb.ChatRequest, error) {
+		req.Model = sdk.PluginConfig()
+		sdk.Log(req.Model, sdk.LogLevelInfo)
+		_, _ = sdk.HostCall("env.cache_get", req.Model)
+		return req, nil
+	})
+
+	for _, name := range []string{"A", "B", "C", "D"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			want := `{"id":"` + name + `"}`
+			h := sdktest.New(t).SetConfig(want)
+
+			// Repeat: a single dispatch could pass by luck, where a hundred
+			// interleaved ones will not.
+			for i := 0; i < 100; i++ {
+				res := h.BeforeRequest(&pb.ChatRequest{})
+				if res.Request.Model != want {
+					t.Fatalf("iteration %d saw config %q, want %q — another harness leaked in",
+						i, res.Request.Model, want)
+				}
+			}
+
+			// Captured state must belong to this harness alone.
+			logs := h.Logs()
+			if len(logs) != 100 {
+				t.Fatalf("captured %d logs, want 100", len(logs))
+			}
+			for _, l := range logs {
+				if l.Message != want {
+					t.Fatalf("captured a log from another harness: %q", l.Message)
+				}
+			}
+			for _, c := range h.Calls() {
+				if c.Command == "env.cache_get" && c.Args != want {
+					t.Fatalf("captured a host call from another harness: %+v", c)
+				}
+			}
+		})
+	}
+}
+
 func TestCheckManifestCatchesBothDirections(t *testing.T) {
 	reset(t)
 	dir := t.TempDir()

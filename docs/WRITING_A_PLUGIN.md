@@ -458,6 +458,15 @@ The same applies to footguns. If you set a verdict and then return `nil` from
 your handler, `sdktest` reports no verdict — because that is what the host
 does, and it is a mistake worth catching in a test rather than in a demo.
 
+### Parallel tests
+
+`t.Parallel()` is safe. The installed host is process-global — your plugin calls
+`sdk.HostCall()` with no host argument, because on `wasip1` the host *is* the
+runtime — so `sdktest` installs a harness only for the duration of each hook
+dispatch and serializes those dispatches. Parallel tests keep their own config,
+stubs, logs, metrics and captured calls; only the dispatches themselves take
+turns.
+
 ### Cross-check your manifest
 
 A declared hook with no registered handler loads healthy and never acts. A

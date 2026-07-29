@@ -79,13 +79,13 @@ const (
 )
 
 func Log(msg string, level int32) {
-	if h := testHost; h != nil && h.Log != nil {
+	if h := testHostOf(); h != nil && h.Log != nil {
 		h.Log(msg, level)
 	}
 }
 
 func EmitMetric(name string, metricType int32, value float64, labels map[string]string) {
-	if h := testHost; h != nil && h.Metric != nil {
+	if h := testHostOf(); h != nil && h.Metric != nil {
 		h.Metric(name, metricType, value, labels)
 	}
 }
@@ -98,7 +98,7 @@ func EmitMetric(name string, metricType int32, value float64, labels map[string]
 // (sdk.go:371) — a divergence here would let a test pass on an error path that
 // cannot occur in production.
 func HostCall(cmd string, args string) (string, error) {
-	if h := testHost; h != nil && h.HostCall != nil {
+	if h := testHostOf(); h != nil && h.HostCall != nil {
 		return h.HostCall(cmd, args)
 	}
 	return "", nil

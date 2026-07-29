@@ -71,7 +71,8 @@ type HostCallEntry struct {
 
 // Harness is a fake Torana host. Create one with New.
 type Harness struct {
-	t testing.TB
+	t    testing.TB
+	host *sdk.TestHost
 
 	mu       sync.Mutex
 	meta     map[string]string
@@ -91,9 +92,13 @@ type Harness struct {
 	StateConfigured bool
 }
 
-// New installs a fake host for the duration of the test and removes it
-// afterwards. Registrations made by the plugin's init() are already in place
-// by the time a test runs, so no explicit wiring is needed.
+// New builds a fake host for this test. Registrations made by the plugin's
+// init() are already in place by the time a test runs, so no wiring is needed.
+//
+// The harness is installed only for the duration of each hook dispatch, not
+// for the lifetime of the test — see dispatch.go. That keeps t.Parallel() tests
+// from overwriting one another's host, at the cost of serializing the
+// dispatches themselves.
 func New(t testing.TB) *Harness {
 	t.Helper()
 	h := &Harness{
@@ -106,7 +111,7 @@ func New(t testing.TB) *Harness {
 		now:             func() int64 { return time.Now().UnixMilli() },
 		StateConfigured: true,
 	}
-	sdk.InstallTestHost(&sdk.TestHost{
+	h.host = &sdk.TestHost{
 		HostCall: h.hostCall,
 		Log: func(msg string, level int32) {
 			h.mu.Lock()
@@ -118,9 +123,14 @@ func New(t testing.TB) *Harness {
 			defer h.mu.Unlock()
 			h.metrics = append(h.metrics, MetricEntry{Name: name, Type: typ, Value: value, Labels: labels})
 		},
-	})
-	t.Cleanup(func() { sdk.InstallTestHost(nil) })
+	}
 	return h
+}
+
+// with installs this harness for one dispatch. Every hook entry point in
+// dispatch.go goes through it.
+func (h *Harness) with(fn func()) {
+	sdk.WithTestHost(h.host, fn)
 }
 
 // SetConfig sets what env.plugin_config returns — the raw JSON an operator

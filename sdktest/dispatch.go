@@ -58,7 +58,10 @@ func (h *Harness) BeforeRequest(req *pb.ChatRequest) RequestResult {
 			"the host calls _initialize and main() never runs")
 	}
 
-	out, err := handler(context.Background(), req)
+	var out *pb.ChatRequest
+	var err error
+	h.with(func() { out, err = handler(context.Background(), req) })
+
 	res := RequestResult{Request: out, PassedThrough: out == nil, Err: err}
 	if out != nil {
 		res.Block, res.Respond, res.Route = decodeVerdicts(h.t, out.ToranaMetaJson)
@@ -77,7 +80,9 @@ func (h *Harness) AfterResponse(resp *pb.ChatRequest) RequestResult {
 	if handler == nil {
 		h.t.Fatal("sdktest: no run_after_response handler registered")
 	}
-	out, err := handler(context.Background(), resp)
+	var out *pb.ChatRequest
+	var err error
+	h.with(func() { out, err = handler(context.Background(), resp) })
 	return RequestResult{Request: out, PassedThrough: out == nil, Err: err}
 }
 
@@ -111,7 +116,9 @@ func (h *Harness) StreamChunk(ev *pb.StreamEvent) StreamResult {
 	if handler == nil {
 		h.t.Fatal("sdktest: no run_on_stream_chunk handler registered")
 	}
-	out, err := handler(context.Background(), ev)
+	var out *pb.StreamEventResult
+	var err error
+	h.with(func() { out, err = handler(context.Background(), ev) })
 	return StreamResult{Result: out, Err: err}
 }
 
@@ -142,7 +149,10 @@ func (h *Harness) HTTPRequest(req *pb.HttpRequest) (*pb.HttpResponse, error) {
 	if handler == nil {
 		h.t.Fatal("sdktest: no run_on_http_request handler registered")
 	}
-	return handler(context.Background(), req)
+	var out *pb.HttpResponse
+	var err error
+	h.with(func() { out, err = handler(context.Background(), req) })
+	return out, err
 }
 
 // Tick dispatches run_on_tick.
@@ -152,7 +162,10 @@ func (h *Harness) Tick(req *pb.TickRequest) (*pb.TickResult, error) {
 	if handler == nil {
 		h.t.Fatal("sdktest: no run_on_tick handler registered")
 	}
-	return handler(context.Background(), req)
+	var out *pb.TickResult
+	var err error
+	h.with(func() { out, err = handler(context.Background(), req) })
+	return out, err
 }
 
 // decodeVerdicts pulls the verdict keys out of ToranaMetaJson, which is where
