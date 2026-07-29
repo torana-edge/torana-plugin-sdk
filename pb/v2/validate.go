@@ -35,13 +35,35 @@ func (x *HookInput) HookOf() Hook {
 	return Hook_HOOK_UNSPECIFIED
 }
 
-// Validate reports whether an input is well formed.
+// Validate reports whether an input is well formed on its own terms: that it
+// carries a payload at all.
+//
+// It is NOT enough by itself. The WASM export a plugin was called through is a
+// second discriminator, and nothing in the envelope forces the two to agree —
+// a tick payload delivered to run_before_request is a well-formed input to the
+// wrong hook. Guests must use ValidateFor.
 func (x *HookInput) Validate() error {
 	if x == nil {
 		return fmt.Errorf("hook input is nil")
 	}
 	if x.HookOf() == Hook_HOOK_UNSPECIFIED {
 		return fmt.Errorf("hook input carries no payload, so there is no hook to dispatch")
+	}
+	return nil
+}
+
+// ValidateFor reports whether an input is a well-formed dispatch to hook.
+//
+// Every guest export must call this with its own hook. Removing the hook field
+// from the envelope made a frame unable to contradict itself, but the export
+// that was invoked still carries hook identity, and that pairing is exactly
+// where a misdispatch shows up.
+func (x *HookInput) ValidateFor(hook Hook) error {
+	if err := x.Validate(); err != nil {
+		return err
+	}
+	if got := x.HookOf(); got != hook {
+		return fmt.Errorf("%v was dispatched a %v payload", hook, got)
 	}
 	return nil
 }
@@ -109,6 +131,15 @@ func (x *HookResult) ValidateFor(hook Hook) error {
 		}
 		if got := x.HookOf(); got != hook {
 			return fmt.Errorf("hook result for %v carries a %v payload", hook, got)
+		}
+		// REPLACE with no events emits nothing, which is what SUPPRESS means.
+		// Two encodings of one action is the ambiguity this contract exists to
+		// remove, so only one of them is legal.
+		if ev, ok := x.Payload.(*HookResult_StreamEvents); ok {
+			if ev.StreamEvents == nil || len(ev.StreamEvents.Events) == 0 {
+				return fmt.Errorf("hook result says REPLACE with no events, which emits " +
+					"nothing; say SUPPRESS instead")
+			}
 		}
 		return nil
 	}

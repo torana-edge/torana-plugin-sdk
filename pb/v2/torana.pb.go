@@ -820,31 +820,32 @@ func (x *ChatResponse) GetProviderExtensionsJson() []byte {
 	return nil
 }
 
-type ToolCallStart struct {
+// Identifies the tool call a "tool_call" content block is assembling. Its
+// arguments arrive as ToolCallDelta events between the block's start and stop.
+type ToolCallRef struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	Index int32                  `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
-	Id    string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
-	Name  string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name  string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	// Opaque provider token on the call (Gemini thoughtSignature); empty otherwise.
-	Signature     string `protobuf:"bytes,4,opt,name=signature,proto3" json:"signature,omitempty"`
+	Signature     string `protobuf:"bytes,3,opt,name=signature,proto3" json:"signature,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ToolCallStart) Reset() {
-	*x = ToolCallStart{}
+func (x *ToolCallRef) Reset() {
+	*x = ToolCallRef{}
 	mi := &file_proto_torana_v2_torana_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ToolCallStart) String() string {
+func (x *ToolCallRef) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ToolCallStart) ProtoMessage() {}
+func (*ToolCallRef) ProtoMessage() {}
 
-func (x *ToolCallStart) ProtoReflect() protoreflect.Message {
+func (x *ToolCallRef) ProtoReflect() protoreflect.Message {
 	mi := &file_proto_torana_v2_torana_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -856,33 +857,26 @@ func (x *ToolCallStart) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ToolCallStart.ProtoReflect.Descriptor instead.
-func (*ToolCallStart) Descriptor() ([]byte, []int) {
+// Deprecated: Use ToolCallRef.ProtoReflect.Descriptor instead.
+func (*ToolCallRef) Descriptor() ([]byte, []int) {
 	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *ToolCallStart) GetIndex() int32 {
-	if x != nil {
-		return x.Index
-	}
-	return 0
-}
-
-func (x *ToolCallStart) GetId() string {
+func (x *ToolCallRef) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-func (x *ToolCallStart) GetName() string {
+func (x *ToolCallRef) GetName() string {
 	if x != nil {
 		return x.Name
 	}
 	return ""
 }
 
-func (x *ToolCallStart) GetSignature() string {
+func (x *ToolCallRef) GetSignature() string {
 	if x != nil {
 		return x.Signature
 	}
@@ -941,50 +935,6 @@ func (x *ToolCallDelta) GetArgumentsDelta() string {
 	return ""
 }
 
-type ToolCallEnd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Index         int32                  `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ToolCallEnd) Reset() {
-	*x = ToolCallEnd{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ToolCallEnd) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ToolCallEnd) ProtoMessage() {}
-
-func (x *ToolCallEnd) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ToolCallEnd.ProtoReflect.Descriptor instead.
-func (*ToolCallEnd) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *ToolCallEnd) GetIndex() int32 {
-	if x != nil {
-		return x.Index
-	}
-	return 0
-}
-
 type StreamError struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
@@ -995,7 +945,7 @@ type StreamError struct {
 
 func (x *StreamError) Reset() {
 	*x = StreamError{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[9]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1007,7 +957,7 @@ func (x *StreamError) String() string {
 func (*StreamError) ProtoMessage() {}
 
 func (x *StreamError) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[9]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1020,7 +970,7 @@ func (x *StreamError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamError.ProtoReflect.Descriptor instead.
 func (*StreamError) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{9}
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *StreamError) GetCode() int32 {
@@ -1057,7 +1007,7 @@ type MessageStart struct {
 
 func (x *MessageStart) Reset() {
 	*x = MessageStart{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[10]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1069,7 +1019,7 @@ func (x *MessageStart) String() string {
 func (*MessageStart) ProtoMessage() {}
 
 func (x *MessageStart) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[10]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1082,7 +1032,7 @@ func (x *MessageStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageStart.ProtoReflect.Descriptor instead.
 func (*MessageStart) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{10}
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *MessageStart) GetRole() string {
@@ -1106,6 +1056,11 @@ func (x *MessageStart) GetModel() string {
 	return ""
 }
 
+// MessageStop closes the message and carries why it ended.
+//
+// finish_reason lives here rather than in an event of its own. v1 had a
+// standalone finish_reason event, which would have left two ways to say the
+// same thing — and one unambiguous representation per fact is the point of v2.
 type MessageStop struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	FinishReason  string                 `protobuf:"bytes,1,opt,name=finish_reason,json=finishReason,proto3" json:"finish_reason,omitempty"`
@@ -1115,7 +1070,7 @@ type MessageStop struct {
 
 func (x *MessageStop) Reset() {
 	*x = MessageStop{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[11]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1127,7 +1082,7 @@ func (x *MessageStop) String() string {
 func (*MessageStop) ProtoMessage() {}
 
 func (x *MessageStop) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[11]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1140,7 +1095,7 @@ func (x *MessageStop) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageStop.ProtoReflect.Descriptor instead.
 func (*MessageStop) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{11}
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *MessageStop) GetFinishReason() string {
@@ -1152,19 +1107,26 @@ func (x *MessageStop) GetFinishReason() string {
 
 // ContentBlockStart opens a text, thinking or tool-call block. Deltas that
 // follow belong to it until the matching stop.
+//
+// This is the ONLY block boundary. v1 had ToolCallStart/ToolCallEnd alongside
+// nothing for text or thinking, so a plugin needed one mechanism for tool calls
+// and inference for everything else. Folding tool calls in as a kind means an
+// assembler handles every block the same way.
 type ContentBlockStart struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Index int32                  `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
 	// "text", "thinking", "tool_call", or a provider-specific name passed
 	// through verbatim.
-	Kind          string `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
+	Kind string `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
+	// Set when kind is "tool_call"; nil otherwise.
+	ToolCall      *ToolCallRef `protobuf:"bytes,3,opt,name=tool_call,json=toolCall,proto3" json:"tool_call,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ContentBlockStart) Reset() {
 	*x = ContentBlockStart{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[12]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1176,7 +1138,7 @@ func (x *ContentBlockStart) String() string {
 func (*ContentBlockStart) ProtoMessage() {}
 
 func (x *ContentBlockStart) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[12]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1189,7 +1151,7 @@ func (x *ContentBlockStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContentBlockStart.ProtoReflect.Descriptor instead.
 func (*ContentBlockStart) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{12}
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ContentBlockStart) GetIndex() int32 {
@@ -1206,6 +1168,13 @@ func (x *ContentBlockStart) GetKind() string {
 	return ""
 }
 
+func (x *ContentBlockStart) GetToolCall() *ToolCallRef {
+	if x != nil {
+		return x.ToolCall
+	}
+	return nil
+}
+
 type ContentBlockStop struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Index         int32                  `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
@@ -1215,7 +1184,7 @@ type ContentBlockStop struct {
 
 func (x *ContentBlockStop) Reset() {
 	*x = ContentBlockStop{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[13]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1227,7 +1196,7 @@ func (x *ContentBlockStop) String() string {
 func (*ContentBlockStop) ProtoMessage() {}
 
 func (x *ContentBlockStop) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[13]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1240,7 +1209,7 @@ func (x *ContentBlockStop) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContentBlockStop.ProtoReflect.Descriptor instead.
 func (*ContentBlockStop) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{13}
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ContentBlockStop) GetIndex() int32 {
@@ -1250,16 +1219,30 @@ func (x *ContentBlockStop) GetIndex() int32 {
 	return 0
 }
 
+// StreamEvent is one event in a streamed response.
+//
+// The canonical sequence, which adapters produce and plugins may rely on:
+//
+//	MessageStart{role, id, model}
+//	  ContentBlockStart{index, kind}          kind "text" | "thinking"
+//	    TextDelta / ThinkingDelta ...
+//	  ContentBlockStop{index}
+//	  ContentBlockStart{index, "tool_call", ToolCallRef{id, name}}
+//	    ToolCallDelta{index, arguments_delta} ...
+//	  ContentBlockStop{index}
+//	Usage
+//	MessageStop{finish_reason}
+//
+// Usage may arrive before or after MessageStop depending on the provider, and
+// StreamError may replace the remainder at any point. Everything else is
+// ordered as shown, and every block is opened and closed exactly once.
 type StreamEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Event:
 	//
 	//	*StreamEvent_TextDelta
 	//	*StreamEvent_ThinkingDelta
-	//	*StreamEvent_ToolCallStart
 	//	*StreamEvent_ToolCallDelta
-	//	*StreamEvent_ToolCallEnd
-	//	*StreamEvent_FinishReason
 	//	*StreamEvent_Usage
 	//	*StreamEvent_Error
 	//	*StreamEvent_SignatureDelta
@@ -1274,7 +1257,7 @@ type StreamEvent struct {
 
 func (x *StreamEvent) Reset() {
 	*x = StreamEvent{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[14]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1286,7 +1269,7 @@ func (x *StreamEvent) String() string {
 func (*StreamEvent) ProtoMessage() {}
 
 func (x *StreamEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[14]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1299,7 +1282,7 @@ func (x *StreamEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamEvent.ProtoReflect.Descriptor instead.
 func (*StreamEvent) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{14}
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *StreamEvent) GetEvent() isStreamEvent_Event {
@@ -1327,15 +1310,6 @@ func (x *StreamEvent) GetThinkingDelta() string {
 	return ""
 }
 
-func (x *StreamEvent) GetToolCallStart() *ToolCallStart {
-	if x != nil {
-		if x, ok := x.Event.(*StreamEvent_ToolCallStart); ok {
-			return x.ToolCallStart
-		}
-	}
-	return nil
-}
-
 func (x *StreamEvent) GetToolCallDelta() *ToolCallDelta {
 	if x != nil {
 		if x, ok := x.Event.(*StreamEvent_ToolCallDelta); ok {
@@ -1343,24 +1317,6 @@ func (x *StreamEvent) GetToolCallDelta() *ToolCallDelta {
 		}
 	}
 	return nil
-}
-
-func (x *StreamEvent) GetToolCallEnd() *ToolCallEnd {
-	if x != nil {
-		if x, ok := x.Event.(*StreamEvent_ToolCallEnd); ok {
-			return x.ToolCallEnd
-		}
-	}
-	return nil
-}
-
-func (x *StreamEvent) GetFinishReason() string {
-	if x != nil {
-		if x, ok := x.Event.(*StreamEvent_FinishReason); ok {
-			return x.FinishReason
-		}
-	}
-	return ""
 }
 
 func (x *StreamEvent) GetUsage() *Usage {
@@ -1438,63 +1394,45 @@ type StreamEvent_ThinkingDelta struct {
 	ThinkingDelta string `protobuf:"bytes,2,opt,name=thinking_delta,json=thinkingDelta,proto3,oneof"`
 }
 
-type StreamEvent_ToolCallStart struct {
-	ToolCallStart *ToolCallStart `protobuf:"bytes,3,opt,name=tool_call_start,json=toolCallStart,proto3,oneof"`
-}
-
 type StreamEvent_ToolCallDelta struct {
-	ToolCallDelta *ToolCallDelta `protobuf:"bytes,4,opt,name=tool_call_delta,json=toolCallDelta,proto3,oneof"`
-}
-
-type StreamEvent_ToolCallEnd struct {
-	ToolCallEnd *ToolCallEnd `protobuf:"bytes,5,opt,name=tool_call_end,json=toolCallEnd,proto3,oneof"`
-}
-
-type StreamEvent_FinishReason struct {
-	FinishReason string `protobuf:"bytes,6,opt,name=finish_reason,json=finishReason,proto3,oneof"`
+	ToolCallDelta *ToolCallDelta `protobuf:"bytes,3,opt,name=tool_call_delta,json=toolCallDelta,proto3,oneof"`
 }
 
 type StreamEvent_Usage struct {
-	Usage *Usage `protobuf:"bytes,7,opt,name=usage,proto3,oneof"`
+	Usage *Usage `protobuf:"bytes,4,opt,name=usage,proto3,oneof"`
 }
 
 type StreamEvent_Error struct {
-	Error *StreamError `protobuf:"bytes,8,opt,name=error,proto3,oneof"`
+	Error *StreamError `protobuf:"bytes,5,opt,name=error,proto3,oneof"`
 }
 
 type StreamEvent_SignatureDelta struct {
 	// Opaque provider signature paired with the surrounding block (Gemini
 	// thoughtSignature on a standalone text/thought part).
-	SignatureDelta string `protobuf:"bytes,9,opt,name=signature_delta,json=signatureDelta,proto3,oneof"`
+	SignatureDelta string `protobuf:"bytes,6,opt,name=signature_delta,json=signatureDelta,proto3,oneof"`
 }
 
 type StreamEvent_MessageStart struct {
-	MessageStart *MessageStart `protobuf:"bytes,10,opt,name=message_start,json=messageStart,proto3,oneof"`
+	MessageStart *MessageStart `protobuf:"bytes,7,opt,name=message_start,json=messageStart,proto3,oneof"`
 }
 
 type StreamEvent_MessageStop struct {
-	MessageStop *MessageStop `protobuf:"bytes,11,opt,name=message_stop,json=messageStop,proto3,oneof"`
+	MessageStop *MessageStop `protobuf:"bytes,8,opt,name=message_stop,json=messageStop,proto3,oneof"`
 }
 
 type StreamEvent_ContentBlockStart struct {
-	ContentBlockStart *ContentBlockStart `protobuf:"bytes,12,opt,name=content_block_start,json=contentBlockStart,proto3,oneof"`
+	ContentBlockStart *ContentBlockStart `protobuf:"bytes,9,opt,name=content_block_start,json=contentBlockStart,proto3,oneof"`
 }
 
 type StreamEvent_ContentBlockStop struct {
-	ContentBlockStop *ContentBlockStop `protobuf:"bytes,13,opt,name=content_block_stop,json=contentBlockStop,proto3,oneof"`
+	ContentBlockStop *ContentBlockStop `protobuf:"bytes,10,opt,name=content_block_stop,json=contentBlockStop,proto3,oneof"`
 }
 
 func (*StreamEvent_TextDelta) isStreamEvent_Event() {}
 
 func (*StreamEvent_ThinkingDelta) isStreamEvent_Event() {}
 
-func (*StreamEvent_ToolCallStart) isStreamEvent_Event() {}
-
 func (*StreamEvent_ToolCallDelta) isStreamEvent_Event() {}
-
-func (*StreamEvent_ToolCallEnd) isStreamEvent_Event() {}
-
-func (*StreamEvent_FinishReason) isStreamEvent_Event() {}
 
 func (*StreamEvent_Usage) isStreamEvent_Event() {}
 
@@ -1520,7 +1458,7 @@ type StreamEvents struct {
 
 func (x *StreamEvents) Reset() {
 	*x = StreamEvents{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[15]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1532,7 +1470,7 @@ func (x *StreamEvents) String() string {
 func (*StreamEvents) ProtoMessage() {}
 
 func (x *StreamEvents) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[15]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1545,7 +1483,7 @@ func (x *StreamEvents) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamEvents.ProtoReflect.Descriptor instead.
 func (*StreamEvents) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{15}
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *StreamEvents) GetEvents() []*StreamEvent {
@@ -1579,7 +1517,7 @@ type HttpRequest struct {
 
 func (x *HttpRequest) Reset() {
 	*x = HttpRequest{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[16]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1591,7 +1529,7 @@ func (x *HttpRequest) String() string {
 func (*HttpRequest) ProtoMessage() {}
 
 func (x *HttpRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[16]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1604,7 +1542,7 @@ func (x *HttpRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HttpRequest.ProtoReflect.Descriptor instead.
 func (*HttpRequest) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{16}
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *HttpRequest) GetMethod() string {
@@ -1670,7 +1608,7 @@ type HttpResponse struct {
 
 func (x *HttpResponse) Reset() {
 	*x = HttpResponse{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[17]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1682,7 +1620,7 @@ func (x *HttpResponse) String() string {
 func (*HttpResponse) ProtoMessage() {}
 
 func (x *HttpResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[17]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1695,7 +1633,7 @@ func (x *HttpResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HttpResponse.ProtoReflect.Descriptor instead.
 func (*HttpResponse) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{17}
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *HttpResponse) GetStatus() int32 {
@@ -1747,7 +1685,7 @@ type TickRequest struct {
 
 func (x *TickRequest) Reset() {
 	*x = TickRequest{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[18]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1759,7 +1697,7 @@ func (x *TickRequest) String() string {
 func (*TickRequest) ProtoMessage() {}
 
 func (x *TickRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[18]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1772,7 +1710,7 @@ func (x *TickRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TickRequest.ProtoReflect.Descriptor instead.
 func (*TickRequest) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{18}
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *TickRequest) GetTickId() uint64 {
@@ -1808,7 +1746,7 @@ type TickOutcome struct {
 
 func (x *TickOutcome) Reset() {
 	*x = TickOutcome{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[19]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1820,7 +1758,7 @@ func (x *TickOutcome) String() string {
 func (*TickOutcome) ProtoMessage() {}
 
 func (x *TickOutcome) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[19]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1833,7 +1771,7 @@ func (x *TickOutcome) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TickOutcome.ProtoReflect.Descriptor instead.
 func (*TickOutcome) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{19}
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *TickOutcome) GetActions() int32 {
@@ -1885,7 +1823,7 @@ type HookInput struct {
 
 func (x *HookInput) Reset() {
 	*x = HookInput{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[20]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1897,7 +1835,7 @@ func (x *HookInput) String() string {
 func (*HookInput) ProtoMessage() {}
 
 func (x *HookInput) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[20]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1910,7 +1848,7 @@ func (x *HookInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HookInput.ProtoReflect.Descriptor instead.
 func (*HookInput) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{20}
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *HookInput) GetAbiMinor() uint32 {
@@ -2044,7 +1982,7 @@ type HookResult struct {
 
 func (x *HookResult) Reset() {
 	*x = HookResult{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[21]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2056,7 +1994,7 @@ func (x *HookResult) String() string {
 func (*HookResult) ProtoMessage() {}
 
 func (x *HookResult) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[21]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2069,7 +2007,7 @@ func (x *HookResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HookResult.ProtoReflect.Descriptor instead.
 func (*HookResult) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{21}
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *HookResult) GetDisposition() Disposition {
@@ -2176,7 +2114,7 @@ type HostError struct {
 
 func (x *HostError) Reset() {
 	*x = HostError{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[22]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2188,7 +2126,7 @@ func (x *HostError) String() string {
 func (*HostError) ProtoMessage() {}
 
 func (x *HostError) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[22]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2201,7 +2139,7 @@ func (x *HostError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostError.ProtoReflect.Descriptor instead.
 func (*HostError) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{22}
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *HostError) GetCode() ErrorCode {
@@ -2237,7 +2175,7 @@ type HostCallResult struct {
 
 func (x *HostCallResult) Reset() {
 	*x = HostCallResult{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[23]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2249,7 +2187,7 @@ func (x *HostCallResult) String() string {
 func (*HostCallResult) ProtoMessage() {}
 
 func (x *HostCallResult) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[23]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2262,7 +2200,7 @@ func (x *HostCallResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostCallResult.ProtoReflect.Descriptor instead.
 func (*HostCallResult) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{23}
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *HostCallResult) GetResult() isHostCallResult_Result {
@@ -2367,17 +2305,14 @@ const file_proto_torana_v2_torana_proto_rawDesc = "" +
 	"\x0fupstream_status\x18\x06 \x01(\x05R\x0eupstreamStatus\x12\x1f\n" +
 	"\vduration_ms\x18\a \x01(\x03R\n" +
 	"durationMs\x128\n" +
-	"\x18provider_extensions_json\x18\b \x01(\fR\x16providerExtensionsJson\"g\n" +
-	"\rToolCallStart\x12\x14\n" +
-	"\x05index\x18\x01 \x01(\x05R\x05index\x12\x0e\n" +
-	"\x02id\x18\x02 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x03 \x01(\tR\x04name\x12\x1c\n" +
-	"\tsignature\x18\x04 \x01(\tR\tsignature\"N\n" +
+	"\x18provider_extensions_json\x18\b \x01(\fR\x16providerExtensionsJson\"O\n" +
+	"\vToolCallRef\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1c\n" +
+	"\tsignature\x18\x03 \x01(\tR\tsignature\"N\n" +
 	"\rToolCallDelta\x12\x14\n" +
 	"\x05index\x18\x01 \x01(\x05R\x05index\x12'\n" +
-	"\x0farguments_delta\x18\x02 \x01(\tR\x0eargumentsDelta\"#\n" +
-	"\vToolCallEnd\x12\x14\n" +
-	"\x05index\x18\x01 \x01(\x05R\x05index\";\n" +
+	"\x0farguments_delta\x18\x02 \x01(\tR\x0eargumentsDelta\";\n" +
 	"\vStreamError\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"H\n" +
@@ -2386,28 +2321,26 @@ const file_proto_torana_v2_torana_proto_rawDesc = "" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12\x14\n" +
 	"\x05model\x18\x03 \x01(\tR\x05model\"2\n" +
 	"\vMessageStop\x12#\n" +
-	"\rfinish_reason\x18\x01 \x01(\tR\ffinishReason\"=\n" +
+	"\rfinish_reason\x18\x01 \x01(\tR\ffinishReason\"r\n" +
 	"\x11ContentBlockStart\x12\x14\n" +
 	"\x05index\x18\x01 \x01(\x05R\x05index\x12\x12\n" +
-	"\x04kind\x18\x02 \x01(\tR\x04kind\"(\n" +
+	"\x04kind\x18\x02 \x01(\tR\x04kind\x123\n" +
+	"\ttool_call\x18\x03 \x01(\v2\x16.torana.v2.ToolCallRefR\btoolCall\"(\n" +
 	"\x10ContentBlockStop\x12\x14\n" +
-	"\x05index\x18\x01 \x01(\x05R\x05index\"\xec\x05\n" +
+	"\x05index\x18\x01 \x01(\x05R\x05index\"\xc3\x04\n" +
 	"\vStreamEvent\x12\x1f\n" +
 	"\n" +
 	"text_delta\x18\x01 \x01(\tH\x00R\ttextDelta\x12'\n" +
 	"\x0ethinking_delta\x18\x02 \x01(\tH\x00R\rthinkingDelta\x12B\n" +
-	"\x0ftool_call_start\x18\x03 \x01(\v2\x18.torana.v2.ToolCallStartH\x00R\rtoolCallStart\x12B\n" +
-	"\x0ftool_call_delta\x18\x04 \x01(\v2\x18.torana.v2.ToolCallDeltaH\x00R\rtoolCallDelta\x12<\n" +
-	"\rtool_call_end\x18\x05 \x01(\v2\x16.torana.v2.ToolCallEndH\x00R\vtoolCallEnd\x12%\n" +
-	"\rfinish_reason\x18\x06 \x01(\tH\x00R\ffinishReason\x12(\n" +
-	"\x05usage\x18\a \x01(\v2\x10.torana.v2.UsageH\x00R\x05usage\x12.\n" +
-	"\x05error\x18\b \x01(\v2\x16.torana.v2.StreamErrorH\x00R\x05error\x12)\n" +
-	"\x0fsignature_delta\x18\t \x01(\tH\x00R\x0esignatureDelta\x12>\n" +
-	"\rmessage_start\x18\n" +
-	" \x01(\v2\x17.torana.v2.MessageStartH\x00R\fmessageStart\x12;\n" +
-	"\fmessage_stop\x18\v \x01(\v2\x16.torana.v2.MessageStopH\x00R\vmessageStop\x12N\n" +
-	"\x13content_block_start\x18\f \x01(\v2\x1c.torana.v2.ContentBlockStartH\x00R\x11contentBlockStart\x12K\n" +
-	"\x12content_block_stop\x18\r \x01(\v2\x1b.torana.v2.ContentBlockStopH\x00R\x10contentBlockStopB\a\n" +
+	"\x0ftool_call_delta\x18\x03 \x01(\v2\x18.torana.v2.ToolCallDeltaH\x00R\rtoolCallDelta\x12(\n" +
+	"\x05usage\x18\x04 \x01(\v2\x10.torana.v2.UsageH\x00R\x05usage\x12.\n" +
+	"\x05error\x18\x05 \x01(\v2\x16.torana.v2.StreamErrorH\x00R\x05error\x12)\n" +
+	"\x0fsignature_delta\x18\x06 \x01(\tH\x00R\x0esignatureDelta\x12>\n" +
+	"\rmessage_start\x18\a \x01(\v2\x17.torana.v2.MessageStartH\x00R\fmessageStart\x12;\n" +
+	"\fmessage_stop\x18\b \x01(\v2\x16.torana.v2.MessageStopH\x00R\vmessageStop\x12N\n" +
+	"\x13content_block_start\x18\t \x01(\v2\x1c.torana.v2.ContentBlockStartH\x00R\x11contentBlockStart\x12K\n" +
+	"\x12content_block_stop\x18\n" +
+	" \x01(\v2\x1b.torana.v2.ContentBlockStopH\x00R\x10contentBlockStopB\a\n" +
 	"\x05event\">\n" +
 	"\fStreamEvents\x12.\n" +
 	"\x06events\x18\x01 \x03(\v2\x16.torana.v2.StreamEventR\x06events\"\xbf\x01\n" +
@@ -2494,7 +2427,7 @@ func file_proto_torana_v2_torana_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_torana_v2_torana_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_proto_torana_v2_torana_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_proto_torana_v2_torana_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_proto_torana_v2_torana_proto_goTypes = []any{
 	(Hook)(0),                 // 0: torana.v2.Hook
 	(Disposition)(0),          // 1: torana.v2.Disposition
@@ -2505,24 +2438,23 @@ var file_proto_torana_v2_torana_proto_goTypes = []any{
 	(*Usage)(nil),             // 6: torana.v2.Usage
 	(*ChatRequest)(nil),       // 7: torana.v2.ChatRequest
 	(*ChatResponse)(nil),      // 8: torana.v2.ChatResponse
-	(*ToolCallStart)(nil),     // 9: torana.v2.ToolCallStart
+	(*ToolCallRef)(nil),       // 9: torana.v2.ToolCallRef
 	(*ToolCallDelta)(nil),     // 10: torana.v2.ToolCallDelta
-	(*ToolCallEnd)(nil),       // 11: torana.v2.ToolCallEnd
-	(*StreamError)(nil),       // 12: torana.v2.StreamError
-	(*MessageStart)(nil),      // 13: torana.v2.MessageStart
-	(*MessageStop)(nil),       // 14: torana.v2.MessageStop
-	(*ContentBlockStart)(nil), // 15: torana.v2.ContentBlockStart
-	(*ContentBlockStop)(nil),  // 16: torana.v2.ContentBlockStop
-	(*StreamEvent)(nil),       // 17: torana.v2.StreamEvent
-	(*StreamEvents)(nil),      // 18: torana.v2.StreamEvents
-	(*HttpRequest)(nil),       // 19: torana.v2.HttpRequest
-	(*HttpResponse)(nil),      // 20: torana.v2.HttpResponse
-	(*TickRequest)(nil),       // 21: torana.v2.TickRequest
-	(*TickOutcome)(nil),       // 22: torana.v2.TickOutcome
-	(*HookInput)(nil),         // 23: torana.v2.HookInput
-	(*HookResult)(nil),        // 24: torana.v2.HookResult
-	(*HostError)(nil),         // 25: torana.v2.HostError
-	(*HostCallResult)(nil),    // 26: torana.v2.HostCallResult
+	(*StreamError)(nil),       // 11: torana.v2.StreamError
+	(*MessageStart)(nil),      // 12: torana.v2.MessageStart
+	(*MessageStop)(nil),       // 13: torana.v2.MessageStop
+	(*ContentBlockStart)(nil), // 14: torana.v2.ContentBlockStart
+	(*ContentBlockStop)(nil),  // 15: torana.v2.ContentBlockStop
+	(*StreamEvent)(nil),       // 16: torana.v2.StreamEvent
+	(*StreamEvents)(nil),      // 17: torana.v2.StreamEvents
+	(*HttpRequest)(nil),       // 18: torana.v2.HttpRequest
+	(*HttpResponse)(nil),      // 19: torana.v2.HttpResponse
+	(*TickRequest)(nil),       // 20: torana.v2.TickRequest
+	(*TickOutcome)(nil),       // 21: torana.v2.TickOutcome
+	(*HookInput)(nil),         // 22: torana.v2.HookInput
+	(*HookResult)(nil),        // 23: torana.v2.HookResult
+	(*HostError)(nil),         // 24: torana.v2.HostError
+	(*HostCallResult)(nil),    // 25: torana.v2.HostCallResult
 }
 var file_proto_torana_v2_torana_proto_depIdxs = []int32{
 	4,  // 0: torana.v2.Message.tool_calls:type_name -> torana.v2.ToolCall
@@ -2530,34 +2462,33 @@ var file_proto_torana_v2_torana_proto_depIdxs = []int32{
 	5,  // 2: torana.v2.ChatRequest.tools:type_name -> torana.v2.ToolDef
 	3,  // 3: torana.v2.ChatResponse.message:type_name -> torana.v2.Message
 	6,  // 4: torana.v2.ChatResponse.usage:type_name -> torana.v2.Usage
-	9,  // 5: torana.v2.StreamEvent.tool_call_start:type_name -> torana.v2.ToolCallStart
+	9,  // 5: torana.v2.ContentBlockStart.tool_call:type_name -> torana.v2.ToolCallRef
 	10, // 6: torana.v2.StreamEvent.tool_call_delta:type_name -> torana.v2.ToolCallDelta
-	11, // 7: torana.v2.StreamEvent.tool_call_end:type_name -> torana.v2.ToolCallEnd
-	6,  // 8: torana.v2.StreamEvent.usage:type_name -> torana.v2.Usage
-	12, // 9: torana.v2.StreamEvent.error:type_name -> torana.v2.StreamError
-	13, // 10: torana.v2.StreamEvent.message_start:type_name -> torana.v2.MessageStart
-	14, // 11: torana.v2.StreamEvent.message_stop:type_name -> torana.v2.MessageStop
-	15, // 12: torana.v2.StreamEvent.content_block_start:type_name -> torana.v2.ContentBlockStart
-	16, // 13: torana.v2.StreamEvent.content_block_stop:type_name -> torana.v2.ContentBlockStop
-	17, // 14: torana.v2.StreamEvents.events:type_name -> torana.v2.StreamEvent
-	7,  // 15: torana.v2.HookInput.chat_request:type_name -> torana.v2.ChatRequest
-	8,  // 16: torana.v2.HookInput.chat_response:type_name -> torana.v2.ChatResponse
-	17, // 17: torana.v2.HookInput.stream_event:type_name -> torana.v2.StreamEvent
-	19, // 18: torana.v2.HookInput.http_request:type_name -> torana.v2.HttpRequest
-	21, // 19: torana.v2.HookInput.tick_request:type_name -> torana.v2.TickRequest
-	1,  // 20: torana.v2.HookResult.disposition:type_name -> torana.v2.Disposition
-	7,  // 21: torana.v2.HookResult.chat_request:type_name -> torana.v2.ChatRequest
-	8,  // 22: torana.v2.HookResult.chat_response:type_name -> torana.v2.ChatResponse
-	18, // 23: torana.v2.HookResult.stream_events:type_name -> torana.v2.StreamEvents
-	20, // 24: torana.v2.HookResult.http_response:type_name -> torana.v2.HttpResponse
-	22, // 25: torana.v2.HookResult.tick_outcome:type_name -> torana.v2.TickOutcome
-	2,  // 26: torana.v2.HostError.code:type_name -> torana.v2.ErrorCode
-	25, // 27: torana.v2.HostCallResult.error:type_name -> torana.v2.HostError
-	28, // [28:28] is the sub-list for method output_type
-	28, // [28:28] is the sub-list for method input_type
-	28, // [28:28] is the sub-list for extension type_name
-	28, // [28:28] is the sub-list for extension extendee
-	0,  // [0:28] is the sub-list for field type_name
+	6,  // 7: torana.v2.StreamEvent.usage:type_name -> torana.v2.Usage
+	11, // 8: torana.v2.StreamEvent.error:type_name -> torana.v2.StreamError
+	12, // 9: torana.v2.StreamEvent.message_start:type_name -> torana.v2.MessageStart
+	13, // 10: torana.v2.StreamEvent.message_stop:type_name -> torana.v2.MessageStop
+	14, // 11: torana.v2.StreamEvent.content_block_start:type_name -> torana.v2.ContentBlockStart
+	15, // 12: torana.v2.StreamEvent.content_block_stop:type_name -> torana.v2.ContentBlockStop
+	16, // 13: torana.v2.StreamEvents.events:type_name -> torana.v2.StreamEvent
+	7,  // 14: torana.v2.HookInput.chat_request:type_name -> torana.v2.ChatRequest
+	8,  // 15: torana.v2.HookInput.chat_response:type_name -> torana.v2.ChatResponse
+	16, // 16: torana.v2.HookInput.stream_event:type_name -> torana.v2.StreamEvent
+	18, // 17: torana.v2.HookInput.http_request:type_name -> torana.v2.HttpRequest
+	20, // 18: torana.v2.HookInput.tick_request:type_name -> torana.v2.TickRequest
+	1,  // 19: torana.v2.HookResult.disposition:type_name -> torana.v2.Disposition
+	7,  // 20: torana.v2.HookResult.chat_request:type_name -> torana.v2.ChatRequest
+	8,  // 21: torana.v2.HookResult.chat_response:type_name -> torana.v2.ChatResponse
+	17, // 22: torana.v2.HookResult.stream_events:type_name -> torana.v2.StreamEvents
+	19, // 23: torana.v2.HookResult.http_response:type_name -> torana.v2.HttpResponse
+	21, // 24: torana.v2.HookResult.tick_outcome:type_name -> torana.v2.TickOutcome
+	2,  // 25: torana.v2.HostError.code:type_name -> torana.v2.ErrorCode
+	24, // 26: torana.v2.HostCallResult.error:type_name -> torana.v2.HostError
+	27, // [27:27] is the sub-list for method output_type
+	27, // [27:27] is the sub-list for method input_type
+	27, // [27:27] is the sub-list for extension type_name
+	27, // [27:27] is the sub-list for extension extendee
+	0,  // [0:27] is the sub-list for field type_name
 }
 
 func init() { file_proto_torana_v2_torana_proto_init() }
@@ -2566,13 +2497,10 @@ func file_proto_torana_v2_torana_proto_init() {
 		return
 	}
 	file_proto_torana_v2_torana_proto_msgTypes[4].OneofWrappers = []any{}
-	file_proto_torana_v2_torana_proto_msgTypes[14].OneofWrappers = []any{
+	file_proto_torana_v2_torana_proto_msgTypes[13].OneofWrappers = []any{
 		(*StreamEvent_TextDelta)(nil),
 		(*StreamEvent_ThinkingDelta)(nil),
-		(*StreamEvent_ToolCallStart)(nil),
 		(*StreamEvent_ToolCallDelta)(nil),
-		(*StreamEvent_ToolCallEnd)(nil),
-		(*StreamEvent_FinishReason)(nil),
 		(*StreamEvent_Usage)(nil),
 		(*StreamEvent_Error)(nil),
 		(*StreamEvent_SignatureDelta)(nil),
@@ -2581,21 +2509,21 @@ func file_proto_torana_v2_torana_proto_init() {
 		(*StreamEvent_ContentBlockStart)(nil),
 		(*StreamEvent_ContentBlockStop)(nil),
 	}
-	file_proto_torana_v2_torana_proto_msgTypes[20].OneofWrappers = []any{
+	file_proto_torana_v2_torana_proto_msgTypes[19].OneofWrappers = []any{
 		(*HookInput_ChatRequest)(nil),
 		(*HookInput_ChatResponse)(nil),
 		(*HookInput_StreamEvent)(nil),
 		(*HookInput_HttpRequest)(nil),
 		(*HookInput_TickRequest)(nil),
 	}
-	file_proto_torana_v2_torana_proto_msgTypes[21].OneofWrappers = []any{
+	file_proto_torana_v2_torana_proto_msgTypes[20].OneofWrappers = []any{
 		(*HookResult_ChatRequest)(nil),
 		(*HookResult_ChatResponse)(nil),
 		(*HookResult_StreamEvents)(nil),
 		(*HookResult_HttpResponse)(nil),
 		(*HookResult_TickOutcome)(nil),
 	}
-	file_proto_torana_v2_torana_proto_msgTypes[23].OneofWrappers = []any{
+	file_proto_torana_v2_torana_proto_msgTypes[22].OneofWrappers = []any{
 		(*HostCallResult_Value)(nil),
 		(*HostCallResult_Error)(nil),
 	}
@@ -2605,7 +2533,7 @@ func file_proto_torana_v2_torana_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_torana_v2_torana_proto_rawDesc), len(file_proto_torana_v2_torana_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   24,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -35,7 +35,10 @@ func replaceFor(h v2.Hook) *v2.HookResult {
 	case v2.Hook_HOOK_AFTER_RESPONSE:
 		r.Payload = &v2.HookResult_ChatResponse{ChatResponse: &v2.ChatResponse{Model: "m"}}
 	case v2.Hook_HOOK_ON_STREAM_CHUNK:
-		r.Payload = &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{}}
+		// One event: a REPLACE emitting nothing is SUPPRESS, and is refused.
+		r.Payload = &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{
+			Events: []*v2.StreamEvent{{Event: &v2.StreamEvent_TextDelta{TextDelta: "x"}}},
+		}}
 	case v2.Hook_HOOK_ON_HTTP_REQUEST:
 		r.Payload = &v2.HookResult_HttpResponse{HttpResponse: &v2.HttpResponse{Status: 200}}
 	case v2.Hook_HOOK_ON_TICK:
@@ -102,6 +105,28 @@ func TestPayloadIsTheSoleDiscriminator(t *testing.T) {
 	}
 }
 
+// The export a plugin was called through is a second discriminator, and nothing
+// in the envelope forces the two to agree: a tick payload delivered to
+// run_before_request is a well-formed input to the wrong hook. Removing the hook
+// field stopped a frame contradicting ITSELF; this is the other half.
+func TestInputPayloadMustMatchTheInvokedHook(t *testing.T) {
+	for _, invoked := range allHooks {
+		for _, carried := range allHooks {
+			err := inputFor(carried).ValidateFor(invoked)
+			if invoked == carried {
+				if err != nil {
+					t.Errorf("%v with its own payload rejected: %v", invoked, err)
+				}
+				continue
+			}
+			if err == nil {
+				t.Errorf("%v accepted a %v payload — input misdispatch is not caught",
+					invoked, carried)
+			}
+		}
+	}
+}
+
 // An input with no payload names no hook, and must be rejected rather than
 // dispatched to a guess.
 func TestInputWithoutPayloadIsRejected(t *testing.T) {
@@ -111,6 +136,11 @@ func TestInputWithoutPayloadIsRejected(t *testing.T) {
 	}
 	if err := in.Validate(); err == nil {
 		t.Fatal("an input carrying no payload must be rejected")
+	}
+	for _, h := range allHooks {
+		if err := in.ValidateFor(h); err == nil {
+			t.Errorf("%v accepted an input with no payload", h)
+		}
 	}
 }
 
@@ -204,6 +234,18 @@ func TestMalformedResultsAreRejected(t *testing.T) {
 			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_SUPPRESS,
 				Payload: &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{}}},
 			"suppress emits nothing; carrying events means REPLACE was meant",
+		},
+		{
+			"REPLACE with no events", v2.Hook_HOOK_ON_STREAM_CHUNK,
+			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
+				Payload: &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{}}},
+			"a REPLACE emitting nothing is a second encoding of SUPPRESS",
+		},
+		{
+			"REPLACE with nil events", v2.Hook_HOOK_ON_STREAM_CHUNK,
+			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
+				Payload: &v2.HookResult_StreamEvents{}},
+			"same, with the wrapper present but empty",
 		},
 		{
 			"nil result", v2.Hook_HOOK_BEFORE_REQUEST, nil,

@@ -135,21 +135,18 @@ message ChatResponse {
 // Streaming
 // ---------------------------------------------------------------------------
 
-message ToolCallStart {
-  int32 index = 1;
-  string id = 2;
-  string name = 3;
+// Identifies the tool call a "tool_call" content block is assembling. Its
+// arguments arrive as ToolCallDelta events between the block's start and stop.
+message ToolCallRef {
+  string id = 1;
+  string name = 2;
   // Opaque provider token on the call (Gemini thoughtSignature); empty otherwise.
-  string signature = 4;
+  string signature = 3;
 }
 
 message ToolCallDelta {
   int32 index = 1;
   string arguments_delta = 2;
-}
-
-message ToolCallEnd {
-  int32 index = 1;
 }
 
 message StreamError {
@@ -172,40 +169,66 @@ message MessageStart {
   string model = 3;
 }
 
+// MessageStop closes the message and carries why it ended.
+//
+// finish_reason lives here rather than in an event of its own. v1 had a
+// standalone finish_reason event, which would have left two ways to say the
+// same thing — and one unambiguous representation per fact is the point of v2.
 message MessageStop {
   string finish_reason = 1;
 }
 
 // ContentBlockStart opens a text, thinking or tool-call block. Deltas that
 // follow belong to it until the matching stop.
+//
+// This is the ONLY block boundary. v1 had ToolCallStart/ToolCallEnd alongside
+// nothing for text or thinking, so a plugin needed one mechanism for tool calls
+// and inference for everything else. Folding tool calls in as a kind means an
+// assembler handles every block the same way.
 message ContentBlockStart {
   int32 index = 1;
   // "text", "thinking", "tool_call", or a provider-specific name passed
   // through verbatim.
   string kind = 2;
+  // Set when kind is "tool_call"; nil otherwise.
+  ToolCallRef tool_call = 3;
 }
 
 message ContentBlockStop {
   int32 index = 1;
 }
 
+// StreamEvent is one event in a streamed response.
+//
+// The canonical sequence, which adapters produce and plugins may rely on:
+//
+//   MessageStart{role, id, model}
+//     ContentBlockStart{index, kind}          kind "text" | "thinking"
+//       TextDelta / ThinkingDelta ...
+//     ContentBlockStop{index}
+//     ContentBlockStart{index, "tool_call", ToolCallRef{id, name}}
+//       ToolCallDelta{index, arguments_delta} ...
+//     ContentBlockStop{index}
+//   Usage
+//   MessageStop{finish_reason}
+//
+// Usage may arrive before or after MessageStop depending on the provider, and
+// StreamError may replace the remainder at any point. Everything else is
+// ordered as shown, and every block is opened and closed exactly once.
 message StreamEvent {
   oneof event {
     string text_delta = 1;
     string thinking_delta = 2;
-    ToolCallStart tool_call_start = 3;
-    ToolCallDelta tool_call_delta = 4;
-    ToolCallEnd tool_call_end = 5;
-    string finish_reason = 6;
-    Usage usage = 7;
-    StreamError error = 8;
+    ToolCallDelta tool_call_delta = 3;
+    Usage usage = 4;
+    StreamError error = 5;
     // Opaque provider signature paired with the surrounding block (Gemini
     // thoughtSignature on a standalone text/thought part).
-    string signature_delta = 9;
-    MessageStart message_start = 10;
-    MessageStop message_stop = 11;
-    ContentBlockStart content_block_start = 12;
-    ContentBlockStop content_block_stop = 13;
+    string signature_delta = 6;
+    MessageStart message_start = 7;
+    MessageStop message_stop = 8;
+    ContentBlockStart content_block_start = 9;
+    ContentBlockStop content_block_stop = 10;
   }
 }
 
