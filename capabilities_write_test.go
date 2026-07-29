@@ -16,9 +16,9 @@ func TestEveryMessageRoleHasAWriteGrant(t *testing.T) {
 
 	granted := map[WriteSection]bool{}
 	for _, role := range roles {
-		section, ok := MessageWriteSection(role)
-		if !ok {
-			t.Fatalf("role %q has no write grant", role)
+		section := MessageWriteSection(role)
+		if !IsModelledRole(role) {
+			t.Fatalf("role %q fell to the catch-all instead of its own grant", role)
 		}
 		if !IsWritePermission(string(section)) {
 			t.Errorf("%q is not in WritePermissions, so a manifest requesting it is rejected", section)
@@ -29,7 +29,7 @@ func TestEveryMessageRoleHasAWriteGrant(t *testing.T) {
 	// Every message-role grant must be reachable, so the vocabulary carries
 	// nothing an author cannot actually use. The catch-all is reachable only
 	// from roles Torana does not model, so it is checked that way.
-	if s, _ := MessageWriteSection("a_role_torana_does_not_model"); s == SectionMessagesOther {
+	if MessageWriteSection("a_role_torana_does_not_model") == SectionMessagesOther {
 		granted[SectionMessagesOther] = true
 	}
 	for _, p := range WritePermissions {
@@ -38,6 +38,17 @@ func TestEveryMessageRoleHasAWriteGrant(t *testing.T) {
 		}
 		if !granted[WriteSection(p)] {
 			t.Errorf("%q is offered but no role maps to it", p)
+		}
+	}
+}
+
+// MessageWriteSection returns one value, not (value, ok). A host writing the
+// idiomatic `if !ok { reject }` against a two-value form would have rejected
+// every unmodelled role — the exact failure the catch-all prevents.
+func TestMessageWriteSectionAlwaysAnswers(t *testing.T) {
+	for _, role := range []string{"user", "developer", "", "anything_at_all"} {
+		if MessageWriteSection(role) == "" {
+			t.Errorf("role %q produced no grant; every role must map to one", role)
 		}
 	}
 }
@@ -52,8 +63,8 @@ func TestEveryMessageRoleHasAWriteGrant(t *testing.T) {
 // to "allowed" would make it an unguarded write path.
 func TestUnmodelledRoleFallsToTheCatchAllGrant(t *testing.T) {
 	for _, role := range []string{"", "USER", "tool_result", "some_future_role"} {
-		section, modelled := MessageWriteSection(role)
-		if modelled {
+		section := MessageWriteSection(role)
+		if IsModelledRole(role) {
 			t.Errorf("role %q reported as modelled by name", role)
 		}
 		if section != SectionMessagesOther {
@@ -72,8 +83,8 @@ func TestUnmodelledRoleFallsToTheCatchAllGrant(t *testing.T) {
 // rewrite user prompts.
 func TestModelledRolesDoNotFallToTheCatchAll(t *testing.T) {
 	for _, role := range []string{"user", "assistant", "system", "tool", "developer"} {
-		section, modelled := MessageWriteSection(role)
-		if !modelled {
+		section := MessageWriteSection(role)
+		if !IsModelledRole(role) {
 			t.Errorf("role %q is not reported as modelled", role)
 		}
 		if section == SectionMessagesOther {

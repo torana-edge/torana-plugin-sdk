@@ -92,27 +92,44 @@ const (
 )
 
 // MessageWriteSection returns the grant governing writes to a message of the
-// given role. Every role maps to something: unmodelled roles fall to
-// SectionMessagesOther, which still requires a grant.
+// given role. Every role maps to one, so there is nothing to report as absent —
+// unmodelled roles fall to SectionMessagesOther, which still requires a grant.
 //
-// The second return reports whether the role is one Torana models by name. It
-// is informational — a caller must not treat false as "unrestricted", which is
-// the reading that would turn every new provider role into an unguarded write
-// path.
-func MessageWriteSection(role string) (WriteSection, bool) {
+// This deliberately does NOT return (WriteSection, bool). It did briefly, with
+// false meaning "this is the catch-all", which reads as Go's (value, ok) idiom
+// and means the opposite of it: a host writing the idiomatic
+//
+//	section, ok := MessageWriteSection(role)
+//	if !ok { reject }
+//
+// would have rejected every unmodelled role — the exact failure the catch-all
+// exists to prevent. Use IsModelledRole when the distinction is actually wanted.
+func MessageWriteSection(role string) WriteSection {
 	switch role {
 	case "user":
-		return SectionMessagesUser, true
+		return SectionMessagesUser
 	case "assistant":
-		return SectionMessagesAssistant, true
+		return SectionMessagesAssistant
 	case "system":
-		return SectionMessagesSystem, true
+		return SectionMessagesSystem
 	case "tool":
-		return SectionMessagesTool, true
+		return SectionMessagesTool
 	case "developer":
-		return SectionMessagesDeveloper, true
+		return SectionMessagesDeveloper
 	}
-	return SectionMessagesOther, false
+	return SectionMessagesOther
+}
+
+// IsModelledRole reports whether Torana names this role, as opposed to handling
+// it through the catch-all grant.
+//
+// Useful for diagnostics — telling an operator that a plugin asked for
+// ir.messages.write.other because the provider sent a role Torana does not
+// model is more informative than naming the grant alone. It must not be used to
+// decide whether a write is permitted: that is MessageWriteSection's job, and
+// every role has an answer.
+func IsModelledRole(role string) bool {
+	return MessageWriteSection(role) != SectionMessagesOther
 }
 
 // IsWritePermission reports whether name is a write grant.
