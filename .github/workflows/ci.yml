@@ -76,6 +76,17 @@ jobs:
           protoc -I proto --descriptor_set_out=/tmp/canonical.pb proto/torana/v1/torana.proto
           protoc -I rust/torana-plugin-sdk/proto --descriptor_set_out=/tmp/crate.pb rust/torana-plugin-sdk/proto/torana/v1/torana.proto
           cmp /tmp/canonical.pb /tmp/crate.pb
+          # The crate needs its own copy because a crates.io package cannot read
+          # files outside its archive, so both versions are checked. Comparing
+          # descriptor sets rather than text means comments may differ while any
+          # field, type or number change fails.
+          test -f rust/torana-plugin-sdk/proto/torana/v2/torana.proto || {
+            echo "::error::Rust crate is missing the v2 ABI proto" >&2
+            exit 1
+          }
+          protoc -I proto --descriptor_set_out=/tmp/canonical-v2.pb proto/torana/v2/torana.proto
+          protoc -I rust/torana-plugin-sdk/proto --descriptor_set_out=/tmp/crate-v2.pb rust/torana-plugin-sdk/proto/torana/v2/torana.proto
+          cmp /tmp/canonical-v2.pb /tmp/crate-v2.pb
       - run: cargo fmt --manifest-path rust/torana-plugin-sdk/Cargo.toml --check
       - run: cargo clippy --manifest-path rust/torana-plugin-sdk/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path rust/torana-plugin-sdk/Cargo.toml

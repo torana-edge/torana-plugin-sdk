@@ -1,0 +1,375 @@
+syntax = "proto3";
+
+package torana.v2;
+option go_package = "github.com/torana-edge/torana-plugin-sdk/pb/v2";
+
+// The Torana plugin ABI, version 2.
+//
+// v2 is a clean replacement for v1, not an extension of it. Every difference
+// below fixes something v1 could only document its way around:
+//
+//   - Hook payloads are enveloped and self-describing. In v1 a mis-dispatched
+//     payload decoded as an EMPTY message of whatever type the hook expected,
+//     and every plugin treated that as a legitimate empty request.
+//   - Results carry an explicit disposition. v1 needed a `handled` bool on
+//     three of five result types purely because an all-defaults protobuf
+//     message marshals to zero bytes — a wire artifact promoted into the API,
+//     and the most-documented footgun in the system.
+//   - Host calls return a typed result. v1 returned a bare string in eight
+//     different shapes, with errors indistinguishable from a plugin's own
+//     stored data.
+//   - The response hook gets a real ChatResponse. v1 carried responses in a
+//     ChatRequest, which four independent auditors reported as a bug.
+//
+// Tool-call arguments and tool parameters remain `bytes` holding verbatim JSON.
+// That is load-bearing, not laziness: decoding and re-encoding them reorders
+// object keys, which changes the cacheable prompt prefix and silently costs the
+// operator a cache hit on every request a plugin touches.
+
+// ---------------------------------------------------------------------------
+// Chat IR
+// ---------------------------------------------------------------------------
+
+// A single turn in a chat conversation.
+message Message {
+  string role = 1;
+  string content = 2;
+  // JSON array of multimodal parts (e.g. vision).
+  bytes content_parts_json = 3;
+  string thinking = 4;
+  string thinking_signature = 5;
+  string redacted_thinking = 6;
+  repeated ToolCall tool_calls = 7;
+  string tool_call_id = 8;
+  string tool_name = 9;
+  // Opaque provider cache breakpoint on this message (JSON object, e.g.
+  // Anthropic {"type":"ephemeral"}). Preserved verbatim across the plugin
+  // boundary so mutating plugins don't strip prompt-cache markers.
+  bytes cache_control_json = 10;
+}
+
+// An assistant's request to invoke a tool.
+message ToolCall {
+  string id = 1;
+  string name = 2;
+  // Verbatim JSON. Never decode and re-encode: key order is part of the
+  // cacheable prefix.
+  bytes arguments_json = 3;
+  // Opaque provider token bound to this call (e.g. Gemini thoughtSignature).
+  // Preserved across round-trips so replayed history keeps the model's
+  // reasoning binding; empty for providers that don't emit one.
+  string signature = 4;
+}
+
+// Describes a function available to the model.
+message ToolDef {
+  string name = 1;
+  string description = 2;
+  // Verbatim JSON Schema. Same rule as arguments_json.
+  bytes parameters_json = 3;
+  bool strict = 4;
+  // Opaque cache breakpoint after this tool definition (JSON object).
+  bytes cache_control_json = 5;
+}
+
+// Token accounting reported by the provider.
+message Usage {
+  int32 input_tokens = 1;
+  int32 output_tokens = 2;
+  // Input tokens served from the provider's prompt cache.
+  int32 cache_read_tokens = 3;
+  // Input tokens written to the cache this turn; 0 if unreported.
+  int32 cache_write_tokens = 4;
+}
+
+// Canonical representation of a chat completion request.
+message ChatRequest {
+  string model = 1;
+  repeated Message messages = 2;
+  repeated ToolDef tools = 3;
+  bool stream = 4;
+
+  optional int32 max_tokens = 5;
+  optional double temperature = 6;
+  optional double top_p = 7;
+  repeated string stop_sequences = 8;
+
+  // Unparsed provider fields, passed through transparently as JSON.
+  bytes provider_extensions_json = 9;
+  bytes safety_settings_json = 10;
+
+  // Proxy-internal metadata the host publishes to plugins: the routed provider,
+  // the conversation id, the request path. Never serialized to the wire.
+  //
+  // In v1 this doubled as the channel plugins used to return verdicts, which is
+  // why a plugin could block a request without holding the capability to block
+  // — the host read the key long after it had lost track of who wrote it.
+  // Verdicts are host calls in v2, so this is host-owned: a plugin changing it
+  // is a protocol violation, not a grantable edit.
+  bytes torana_meta_json = 11;
+}
+
+// Canonical representation of a completed, non-streamed response.
+//
+// v1 had no such message. The response hook received a ChatRequest carrying,
+// depending on which of three code paths produced it, a synthesized assistant
+// message, the outbound request history, or nothing at all — a difference the
+// plugin could not observe. Four independent auditors reported that as a bug.
+message ChatResponse {
+  // Model that actually answered, which may differ from the one requested.
+  string model = 1;
+  // Provider's response id, empty when it reported none.
+  string id = 2;
+  // The assistant's turn.
+  Message message = 3;
+  string finish_reason = 4;
+  Usage usage = 5;
+  // Upstream HTTP status. Non-2xx responses reach observational hooks too.
+  int32 upstream_status = 6;
+  int64 duration_ms = 7;
+  // Provider fields Torana did not model, verbatim.
+  bytes provider_extensions_json = 8;
+}
+
+// ---------------------------------------------------------------------------
+// Streaming
+// ---------------------------------------------------------------------------
+
+message ToolCallStart {
+  int32 index = 1;
+  string id = 2;
+  string name = 3;
+  // Opaque provider token on the call (Gemini thoughtSignature); empty otherwise.
+  string signature = 4;
+}
+
+message ToolCallDelta {
+  int32 index = 1;
+  string arguments_delta = 2;
+}
+
+message ToolCallEnd {
+  int32 index = 1;
+}
+
+message StreamError {
+  int32 code = 1;
+  string message = 2;
+}
+
+message StreamEvent {
+  oneof event {
+    string text_delta = 1;
+    string thinking_delta = 2;
+    ToolCallStart tool_call_start = 3;
+    ToolCallDelta tool_call_delta = 4;
+    ToolCallEnd tool_call_end = 5;
+    string finish_reason = 6;
+    Usage usage = 7;
+    StreamError error = 8;
+    // Opaque provider signature paired with the surrounding block (Gemini
+    // thoughtSignature on a standalone text/thought part).
+    string signature_delta = 9;
+  }
+}
+
+// StreamEvents exists because a protobuf oneof cannot hold a repeated field.
+message StreamEvents {
+  repeated StreamEvent events = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Plugin-served HTTP
+// ---------------------------------------------------------------------------
+
+// Incoming HTTP request forwarded to a plugin's run_on_http_request hook.
+// Built directly from net/http — does not cross the chat IR.
+message HttpRequest {
+  string method = 1;
+  string path = 2;
+  // Raw query string, without the leading "?". v1 dropped this entirely, so a
+  // plugin serving a page could not read its own query parameters.
+  string query = 3;
+  // "http" or "https".
+  string scheme = 4;
+  // Caller address, for a plugin that wants to refuse non-local requests
+  // itself. The host has already applied its own guard before dispatching.
+  string remote_addr = 5;
+  // JSON-encoded map of request headers (map[string][]string), filtered by the
+  // host to the same allowlist the chat path uses.
+  bytes headers_json = 6;
+  bytes body = 7;
+}
+
+// Response produced by a plugin's run_on_http_request hook.
+message HttpResponse {
+  int32 status = 1;
+  // JSON-encoded map of response headers (map[string][]string). The host
+  // applies its own allowlist; anything outside it fails the response.
+  bytes headers_json = 2;
+  bytes body = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Background ticks
+// ---------------------------------------------------------------------------
+
+// Fired periodically by the host, with no request in flight.
+//
+// Every other hook is reactive: a plugin can only act while a request is
+// passing through it. This one exists so a plugin can act when nothing is
+// happening — refreshing a provider cache before it lapses, emitting a periodic
+// report, expiring its own state.
+//
+// Requires env.background_tick. Running code with no request in flight is a
+// capability an operator should grant deliberately: a plugin holding it can act
+// — and spend — outside any request the operator can see.
+message TickRequest {
+  // Monotonically increasing within one scheduler, starting at 1. Resets if the
+  // scheduler restarts, so treat it as an ordering hint rather than a durable
+  // counter.
+  uint64 tick_id = 1;
+  // Host wall-clock time. Plugins have no clock of their own: WASI preview1
+  // exposes none, and this is the only time source they get.
+  int64 unix_millis = 2;
+  // Configured interval, so a plugin can reason about elapsed time without
+  // assuming a particular cadence.
+  int64 interval_ms = 3;
+}
+
+// What a plugin did during a tick. Reported for observability only; the host
+// attaches no meaning to it.
+message TickOutcome {
+  int32 actions = 1;
+  string note = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Hook envelopes
+// ---------------------------------------------------------------------------
+
+// Hook names the hook a payload belongs to.
+//
+// v1 handed each hook a bare message. A payload delivered to the wrong hook
+// therefore decoded as an EMPTY message of the expected type — protobuf treats
+// unknown fields as unknown, not as an error — and every plugin read that as a
+// legitimate empty request. Naming the hook on the wire makes the mismatch an
+// error instead of a silent no-op.
+enum Hook {
+  HOOK_UNSPECIFIED = 0;
+  HOOK_BEFORE_REQUEST = 1;
+  HOOK_AFTER_RESPONSE = 2;
+  HOOK_ON_STREAM_CHUNK = 3;
+  HOOK_ON_HTTP_REQUEST = 4;
+  HOOK_ON_TICK = 5;
+}
+
+// Disposition states what a plugin wants done with the input it was given.
+//
+// This replaces v1's `handled` bool, which existed only because an all-defaults
+// protobuf message marshals to zero bytes, making "suppress" indistinguishable
+// from "pass through". A hook that changes nothing still returns zero bytes at
+// the ABI level; a hook that returns a frame must say what it means.
+enum Disposition {
+  // Never valid in a returned frame. A frame that says nothing is a protocol
+  // error, and the host traps rather than guessing.
+  DISPOSITION_UNSPECIFIED = 0;
+  // Use the host's input unchanged. Equivalent to returning zero bytes, and
+  // accepted so a plugin can be explicit.
+  DISPOSITION_PASS = 1;
+  // Use the frame's payload instead of the input.
+  DISPOSITION_REPLACE = 2;
+  // Drop the input and emit nothing. Stream events only.
+  DISPOSITION_SUPPRESS = 3;
+}
+
+// HookInput is what every hook receives.
+message HookInput {
+  Hook hook = 1;
+  // Minor version of the v2 contract the host is speaking. Additive changes
+  // bump this; a plugin may use it to detect fields it can rely on.
+  uint32 abi_minor = 2;
+  // Host-assigned request id, stable for the life of one request. Stream hooks
+  // for the same response share it.
+  uint64 request_id = 3;
+  // Whether the host will apply a REPLACE. False for observational dispatches —
+  // the streaming and error response paths — so a plugin can tell that its
+  // mutations would be discarded instead of finding out by their having no
+  // effect, which is what v1 offered.
+  bool mutable = 4;
+
+  oneof payload {
+    ChatRequest chat_request = 5;
+    ChatResponse chat_response = 6;
+    StreamEvent stream_event = 7;
+    HttpRequest http_request = 8;
+    TickRequest tick_request = 9;
+  }
+}
+
+// HookResult is what every hook returns, when it returns anything at all.
+//
+// Returning zero bytes still means "pass through" — that is unambiguous at the
+// ABI level, because it is a length rather than a message.
+message HookResult {
+  // Must match the hook that was dispatched. A mismatch is a protocol error.
+  Hook hook = 1;
+  Disposition disposition = 2;
+
+  oneof payload {
+    ChatRequest chat_request = 3;
+    ChatResponse chat_response = 4;
+    StreamEvents stream_events = 5;
+    HttpResponse http_response = 6;
+    TickOutcome tick_outcome = 7;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Host calls
+// ---------------------------------------------------------------------------
+
+// ErrorCode classifies a failed host call.
+//
+// v1 returned a bare string, and the same channel carried both the plugin's own
+// stored data and the host's errors. Telling them apart took 55 lines of
+// heuristics in the SDK whose own comment conceded the ambiguity was
+// unresolvable. Notably, "the key is absent" and "durable state is not
+// configured at all" were indistinguishable, so a plugin could not tell a fresh
+// store from a disabled one.
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  // The capability was not granted. The plugin asked for something its manifest
+  // may not even declare.
+  ERROR_CODE_PERMISSION_DENIED = 1;
+  // The key, conversation or record does not exist.
+  ERROR_CODE_NOT_FOUND = 2;
+  // The feature exists but the operator has not configured it — no durable
+  // state store, no offload provider, no pricing table.
+  ERROR_CODE_NOT_CONFIGURED = 3;
+  // Configured but not usable right now: upstream down, budget exhausted.
+  ERROR_CODE_UNAVAILABLE = 4;
+  // The plugin's arguments did not parse or did not make sense.
+  ERROR_CODE_INVALID_ARGUMENT = 5;
+  // The host failed for a reason the plugin cannot act on.
+  ERROR_CODE_INTERNAL = 6;
+}
+
+message HostError {
+  ErrorCode code = 1;
+  // Human-readable, for logs. Plugins should branch on `code`, never on this.
+  string message = 2;
+}
+
+// HostCallResult is what every host call returns.
+//
+// A successful call with no value sets `value` to empty bytes, which is
+// distinguishable from an error — unlike v1, where an empty string meant
+// "granted but no value", "cache miss", "key absent", "feature unconfigured",
+// and "the host refused to write an empty payload", all at once.
+message HostCallResult {
+  oneof result {
+    bytes value = 1;
+    HostError error = 2;
+  }
+}
