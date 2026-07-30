@@ -7,106 +7,176 @@ import (
 // Executable before/after fixtures for the bound-signature rule.
 //
 // These exist because the rule was previously stated only in prose, in a
-// Migration B checklist, where nothing could hold the implementation to it. A
-// verifier is correct on this axis exactly when it reproduces every case here.
+// Migration B checklist, where nothing could hold the implementation to it.
 //
-// They are exported deliberately: Migration B lives in torana-edge and must be
-// able to run the SDK's own cases rather than reimplement its reading of them.
+// They deliberately do NOT expose whether bound content changed. That boolean
+// is the answer a verifier must COMPUTE — transactionally, over the binding's
+// scope, correlating by block index. An earlier version of these fixtures
+// handed it over as input, which meant a verifier could compare per event,
+// correlate the wrong index, omit id/name or a fragment from the scope, or
+// simply trust the field, and still reproduce every case. A fixture that
+// supplies the answer tests nothing.
+//
+// A verifier is correct on this axis exactly when, given Accepted and Returned,
+// its own scope diff plus ClassifySignatureMutation yields Want for the block
+// at Index.
+//
+// Exported because Migration B lives in torana-edge and must run the SDK's own
+// cases rather than reimplement its reading of them.
 
-// SignatureFixture is one accepted→returned tool block and the verdict the
-// verifier must reach.
-type SignatureFixture struct {
+// StreamFixture is one accepted→returned stream and the verdict a verifier must
+// reach for the signed block at Index.
+type StreamFixture struct {
 	// Name identifies the case in failures.
 	Name string
-	// AcceptedSignature is the token on the stream the host handed the plugin.
-	AcceptedSignature string
-	// ReturnedSignature is the token on the plugin's output.
-	ReturnedSignature string
-	// BoundContentChanged is computed over the WHOLE binding scope — for a
-	// tool block, start id/name plus every arguments_delta sharing the index.
-	// Never per event: see the transactional note in the package comment.
-	BoundContentChanged bool
-	// Want is the classification ClassifySignatureMutation must return.
+	// Accepted is the event sequence the host handed the plugin.
+	Accepted []*pbv2.StreamEvent
+	// Returned is the sequence the plugin produced.
+	Returned []*pbv2.StreamEvent
+	// Index is the content block the expectation is about. Fixtures with more
+	// than one block exist precisely to catch verifiers that correlate wrongly.
+	Index int32
+	// Want is the classification for that block's signature.
 	Want SignatureMutation
 	// Why states the consequence of getting this case wrong.
 	Why string
 }
 
-// SignatureFixtures returns every bound-signature case, including the two the
-// SDK itself produces (pass and argument replacement).
-func SignatureFixtures() []SignatureFixture {
-	return []SignatureFixture{
+const (
+	sigA = "provider-token-a"
+	sigB = "provider-token-b"
+)
+
+// SignatureStreamFixtures returns the cross-repo transactional contract.
+func SignatureStreamFixtures() []StreamFixture {
+	return []StreamFixture{
 		{
-			Name:              "pass through, nothing touched",
-			AcceptedSignature: "sig-a",
-			ReturnedSignature: "sig-a",
-			Want:              SignatureIntact,
-			Why: "StreamHandler suppresses fragments and re-emits them byte-identically. " +
-				"Judging at the suppression instead of across the block would reject every " +
+			Name:     "suppress then byte-identical re-emission",
+			Accepted: toolBlock(0, "call_1", "read_file", sigA, `{"path":"/a"}`),
+			Returned: toolBlock(0, "call_1", "read_file", sigA, `{"path":"/a"}`),
+			Index:    0,
+			Want:     SignatureIntact,
+			Why: "StreamHandler suppresses fragments and replays them. A verifier that " +
+				"judges at the suppression, rather than across the block, rejects every " +
 				"buffering assembler.",
 		},
 		{
-			Name:                "arguments replaced, token cleared",
-			AcceptedSignature:   "sig-a",
-			ReturnedSignature:   "",
-			BoundContentChanged: true,
-			Want:                SignatureCleared,
-			Why: "Exactly what EmitAssembledToolCall produces via ReplaceToolArguments. " +
-				"Rejecting this is the contradiction the bound-signature policy exists to remove.",
+			Name:     "arguments split across deltas, reassembled identically",
+			Accepted: toolBlockDeltas(0, "call_1", "read_file", sigA, `{"pa`, `th":"`, `/a"}`),
+			Returned: toolBlockDeltas(0, "call_1", "read_file", sigA, `{"path":"/a"}`),
+			Index:    0,
+			Want:     SignatureIntact,
+			Why: "Fragment boundaries are transport, not content. A verifier comparing " +
+				"deltas pairwise sees a change where there is none and rejects a pass.",
 		},
 		{
-			Name:                "arguments replaced, token kept",
-			AcceptedSignature:   "sig-a",
-			ReturnedSignature:   "sig-a",
-			BoundContentChanged: true,
-			Want:                SignatureStale,
-			Why: "The dangerous case: a valid provider token over content the provider " +
-				"never signed. Downstream cannot tell it apart from a genuine signature.",
+			Name:     "arguments changed across multiple deltas, token cleared",
+			Accepted: toolBlockDeltas(0, "call_1", "read_file", sigA, `{"pa`, `th":"`, `/a"}`),
+			Returned: toolBlockDeltas(0, "call_1", "read_file", "", `{"path":"/b"}`),
+			Index:    0,
+			Want:     SignatureCleared,
+			Why: "What ReplaceToolArguments produces. A verifier that only inspects the " +
+				"first delta misses the change and misreads this as a dropped token.",
 		},
 		{
-			Name:              "token swapped for another",
-			AcceptedSignature: "sig-a",
-			ReturnedSignature: "sig-b",
-			Want:              SignatureForged,
-			Why:               "A plugin cannot mint a provider signature, changed content or not.",
+			Name:     "arguments changed in a later delta only, token kept",
+			Accepted: toolBlockDeltas(0, "call_1", "read_file", sigA, `{"path":`, `"/a"}`),
+			Returned: toolBlockDeltas(0, "call_1", "read_file", sigA, `{"path":`, `"/evil"}`),
+			Index:    0,
+			Want:     SignatureStale,
+			Why: "The dangerous case, hidden behind a matching first fragment: a valid " +
+				"provider token over content the provider never signed.",
 		},
 		{
-			Name:                "token swapped while content also changed",
-			AcceptedSignature:   "sig-a",
-			ReturnedSignature:   "sig-b",
-			BoundContentChanged: true,
-			Want:                SignatureForged,
-			Why:                "Changing the content does not license supplying a different token.",
+			Name:     "start id changed, token kept",
+			Accepted: toolBlock(0, "call_1", "read_file", sigA, `{"path":"/a"}`),
+			Returned: toolBlock(0, "call_2", "read_file", sigA, `{"path":"/a"}`),
+			Index:    0,
+			Want:     SignatureStale,
+			Why: "id is inside the signed scope. A verifier that signs only the arguments " +
+				"lets the call be re-pointed under a valid signature.",
 		},
 		{
-			Name:              "token appears where there was none",
-			AcceptedSignature: "",
-			ReturnedSignature: "sig-b",
-			Want:              SignatureAdded,
-			Why:               "Same forgery, reached by addition rather than replacement.",
+			Name:     "start name changed, token kept",
+			Accepted: toolBlock(0, "call_1", "read_file", sigA, `{"path":"/a"}`),
+			Returned: toolBlock(0, "call_1", "delete_file", sigA, `{"path":"/a"}`),
+			Index:    0,
+			Want:     SignatureStale,
+			Why: "name is inside the signed scope, and swapping it is the highest-impact " +
+				"mutation available: same arguments, different tool.",
 		},
 		{
-			Name:              "unsigned block passes through",
-			AcceptedSignature: "",
-			ReturnedSignature: "",
-			Want:              SignatureIntact,
-			Why:               "Most tool calls carry no signature; they must not need special handling.",
+			Name:     "token swapped for another",
+			Accepted: toolBlock(0, "call_1", "read_file", sigA, `{"path":"/a"}`),
+			Returned: toolBlock(0, "call_1", "read_file", sigB, `{"path":"/a"}`),
+			Index:    0,
+			Want:     SignatureForged,
+			Why:      "A plugin cannot mint a provider signature, changed content or not.",
 		},
 		{
-			Name:              "token cleared although content did not change",
-			AcceptedSignature: "sig-a",
-			ReturnedSignature: "",
-			Want:              SignatureCleared,
-			Why: "Permitted: discarding a fact is not forging one. The host forwards no " +
-				"signature and the provider re-derives as it would for any unsigned block.",
+			Name:     "token appears where there was none",
+			Accepted: toolBlock(0, "call_1", "read_file", "", `{"path":"/a"}`),
+			Returned: toolBlock(0, "call_1", "read_file", sigB, `{"path":"/a"}`),
+			Index:    0,
+			Want:     SignatureAdded,
+			Why:      "Forgery reached by addition rather than replacement.",
+		},
+		{
+			Name:     "token dropped while content is untouched",
+			Accepted: toolBlock(0, "call_1", "read_file", sigA, `{"path":"/a"}`),
+			Returned: toolBlock(0, "call_1", "read_file", "", `{"path":"/a"}`),
+			Index:    0,
+			Want:     SignatureDropped,
+			Why: "Stripping provenance from content the provider did sign. Providers can " +
+				"require the token on a later turn, so this breaks replay rather than " +
+				"degrading, and it is indistinguishable from laundering.",
+		},
+		{
+			Name:     "unsigned block passes through",
+			Accepted: toolBlock(0, "call_1", "read_file", "", `{"path":"/a"}`),
+			Returned: toolBlock(0, "call_1", "read_file", "", `{"path":"/a"}`),
+			Index:    0,
+			Want:     SignatureIntact,
+			Why:      "Most tool calls carry no signature and must not need special handling.",
+		},
+		{
+			Name: "two interleaved blocks, only the second changed",
+			Accepted: append(
+				toolBlockDeltas(0, "call_1", "read_file", sigA, `{"path":`, `"/a"}`),
+				toolBlockDeltas(1, "call_2", "write_file", sigB, `{"path":`, `"/b"}`)...),
+			Returned: append(
+				toolBlockDeltas(0, "call_1", "read_file", sigA, `{"path":`, `"/a"}`),
+				toolBlockDeltas(1, "call_2", "write_file", "", `{"path":`, `"/c"}`)...),
+			Index: 0,
+			Want:  SignatureIntact,
+			Why: "Block 0 is untouched. A verifier that pools deltas across indexes sees " +
+				"block 1's change here and rejects an innocent block.",
+		},
+		{
+			Name: "two interleaved blocks, the changed one is judged",
+			Accepted: append(
+				toolBlockDeltas(0, "call_1", "read_file", sigA, `{"path":`, `"/a"}`),
+				toolBlockDeltas(1, "call_2", "write_file", sigB, `{"path":`, `"/b"}`)...),
+			Returned: append(
+				toolBlockDeltas(0, "call_1", "read_file", sigA, `{"path":`, `"/a"}`),
+				toolBlockDeltas(1, "call_2", "write_file", "", `{"path":`, `"/c"}`)...),
+			Index: 1,
+			Want:  SignatureCleared,
+			Why: "Same streams as above, different block. A verifier keying on anything " +
+				"but the block index cannot produce both answers.",
 		},
 	}
 }
 
-// ToolBlock renders a fixture side as the stream events a verifier compares,
-// so Migration B tests the real event shape rather than two bare strings.
-func ToolBlock(index int32, id, name, signature, args string) []*pbv2.StreamEvent {
-	return []*pbv2.StreamEvent{
+// toolBlock renders one signed tool block with a single arguments delta.
+func toolBlock(index int32, id, name, signature, args string) []*pbv2.StreamEvent {
+	return toolBlockDeltas(index, id, name, signature, args)
+}
+
+// toolBlockDeltas renders one signed tool block whose arguments arrive as the
+// given fragments, so fixtures can vary framing independently of content.
+func toolBlockDeltas(index int32, id, name, signature string, args ...string) []*pbv2.StreamEvent {
+	out := []*pbv2.StreamEvent{
 		{Event: &pbv2.StreamEvent_ContentBlockStart{
 			ContentBlockStart: &pbv2.ContentBlockStart{
 				Index: index,
@@ -115,11 +185,17 @@ func ToolBlock(index int32, id, name, signature, args string) []*pbv2.StreamEven
 				}},
 			},
 		}},
-		{Event: &pbv2.StreamEvent_ToolCallDelta{
-			ToolCallDelta: &pbv2.ToolCallDelta{Index: index, ArgumentsDelta: args},
-		}},
-		{Event: &pbv2.StreamEvent_ContentBlockStop{
-			ContentBlockStop: &pbv2.ContentBlockStop{Index: index},
-		}},
 	}
+	for _, a := range args {
+		out = append(out, &pbv2.StreamEvent{
+			Event: &pbv2.StreamEvent_ToolCallDelta{
+				ToolCallDelta: &pbv2.ToolCallDelta{Index: index, ArgumentsDelta: a},
+			},
+		})
+	}
+	return append(out, &pbv2.StreamEvent{
+		Event: &pbv2.StreamEvent_ContentBlockStop{
+			ContentBlockStop: &pbv2.ContentBlockStop{Index: index},
+		},
+	})
 }

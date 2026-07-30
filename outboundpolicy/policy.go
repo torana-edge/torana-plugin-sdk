@@ -210,6 +210,18 @@ const (
 	// SignatureCleared: bound content changed and the token was emptied.
 	// Allowed, and required: the token no longer describes what ships.
 	SignatureCleared
+	// SignatureDropped: the token was emptied while the content it covers was
+	// left identical. Rejected.
+	//
+	// The exception that lets a signature be cleared is narrowly "cleared
+	// BECAUSE the covered content changed". Removing provenance from content
+	// the provider did sign is just removing a host-owned fact, which the
+	// package rule forbids, and it is indistinguishable from laundering.
+	//
+	// Nor is it merely lossy: providers can require the token on a later turn
+	// (Gemini/Code Assist thoughtSignature is the live case), so dropping it
+	// breaks replay rather than degrading gracefully.
+	SignatureDropped
 	// SignatureStale: bound content changed but the token was kept. Rejected —
 	// this is the dangerous case, a valid-looking provider signature over
 	// content the provider never signed.
@@ -233,6 +245,8 @@ func (m SignatureMutation) String() string {
 		return "intact"
 	case SignatureCleared:
 		return "cleared"
+	case SignatureDropped:
+		return "dropped"
 	case SignatureStale:
 		return "stale"
 	case SignatureForged:
@@ -262,9 +276,10 @@ func ClassifySignatureMutation(accepted, returned string, boundContentChanged bo
 		}
 		return SignatureIntact
 	case returned == "":
-		// Cleared. Only meaningful as a response to changed content, but
-		// clearing when nothing changed discards a fact rather than forging
-		// one, so it is permitted and the host simply forwards no signature.
+		if !boundContentChanged {
+			// Provenance stripped from content the provider actually signed.
+			return SignatureDropped
+		}
 		return SignatureCleared
 	case accepted == "":
 		return SignatureAdded
@@ -750,6 +765,12 @@ func validateBoundSignaturePairing() error {
 			}
 		}
 	}
+	type bindingKey struct {
+		msg   protoreflect.FullName
+		field string
+	}
+	claimed := map[bindingKey]bool{}
+
 	for _, b := range signatureBindings {
 		fields, ok := outboundMessageFieldPolicies[b.Message]
 		if !ok {
@@ -767,6 +788,30 @@ func validateBoundSignaturePairing() error {
 				"unconditionally host-owned policy would reject the SDK's own output",
 				b.Message, b.SignatureField, p.kind)
 		}
+		// One token, one scope. Deleting from the tracking map is idempotent,
+		// so a second binding for the same field used to pass silently and give
+		// that token two different definitions of what it covers — a verifier
+		// iterating the exported bindings would have no unique contract to
+		// implement.
+		key := bindingKey{b.Message, b.SignatureField}
+		if claimed[key] {
+			return fmt.Errorf("signature binding %s.%s is declared more than once: "+
+				"a token must have exactly one definition of the content it covers",
+				b.Message, b.SignatureField)
+		}
+		claimed[key] = true
+
+		// Duplicate content refs within one binding are redundant at best and
+		// contradictory at worst, and make a verifier's scope ambiguous.
+		seenRef := map[SignatureContentRef]bool{}
+		for _, c := range b.Content {
+			if seenRef[c] {
+				return fmt.Errorf("signature binding %s.%s lists content ref %s.%s (scope %v) twice",
+					b.Message, b.SignatureField, c.Message, c.Field, c.Scope)
+			}
+			seenRef[c] = true
+		}
+
 		delete(bound[b.Message], b.SignatureField)
 	}
 	for msg, fields := range bound {

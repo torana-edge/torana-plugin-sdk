@@ -270,9 +270,9 @@ type TextAction struct {
 	hasReplace bool
 }
 
-func PassText() TextAction             { return TextAction{pass: true} }
+func PassText() TextAction               { return TextAction{pass: true} }
 func ReplaceText(text string) TextAction { return TextAction{hasReplace: true, replace: text} }
-func SuppressText() TextAction         { return TextAction{suppress: true} }
+func SuppressText() TextAction           { return TextAction{suppress: true} }
 
 // StreamHandler routes stream events to semantic callbacks via StreamAssembler.
 type StreamHandler struct {
