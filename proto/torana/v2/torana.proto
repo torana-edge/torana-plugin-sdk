@@ -8,6 +8,19 @@ option go_package = "github.com/torana-edge/torana-plugin-sdk/pb/v2";
 // v2 is a clean replacement for v1, not an extension of it. Every difference
 // below fixes something v1 could only document its way around:
 //
+//   - Guests export a single run_hook(ptr, size) -> u64. Hook identity lives
+//     only in the HookInput payload oneof; request_id lives only on HookInput.
+//     v1's five named exports, each taking a separate request_id argument, made
+//     "host called the wrong export" detectable rather than impossible — a tick
+//     payload delivered to run_before_request was a well-formed input to the
+//     wrong hook until someone remembered to check.
+//   - Guests ALSO export supported_hooks() -> u32, a bitmap of hooks the module
+//     actually implements. That is startup introspection, not a second dispatch
+//     discriminator: run_hook still routes only from the payload. The bitmap
+//     must exactly equal the manifest hook set (missing and unexpected bits,
+//     bit 0, unassigned bits, and an empty/zero set are load-time errors).
+//     Without it, collapsing five exports to one would erase the only
+//     artifact-level proof that a declared hook has a handler.
 //   - Hook payloads are enveloped and self-describing. In v1 a mis-dispatched
 //     payload decoded as an EMPTY message of whatever type the hook expected,
 //     and every plugin treated that as a legitimate empty request.
@@ -20,6 +33,8 @@ option go_package = "github.com/torana-edge/torana-plugin-sdk/pb/v2";
 //     stored data.
 //   - The response hook gets a real ChatResponse. v1 carried responses in a
 //     ChatRequest, which four independent auditors reported as a bug.
+//   - Whether a response dispatch is mutable lives on the after-response
+//     wrapper, not the global envelope — only that path can be observational.
 //
 // Tool-call arguments and tool parameters remain `bytes` holding verbatim JSON.
 // That is load-bearing, not laziness: decoding and re-encoding them reorders
@@ -302,6 +317,10 @@ message HttpResponse {
 // Requires env.background_tick. Running code with no request in flight is a
 // capability an operator should grant deliberately: a plugin holding it can act
 // — and spend — outside any request the operator can see.
+//
+// HookInput.request_id on a tick is a synthetic execution-scope id for
+// plugin-private ephemeral metadata (env.meta_*), discarded when the tick
+// ends — not a caller request. Caller content remains unavailable.
 message TickRequest {
   // Monotonically increasing within one scheduler, starting at 1. Resets if the
   // scheduler restarts, so treat it as an ordering hint rather than a durable
@@ -336,6 +355,32 @@ message TickOutcome {
 // valid protobuf, so "misdispatch is caught" depended on someone remembering to
 // compare two fields. Deriving the hook from the payload makes the contradiction
 // unrepresentable instead, which is the same lesson as dropping `handled`.
+//
+// The WASM boundary completes that story: guests export one run_hook, so there
+// is no second discriminator at the export name either. request_id is not a
+// WASM argument — it is only on HookInput — so the host cannot disagree with
+// the envelope about which request a call belongs to.
+//
+// Guests also export supported_hooks() -> u32. Bit N is set when Hook value N
+// is implemented:
+//
+//   bit 1 = HOOK_BEFORE_REQUEST
+//   bit 2 = HOOK_AFTER_RESPONSE
+//   bit 3 = HOOK_ON_STREAM_CHUNK
+//   bit 4 = HOOK_ON_HTTP_REQUEST
+//   bit 5 = HOOK_ON_TICK
+//
+// The bitmap must exactly equal the manifest's hook set. Bit 0 and every
+// unassigned bit are invalid. A missing bit (declared, not registered) or an
+// unexpected bit (registered, not declared) is a load-time error. Hook values
+// that participate in this export are limited to 1..31 while the return type
+// is u32; a wider set needs a wider export. An empty declaration / zero bitmap
+// is also a load-time error — a module with no handlers is permanently dead,
+// and that must not pass installation.
+//
+// The SDK derives the bitmap from actual registrations; the host compares it
+// with the manifest before enabling the plugin. This is not a dispatch input —
+// run_hook never consults it.
 enum Hook {
   HOOK_UNSPECIFIED = 0;
   HOOK_BEFORE_REQUEST = 1;
@@ -345,30 +390,48 @@ enum Hook {
   HOOK_ON_TICK = 5;
 }
 
+// AfterResponse is the payload for the after-response hook.
+//
+// mutable lives here, not on HookInput, because only this path can be
+// observational. False when the response was streamed or was an upstream
+// error: the bytes have already gone to the caller, or there is no body to
+// rewrite, so a returned replacement is discarded. Every other hook is always
+// mutable — putting a flag on the global envelope let a before-request or
+// stream dispatch claim otherwise, which is nonsense.
+//
+// v1 offered no such signal, so a plugin learned its mutations were being
+// discarded only by their having no effect.
+message AfterResponse {
+  ChatResponse response = 1;
+  bool mutable = 2;
+}
+
 // HookInput is what every hook receives. The payload determines which hook this
-// is; there is no separate hook field to contradict it.
+// is; there is no separate hook field to contradict it. The guest receives it
+// via run_hook(ptr, size) -> u64 — one export, no request_id WASM argument.
 message HookInput {
   // Minor version of the v2 contract the host is speaking. Additive changes
   // bump this; a plugin may use it to detect fields it can rely on.
   uint32 abi_minor = 1;
-  // Host-assigned request id, stable for the life of one request. Stream hooks
-  // for the same response share it.
+  // Host-assigned execution-scope id. This is the only place the id appears —
+  // it is not also a WASM argument.
+  //
+  // For request-scoped hooks (before_request, after_response, stream, http)
+  // this identifies the caller request, and all stream events for one response
+  // share it. Availability of request-derived host calls is defined per
+  // command and hook; the ID alone grants or guarantees nothing.
+  //
+  // For ticks — which fire with no request in flight — the host supplies a
+  // unique synthetic scope id. Plugin-private ephemeral metadata (env.meta_*)
+  // is available inside that scope and is discarded when the tick ends; that
+  // is why the id must be unique and must not reuse a live request's. Caller
+  // content and identity remain unavailable: there is no caller. Authors must
+  // not interpret a tick's request_id as a caller request.
   uint64 request_id = 2;
-  // Whether the host will apply a REPLACE to this dispatch.
-  //
-  // False only for run_after_response when the response was streamed or was an
-  // upstream error: the bytes have already gone to the caller, or there is no
-  // body to rewrite, so a returned replacement is discarded. run_before_request
-  // and run_on_stream_chunk are always mutable — a stream plugin can and does
-  // replace, suppress and fan out events.
-  //
-  // v1 offered no such signal, so a plugin learned its mutations were being
-  // discarded only by their having no effect.
-  bool mutable = 3;
 
   oneof payload {
     ChatRequest chat_request = 4;
-    ChatResponse chat_response = 5;
+    AfterResponse after_response = 5;
     StreamEvent stream_event = 6;
     HttpRequest http_request = 7;
     TickRequest tick_request = 8;

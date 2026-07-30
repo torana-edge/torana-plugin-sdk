@@ -17,7 +17,9 @@ func inputFor(h v2.Hook) *v2.HookInput {
 	case v2.Hook_HOOK_BEFORE_REQUEST:
 		return &v2.HookInput{Payload: &v2.HookInput_ChatRequest{ChatRequest: &v2.ChatRequest{Model: "m"}}}
 	case v2.Hook_HOOK_AFTER_RESPONSE:
-		return &v2.HookInput{Payload: &v2.HookInput_ChatResponse{ChatResponse: &v2.ChatResponse{Model: "m"}}}
+		return &v2.HookInput{Payload: &v2.HookInput_AfterResponse{
+			AfterResponse: &v2.AfterResponse{Response: &v2.ChatResponse{Model: "m"}, Mutable: true},
+		}}
 	case v2.Hook_HOOK_ON_STREAM_CHUNK:
 		// A real event: an empty StreamEvent carries no variant and is refused,
 		// which is the point of validating inputs at all.
@@ -111,10 +113,12 @@ func TestPayloadIsTheSoleDiscriminator(t *testing.T) {
 	}
 }
 
-// The export a plugin was called through is a second discriminator, and nothing
-// in the envelope forces the two to agree: a tick payload delivered to
-// run_before_request is a well-formed input to the wrong hook. Removing the hook
-// field stopped a frame contradicting ITSELF; this is the other half.
+// ValidateFor still catches a payload handed to the wrong registered handler.
+// The WASM export is no longer a second discriminator — there is only run_hook
+// — but an SDK trampoline (or a handwritten guest) that routes by HookOf can
+// still wire the after-response handler to a tick. Removing the hook field
+// stopped a frame contradicting itself; this is the other half for in-process
+// dispatch.
 func TestInputPayloadMustMatchTheInvokedHook(t *testing.T) {
 	for _, invoked := range allHooks {
 		for _, carried := range allHooks {
@@ -382,14 +386,16 @@ func TestChatResponseCarriesResponseFacts(t *testing.T) {
 // A plugin must be able to tell that its mutations will be discarded, rather
 // than discovering it by their having no effect.
 //
-// This applies to run_after_response when the response was streamed or was an
-// upstream error — the bytes have already gone to the caller, or there is no
-// body to rewrite. run_on_stream_chunk is always mutable: replacing, suppressing
-// and fanning out events is the whole point of that hook.
+// mutable lives on AfterResponse, not HookInput: only the after-response path
+// can be observational. Stream chunks (and every other hook) have no such flag
+// — they are always mutable, and a global envelope field would let them claim
+// otherwise.
 func TestObservationalDispatchIsMarked(t *testing.T) {
 	in := &v2.HookInput{
-		Payload: &v2.HookInput_ChatResponse{ChatResponse: &v2.ChatResponse{}},
-		Mutable: false,
+		Payload: &v2.HookInput_AfterResponse{AfterResponse: &v2.AfterResponse{
+			Response: &v2.ChatResponse{},
+			Mutable:  false,
+		}},
 	}
 	raw, err := proto.Marshal(in)
 	if err != nil {
@@ -399,17 +405,93 @@ func TestObservationalDispatchIsMarked(t *testing.T) {
 	if err := proto.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Mutable {
+	ar := got.GetAfterResponse()
+	if ar == nil {
+		t.Fatal("after-response payload lost across the wire")
+	}
+	if ar.Mutable {
 		t.Fatal("an observational dispatch must report itself as not mutable")
 	}
-
-	// A stream chunk is never observational.
-	stream := &v2.HookInput{
-		Payload: &v2.HookInput_StreamEvent{StreamEvent: &v2.StreamEvent{}},
-		Mutable: true,
+	if got.HookOf() != v2.Hook_HOOK_AFTER_RESPONSE {
+		t.Fatalf("hook of after-response wrapper: got %v", got.HookOf())
 	}
-	if stream.HookOf() != v2.Hook_HOOK_ON_STREAM_CHUNK || !stream.Mutable {
-		t.Fatal("stream chunks are mutable: a plugin replaces, suppresses and fans out events")
+
+	// A stream chunk has no mutable field — mutability is not representable
+	// there, which is the point.
+	stream := &v2.HookInput{
+		Payload: &v2.HookInput_StreamEvent{StreamEvent: &v2.StreamEvent{
+			Event: &v2.StreamEvent_TextDelta{TextDelta: "x"},
+		}},
+	}
+	if stream.HookOf() != v2.Hook_HOOK_ON_STREAM_CHUNK {
+		t.Fatal("stream chunks must remain the stream hook")
+	}
+	if stream.GetAfterResponse() != nil {
+		t.Fatal("a stream dispatch must not carry an after-response wrapper")
+	}
+}
+
+// request_id lives only on HookInput (not as a WASM argument). The envelope
+// shape is asserted via descriptor reflection — not by grepping proto comments,
+// which can pass while the compiled ABI is wrong and fail on harmless prose edits.
+//
+// When Migration A lands the trampoline, a fixture guest's WASM exports must
+// additionally prove: run_hook(i32,i32)->i64 exists, no request_id argument,
+// the five v1 hook exports are gone after the v1 cut, and supported_hooks
+// agrees with registrations. Until then this is the protobuf half of that
+// contract.
+func TestHookInputEnvelopeShape(t *testing.T) {
+	in := &v2.HookInput{
+		RequestId: 42,
+		Payload: &v2.HookInput_ChatRequest{ChatRequest: &v2.ChatRequest{Model: "m"}},
+	}
+	raw, err := proto.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got v2.HookInput
+	if err := proto.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.RequestId != 42 {
+		t.Fatalf("request_id did not round-trip: %d", got.RequestId)
+	}
+
+	inDesc := (&v2.HookInput{}).ProtoReflect().Descriptor()
+	if f := inDesc.Fields().ByName("mutable"); f != nil {
+		t.Fatal("HookInput must not have a mutable field; it belongs on AfterResponse")
+	}
+	if inDesc.Fields().ByName("request_id") == nil {
+		t.Fatal("HookInput must carry request_id")
+	}
+	if inDesc.Fields().ByName("abi_minor") == nil {
+		t.Fatal("HookInput must carry abi_minor")
+	}
+
+	payload := inDesc.Oneofs().ByName("payload")
+	if payload == nil {
+		t.Fatal("HookInput must have a payload oneof")
+	}
+	afterField := inDesc.Fields().ByName("after_response")
+	if afterField == nil {
+		t.Fatal("HookInput.payload must include after_response")
+	}
+	if afterField.ContainingOneof() != payload {
+		t.Fatal("after_response must be a member of the payload oneof")
+	}
+	if afterField.Message() == nil || string(afterField.Message().Name()) != "AfterResponse" {
+		t.Fatalf("after_response must point at AfterResponse, got %v", afterField.Message())
+	}
+	if inDesc.Fields().ByName("chat_response") != nil {
+		t.Fatal("bare chat_response must not remain on HookInput; use AfterResponse")
+	}
+
+	arDesc := (&v2.AfterResponse{}).ProtoReflect().Descriptor()
+	if arDesc.Fields().ByName("mutable") == nil {
+		t.Fatal("AfterResponse must carry mutable")
+	}
+	if arDesc.Fields().ByName("response") == nil {
+		t.Fatal("AfterResponse must carry response")
 	}
 }
 
@@ -606,10 +688,13 @@ func TestNilNestedPayloadsAreRejected(t *testing.T) {
 			in   *v2.HookInput
 		}{
 			{"chat request", &v2.HookInput{Payload: &v2.HookInput_ChatRequest{}}},
-			{"chat response", &v2.HookInput{Payload: &v2.HookInput_ChatResponse{}}},
+			{"after response", &v2.HookInput{Payload: &v2.HookInput_AfterResponse{}}},
 			{"stream event", &v2.HookInput{Payload: &v2.HookInput_StreamEvent{}}},
 			{"http request", &v2.HookInput{Payload: &v2.HookInput_HttpRequest{}}},
 			{"tick request", &v2.HookInput{Payload: &v2.HookInput_TickRequest{}}},
+			{"after response with nil ChatResponse", &v2.HookInput{Payload: &v2.HookInput_AfterResponse{
+				AfterResponse: &v2.AfterResponse{},
+			}}},
 		} {
 			if err := tc.in.Validate(); err == nil {
 				t.Errorf("%s: an input with a nil payload was accepted", tc.name)
@@ -645,8 +730,8 @@ func TestTypedNilWrappersAreRejectedNotPanics(t *testing.T) {
 		{"HookInput chat request", func() error {
 			return (&v2.HookInput{Payload: (*v2.HookInput_ChatRequest)(nil)}).Validate()
 		}},
-		{"HookInput chat response", func() error {
-			return (&v2.HookInput{Payload: (*v2.HookInput_ChatResponse)(nil)}).Validate()
+		{"HookInput after response", func() error {
+			return (&v2.HookInput{Payload: (*v2.HookInput_AfterResponse)(nil)}).Validate()
 		}},
 		{"HookInput stream event", func() error {
 			return (&v2.HookInput{Payload: (*v2.HookInput_StreamEvent)(nil)}).Validate()

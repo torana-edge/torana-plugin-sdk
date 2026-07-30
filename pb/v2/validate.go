@@ -91,7 +91,7 @@ func (x *HookInput) HookOf() Hook {
 	switch x.Payload.(type) {
 	case *HookInput_ChatRequest:
 		return Hook_HOOK_BEFORE_REQUEST
-	case *HookInput_ChatResponse:
+	case *HookInput_AfterResponse:
 		return Hook_HOOK_AFTER_RESPONSE
 	case *HookInput_StreamEvent:
 		return Hook_HOOK_ON_STREAM_CHUNK
@@ -118,8 +118,10 @@ func (x *HookInput) payloadPresent() bool {
 	switch p := x.Payload.(type) {
 	case *HookInput_ChatRequest:
 		return p != nil && p.ChatRequest != nil
-	case *HookInput_ChatResponse:
-		return p != nil && p.ChatResponse != nil
+	case *HookInput_AfterResponse:
+		// The wrapper itself must be present; an empty ChatResponse inside it
+		// is still a real after-response dispatch (e.g. an error with no body).
+		return p != nil && p.AfterResponse != nil
 	case *HookInput_StreamEvent:
 		return p != nil && p.StreamEvent != nil
 	case *HookInput_HttpRequest:
@@ -133,10 +135,10 @@ func (x *HookInput) payloadPresent() bool {
 // Validate reports whether an input is well formed on its own terms: that it
 // carries a payload at all.
 //
-// It is NOT enough by itself. The WASM export a plugin was called through is a
-// second discriminator, and nothing in the envelope forces the two to agree —
-// a tick payload delivered to run_before_request is a well-formed input to the
-// wrong hook. Guests must use ValidateFor.
+// With a single run_hook export, the host cannot deliver a payload to the
+// wrong named export — that class of misdispatch is gone. ValidateFor remains
+// for SDK-internal dispatch: a trampoline that routes by HookOf still checks
+// that a handwritten guest did not hand the after-response handler a tick.
 func (x *HookInput) Validate() error {
 	if x == nil {
 		return fmt.Errorf("hook input is nil")
@@ -149,11 +151,11 @@ func (x *HookInput) Validate() error {
 		// The check is narrower here, and deliberately so. HookResult is
 		// nothing BUT its oneof, so any unknown top-level field is an action
 		// and is refused unconditionally. HookInput also carries top-level
-		// scalars — abi_minor, request_id, mutable — so an unknown top-level
-		// field may instead be a scalar a later minor added. Those are additive
-		// and advisory by construction: a guest that ignores one behaves as it
-		// did before, which is what abi_minor exists to let it negotiate.
-		// Refusing them would make every additive host change a breaking one.
+		// scalars — abi_minor, request_id — so an unknown top-level field may
+		// instead be a scalar a later minor added. Those are additive and
+		// advisory by construction: a guest that ignores one behaves as it did
+		// before, which is what abi_minor exists to let it negotiate. Refusing
+		// them would make every additive host change a breaking one.
 		//
 		// So the two cases are distinguished by what is MISSING, not by what is
 		// unknown: no payload plus unknown bytes means the payload is the part
@@ -167,6 +169,13 @@ func (x *HookInput) Validate() error {
 	if !x.payloadPresent() {
 		return fmt.Errorf("hook input names %v but its payload is nil", x.HookOf())
 	}
+	if ar, ok := x.Payload.(*HookInput_AfterResponse); ok {
+		// AfterResponse with a typed-nil nested response is still "present" as
+		// a wrapper, but nothing usable to hand a handler. Refuse it here.
+		if ar.AfterResponse.Response == nil {
+			return fmt.Errorf("hook input names %v but its response is nil", x.HookOf())
+		}
+	}
 	if ev, ok := x.Payload.(*HookInput_StreamEvent); ok {
 		if err := ev.StreamEvent.Validate(); err != nil {
 			return fmt.Errorf("hook input: %w", err)
@@ -177,10 +186,10 @@ func (x *HookInput) Validate() error {
 
 // ValidateFor reports whether an input is a well-formed dispatch to hook.
 //
-// Every guest export must call this with its own hook. Removing the hook field
-// from the envelope made a frame unable to contradict itself, but the export
-// that was invoked still carries hook identity, and that pairing is exactly
-// where a misdispatch shows up.
+// Guests use this when routing a decoded HookInput to a registered handler.
+// The WASM export is no longer a second discriminator — there is only
+// run_hook — so this catches SDK-level and handwritten miswiring, not host
+// export-name mistakes.
 func (x *HookInput) ValidateFor(hook Hook) error {
 	if err := x.Validate(); err != nil {
 		return err

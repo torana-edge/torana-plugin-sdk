@@ -31,6 +31,32 @@ const (
 // valid protobuf, so "misdispatch is caught" depended on someone remembering to
 // compare two fields. Deriving the hook from the payload makes the contradiction
 // unrepresentable instead, which is the same lesson as dropping `handled`.
+//
+// The WASM boundary completes that story: guests export one run_hook, so there
+// is no second discriminator at the export name either. request_id is not a
+// WASM argument — it is only on HookInput — so the host cannot disagree with
+// the envelope about which request a call belongs to.
+//
+// Guests also export supported_hooks() -> u32. Bit N is set when Hook value N
+// is implemented:
+//
+//	bit 1 = HOOK_BEFORE_REQUEST
+//	bit 2 = HOOK_AFTER_RESPONSE
+//	bit 3 = HOOK_ON_STREAM_CHUNK
+//	bit 4 = HOOK_ON_HTTP_REQUEST
+//	bit 5 = HOOK_ON_TICK
+//
+// The bitmap must exactly equal the manifest's hook set. Bit 0 and every
+// unassigned bit are invalid. A missing bit (declared, not registered) or an
+// unexpected bit (registered, not declared) is a load-time error. Hook values
+// that participate in this export are limited to 1..31 while the return type
+// is u32; a wider set needs a wider export. An empty declaration / zero bitmap
+// is also a load-time error — a module with no handlers is permanently dead,
+// and that must not pass installation.
+//
+// The SDK derives the bitmap from actual registrations; the host compares it
+// with the manifest before enabling the plugin. This is not a dispatch input —
+// run_hook never consults it.
 type Hook int32
 
 const (
@@ -1788,6 +1814,10 @@ func (x *HttpResponse) GetBody() []byte {
 // Requires env.background_tick. Running code with no request in flight is a
 // capability an operator should grant deliberately: a plugin holding it can act
 // — and spend — outside any request the operator can see.
+//
+// HookInput.request_id on a tick is a synthetic execution-scope id for
+// plugin-private ephemeral metadata (env.meta_*), discarded when the tick
+// ends — not a caller request. Caller content remains unavailable.
 type TickRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Monotonically increasing within one scheduler, starting at 1. Resets if the
@@ -1909,31 +1939,96 @@ func (x *TickOutcome) GetNote() string {
 	return ""
 }
 
+// AfterResponse is the payload for the after-response hook.
+//
+// mutable lives here, not on HookInput, because only this path can be
+// observational. False when the response was streamed or was an upstream
+// error: the bytes have already gone to the caller, or there is no body to
+// rewrite, so a returned replacement is discarded. Every other hook is always
+// mutable — putting a flag on the global envelope let a before-request or
+// stream dispatch claim otherwise, which is nonsense.
+//
+// v1 offered no such signal, so a plugin learned its mutations were being
+// discarded only by their having no effect.
+type AfterResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Response      *ChatResponse          `protobuf:"bytes,1,opt,name=response,proto3" json:"response,omitempty"`
+	Mutable       bool                   `protobuf:"varint,2,opt,name=mutable,proto3" json:"mutable,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AfterResponse) Reset() {
+	*x = AfterResponse{}
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AfterResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AfterResponse) ProtoMessage() {}
+
+func (x *AfterResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AfterResponse.ProtoReflect.Descriptor instead.
+func (*AfterResponse) Descriptor() ([]byte, []int) {
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *AfterResponse) GetResponse() *ChatResponse {
+	if x != nil {
+		return x.Response
+	}
+	return nil
+}
+
+func (x *AfterResponse) GetMutable() bool {
+	if x != nil {
+		return x.Mutable
+	}
+	return false
+}
+
 // HookInput is what every hook receives. The payload determines which hook this
-// is; there is no separate hook field to contradict it.
+// is; there is no separate hook field to contradict it. The guest receives it
+// via run_hook(ptr, size) -> u64 — one export, no request_id WASM argument.
 type HookInput struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Minor version of the v2 contract the host is speaking. Additive changes
 	// bump this; a plugin may use it to detect fields it can rely on.
 	AbiMinor uint32 `protobuf:"varint,1,opt,name=abi_minor,json=abiMinor,proto3" json:"abi_minor,omitempty"`
-	// Host-assigned request id, stable for the life of one request. Stream hooks
-	// for the same response share it.
+	// Host-assigned execution-scope id. This is the only place the id appears —
+	// it is not also a WASM argument.
+	//
+	// For request-scoped hooks (before_request, after_response, stream, http)
+	// this identifies the caller request, and all stream events for one response
+	// share it. Availability of request-derived host calls is defined per
+	// command and hook; the ID alone grants or guarantees nothing.
+	//
+	// For ticks — which fire with no request in flight — the host supplies a
+	// unique synthetic scope id. Plugin-private ephemeral metadata (env.meta_*)
+	// is available inside that scope and is discarded when the tick ends; that
+	// is why the id must be unique and must not reuse a live request's. Caller
+	// content and identity remain unavailable: there is no caller. Authors must
+	// not interpret a tick's request_id as a caller request.
 	RequestId uint64 `protobuf:"varint,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// Whether the host will apply a REPLACE to this dispatch.
-	//
-	// False only for run_after_response when the response was streamed or was an
-	// upstream error: the bytes have already gone to the caller, or there is no
-	// body to rewrite, so a returned replacement is discarded. run_before_request
-	// and run_on_stream_chunk are always mutable — a stream plugin can and does
-	// replace, suppress and fan out events.
-	//
-	// v1 offered no such signal, so a plugin learned its mutations were being
-	// discarded only by their having no effect.
-	Mutable bool `protobuf:"varint,3,opt,name=mutable,proto3" json:"mutable,omitempty"`
 	// Types that are valid to be assigned to Payload:
 	//
 	//	*HookInput_ChatRequest
-	//	*HookInput_ChatResponse
+	//	*HookInput_AfterResponse
 	//	*HookInput_StreamEvent
 	//	*HookInput_HttpRequest
 	//	*HookInput_TickRequest
@@ -1944,7 +2039,7 @@ type HookInput struct {
 
 func (x *HookInput) Reset() {
 	*x = HookInput{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[22]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1956,7 +2051,7 @@ func (x *HookInput) String() string {
 func (*HookInput) ProtoMessage() {}
 
 func (x *HookInput) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[22]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1969,7 +2064,7 @@ func (x *HookInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HookInput.ProtoReflect.Descriptor instead.
 func (*HookInput) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{22}
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *HookInput) GetAbiMinor() uint32 {
@@ -1984,13 +2079,6 @@ func (x *HookInput) GetRequestId() uint64 {
 		return x.RequestId
 	}
 	return 0
-}
-
-func (x *HookInput) GetMutable() bool {
-	if x != nil {
-		return x.Mutable
-	}
-	return false
 }
 
 func (x *HookInput) GetPayload() isHookInput_Payload {
@@ -2009,10 +2097,10 @@ func (x *HookInput) GetChatRequest() *ChatRequest {
 	return nil
 }
 
-func (x *HookInput) GetChatResponse() *ChatResponse {
+func (x *HookInput) GetAfterResponse() *AfterResponse {
 	if x != nil {
-		if x, ok := x.Payload.(*HookInput_ChatResponse); ok {
-			return x.ChatResponse
+		if x, ok := x.Payload.(*HookInput_AfterResponse); ok {
+			return x.AfterResponse
 		}
 	}
 	return nil
@@ -2053,8 +2141,8 @@ type HookInput_ChatRequest struct {
 	ChatRequest *ChatRequest `protobuf:"bytes,4,opt,name=chat_request,json=chatRequest,proto3,oneof"`
 }
 
-type HookInput_ChatResponse struct {
-	ChatResponse *ChatResponse `protobuf:"bytes,5,opt,name=chat_response,json=chatResponse,proto3,oneof"`
+type HookInput_AfterResponse struct {
+	AfterResponse *AfterResponse `protobuf:"bytes,5,opt,name=after_response,json=afterResponse,proto3,oneof"`
 }
 
 type HookInput_StreamEvent struct {
@@ -2071,7 +2159,7 @@ type HookInput_TickRequest struct {
 
 func (*HookInput_ChatRequest) isHookInput_Payload() {}
 
-func (*HookInput_ChatResponse) isHookInput_Payload() {}
+func (*HookInput_AfterResponse) isHookInput_Payload() {}
 
 func (*HookInput_StreamEvent) isHookInput_Payload() {}
 
@@ -2093,7 +2181,7 @@ type Suppress struct {
 
 func (x *Suppress) Reset() {
 	*x = Suppress{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[23]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2105,7 +2193,7 @@ func (x *Suppress) String() string {
 func (*Suppress) ProtoMessage() {}
 
 func (x *Suppress) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[23]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2118,7 +2206,7 @@ func (x *Suppress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Suppress.ProtoReflect.Descriptor instead.
 func (*Suppress) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{23}
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{24}
 }
 
 // HookResult is what a hook returns when it wants something done.
@@ -2159,7 +2247,7 @@ type HookResult struct {
 
 func (x *HookResult) Reset() {
 	*x = HookResult{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[24]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2171,7 +2259,7 @@ func (x *HookResult) String() string {
 func (*HookResult) ProtoMessage() {}
 
 func (x *HookResult) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[24]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2184,7 +2272,7 @@ func (x *HookResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HookResult.ProtoReflect.Descriptor instead.
 func (*HookResult) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{24}
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *HookResult) GetAction() isHookResult_Action {
@@ -2299,7 +2387,7 @@ type HostError struct {
 
 func (x *HostError) Reset() {
 	*x = HostError{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[25]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2311,7 +2399,7 @@ func (x *HostError) String() string {
 func (*HostError) ProtoMessage() {}
 
 func (x *HostError) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[25]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2324,7 +2412,7 @@ func (x *HostError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostError.ProtoReflect.Descriptor instead.
 func (*HostError) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{25}
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *HostError) GetCode() ErrorCode {
@@ -2360,7 +2448,7 @@ type HostCallResult struct {
 
 func (x *HostCallResult) Reset() {
 	*x = HostCallResult{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[26]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2372,7 +2460,7 @@ func (x *HostCallResult) String() string {
 func (*HostCallResult) ProtoMessage() {}
 
 func (x *HostCallResult) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[26]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2385,7 +2473,7 @@ func (x *HostCallResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostCallResult.ProtoReflect.Descriptor instead.
 func (*HostCallResult) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{26}
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *HostCallResult) GetResult() isHostCallResult_Result {
@@ -2557,14 +2645,16 @@ const file_proto_torana_v2_torana_proto_rawDesc = "" +
 	"intervalMs\";\n" +
 	"\vTickOutcome\x12\x18\n" +
 	"\aactions\x18\x01 \x01(\x05R\aactions\x12\x12\n" +
-	"\x04note\x18\x02 \x01(\tR\x04note\"\xa0\x03\n" +
+	"\x04note\x18\x02 \x01(\tR\x04note\"^\n" +
+	"\rAfterResponse\x123\n" +
+	"\bresponse\x18\x01 \x01(\v2\x17.torana.v2.ChatResponseR\bresponse\x12\x18\n" +
+	"\amutable\x18\x02 \x01(\bR\amutable\"\x89\x03\n" +
 	"\tHookInput\x12\x1b\n" +
 	"\tabi_minor\x18\x01 \x01(\rR\babiMinor\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x02 \x01(\x04R\trequestId\x12\x18\n" +
-	"\amutable\x18\x03 \x01(\bR\amutable\x12;\n" +
-	"\fchat_request\x18\x04 \x01(\v2\x16.torana.v2.ChatRequestH\x00R\vchatRequest\x12>\n" +
-	"\rchat_response\x18\x05 \x01(\v2\x17.torana.v2.ChatResponseH\x00R\fchatResponse\x12;\n" +
+	"request_id\x18\x02 \x01(\x04R\trequestId\x12;\n" +
+	"\fchat_request\x18\x04 \x01(\v2\x16.torana.v2.ChatRequestH\x00R\vchatRequest\x12A\n" +
+	"\x0eafter_response\x18\x05 \x01(\v2\x18.torana.v2.AfterResponseH\x00R\rafterResponse\x12;\n" +
 	"\fstream_event\x18\x06 \x01(\v2\x16.torana.v2.StreamEventH\x00R\vstreamEvent\x12;\n" +
 	"\fhttp_request\x18\a \x01(\v2\x16.torana.v2.HttpRequestH\x00R\vhttpRequest\x12;\n" +
 	"\ftick_request\x18\b \x01(\v2\x16.torana.v2.TickRequestH\x00R\vtickRequestB\t\n" +
@@ -2618,7 +2708,7 @@ func file_proto_torana_v2_torana_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_torana_v2_torana_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_proto_torana_v2_torana_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_proto_torana_v2_torana_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_proto_torana_v2_torana_proto_goTypes = []any{
 	(Hook)(0),                 // 0: torana.v2.Hook
 	(ErrorCode)(0),            // 1: torana.v2.ErrorCode
@@ -2644,11 +2734,12 @@ var file_proto_torana_v2_torana_proto_goTypes = []any{
 	(*HttpResponse)(nil),      // 21: torana.v2.HttpResponse
 	(*TickRequest)(nil),       // 22: torana.v2.TickRequest
 	(*TickOutcome)(nil),       // 23: torana.v2.TickOutcome
-	(*HookInput)(nil),         // 24: torana.v2.HookInput
-	(*Suppress)(nil),          // 25: torana.v2.Suppress
-	(*HookResult)(nil),        // 26: torana.v2.HookResult
-	(*HostError)(nil),         // 27: torana.v2.HostError
-	(*HostCallResult)(nil),    // 28: torana.v2.HostCallResult
+	(*AfterResponse)(nil),     // 24: torana.v2.AfterResponse
+	(*HookInput)(nil),         // 25: torana.v2.HookInput
+	(*Suppress)(nil),          // 26: torana.v2.Suppress
+	(*HookResult)(nil),        // 27: torana.v2.HookResult
+	(*HostError)(nil),         // 28: torana.v2.HostError
+	(*HostCallResult)(nil),    // 29: torana.v2.HostCallResult
 }
 var file_proto_torana_v2_torana_proto_depIdxs = []int32{
 	3,  // 0: torana.v2.Message.tool_calls:type_name -> torana.v2.ToolCall
@@ -2668,24 +2759,25 @@ var file_proto_torana_v2_torana_proto_depIdxs = []int32{
 	16, // 14: torana.v2.StreamEvent.content_block_start:type_name -> torana.v2.ContentBlockStart
 	17, // 15: torana.v2.StreamEvent.content_block_stop:type_name -> torana.v2.ContentBlockStop
 	18, // 16: torana.v2.StreamEvents.events:type_name -> torana.v2.StreamEvent
-	6,  // 17: torana.v2.HookInput.chat_request:type_name -> torana.v2.ChatRequest
-	7,  // 18: torana.v2.HookInput.chat_response:type_name -> torana.v2.ChatResponse
-	18, // 19: torana.v2.HookInput.stream_event:type_name -> torana.v2.StreamEvent
-	20, // 20: torana.v2.HookInput.http_request:type_name -> torana.v2.HttpRequest
-	22, // 21: torana.v2.HookInput.tick_request:type_name -> torana.v2.TickRequest
-	6,  // 22: torana.v2.HookResult.replace_request:type_name -> torana.v2.ChatRequest
-	7,  // 23: torana.v2.HookResult.replace_response:type_name -> torana.v2.ChatResponse
-	19, // 24: torana.v2.HookResult.emit_events:type_name -> torana.v2.StreamEvents
-	21, // 25: torana.v2.HookResult.serve_http:type_name -> torana.v2.HttpResponse
-	23, // 26: torana.v2.HookResult.tick_outcome:type_name -> torana.v2.TickOutcome
-	25, // 27: torana.v2.HookResult.suppress:type_name -> torana.v2.Suppress
-	1,  // 28: torana.v2.HostError.code:type_name -> torana.v2.ErrorCode
-	27, // 29: torana.v2.HostCallResult.error:type_name -> torana.v2.HostError
-	30, // [30:30] is the sub-list for method output_type
-	30, // [30:30] is the sub-list for method input_type
-	30, // [30:30] is the sub-list for extension type_name
-	30, // [30:30] is the sub-list for extension extendee
-	0,  // [0:30] is the sub-list for field type_name
+	7,  // 17: torana.v2.AfterResponse.response:type_name -> torana.v2.ChatResponse
+	6,  // 18: torana.v2.HookInput.chat_request:type_name -> torana.v2.ChatRequest
+	24, // 19: torana.v2.HookInput.after_response:type_name -> torana.v2.AfterResponse
+	18, // 20: torana.v2.HookInput.stream_event:type_name -> torana.v2.StreamEvent
+	20, // 21: torana.v2.HookInput.http_request:type_name -> torana.v2.HttpRequest
+	22, // 22: torana.v2.HookInput.tick_request:type_name -> torana.v2.TickRequest
+	6,  // 23: torana.v2.HookResult.replace_request:type_name -> torana.v2.ChatRequest
+	7,  // 24: torana.v2.HookResult.replace_response:type_name -> torana.v2.ChatResponse
+	19, // 25: torana.v2.HookResult.emit_events:type_name -> torana.v2.StreamEvents
+	21, // 26: torana.v2.HookResult.serve_http:type_name -> torana.v2.HttpResponse
+	23, // 27: torana.v2.HookResult.tick_outcome:type_name -> torana.v2.TickOutcome
+	26, // 28: torana.v2.HookResult.suppress:type_name -> torana.v2.Suppress
+	1,  // 29: torana.v2.HostError.code:type_name -> torana.v2.ErrorCode
+	28, // 30: torana.v2.HostCallResult.error:type_name -> torana.v2.HostError
+	31, // [31:31] is the sub-list for method output_type
+	31, // [31:31] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_proto_torana_v2_torana_proto_init() }
@@ -2712,14 +2804,14 @@ func file_proto_torana_v2_torana_proto_init() {
 		(*StreamEvent_ContentBlockStart)(nil),
 		(*StreamEvent_ContentBlockStop)(nil),
 	}
-	file_proto_torana_v2_torana_proto_msgTypes[22].OneofWrappers = []any{
+	file_proto_torana_v2_torana_proto_msgTypes[23].OneofWrappers = []any{
 		(*HookInput_ChatRequest)(nil),
-		(*HookInput_ChatResponse)(nil),
+		(*HookInput_AfterResponse)(nil),
 		(*HookInput_StreamEvent)(nil),
 		(*HookInput_HttpRequest)(nil),
 		(*HookInput_TickRequest)(nil),
 	}
-	file_proto_torana_v2_torana_proto_msgTypes[24].OneofWrappers = []any{
+	file_proto_torana_v2_torana_proto_msgTypes[25].OneofWrappers = []any{
 		(*HookResult_ReplaceRequest)(nil),
 		(*HookResult_ReplaceResponse)(nil),
 		(*HookResult_EmitEvents)(nil),
@@ -2727,7 +2819,7 @@ func file_proto_torana_v2_torana_proto_init() {
 		(*HookResult_TickOutcome)(nil),
 		(*HookResult_Suppress)(nil),
 	}
-	file_proto_torana_v2_torana_proto_msgTypes[26].OneofWrappers = []any{
+	file_proto_torana_v2_torana_proto_msgTypes[27].OneofWrappers = []any{
 		(*HostCallResult_Value)(nil),
 		(*HostCallResult_Error)(nil),
 	}
@@ -2737,7 +2829,7 @@ func file_proto_torana_v2_torana_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_torana_v2_torana_proto_rawDesc), len(file_proto_torana_v2_torana_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   27,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
