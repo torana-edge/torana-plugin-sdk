@@ -1,7 +1,6 @@
 package v2_test
 
 import (
-	"os"
 	"strings"
 	"testing"
 
@@ -432,10 +431,16 @@ func TestObservationalDispatchIsMarked(t *testing.T) {
 	}
 }
 
-// request_id lives only on HookInput. Putting it also on the WASM signature
-// duplicated it and let the host disagree with the envelope; the v2 export is
-// run_hook(ptr, size) -> u64 with no id argument.
-func TestRequestIdIsOnlyOnTheEnvelope(t *testing.T) {
+// request_id lives only on HookInput (not as a WASM argument). The envelope
+// shape is asserted via descriptor reflection — not by grepping proto comments,
+// which can pass while the compiled ABI is wrong and fail on harmless prose edits.
+//
+// When Migration A lands the trampoline, a fixture guest's WASM exports must
+// additionally prove: run_hook(i32,i32)->i64 exists, no request_id argument,
+// the five v1 hook exports are gone after the v1 cut, and supported_hooks
+// agrees with registrations. Until then this is the protobuf half of that
+// contract.
+func TestHookInputEnvelopeShape(t *testing.T) {
 	in := &v2.HookInput{
 		RequestId: 42,
 		Payload: &v2.HookInput_ChatRequest{ChatRequest: &v2.ChatRequest{Model: "m"}},
@@ -451,24 +456,42 @@ func TestRequestIdIsOnlyOnTheEnvelope(t *testing.T) {
 	if got.RequestId != 42 {
 		t.Fatalf("request_id did not round-trip: %d", got.RequestId)
 	}
-	// Pin the normative comments: if someone reintroduces a global mutable or
-	// renames the single-export story, these strings are what say so.
-	protoSrc, err := os.ReadFile("../../proto/torana/v2/torana.proto")
-	if err != nil {
-		t.Fatal(err)
+
+	inDesc := (&v2.HookInput{}).ProtoReflect().Descriptor()
+	if f := inDesc.Fields().ByName("mutable"); f != nil {
+		t.Fatal("HookInput must not have a mutable field; it belongs on AfterResponse")
 	}
-	text := string(protoSrc)
-	for _, want := range []string{
-		"run_hook(ptr, size) -> u64",
-		"it is not also a WASM argument",
-		"message AfterResponse",
-	} {
-		if !strings.Contains(text, want) {
-			t.Errorf("proto/torana/v2/torana.proto must document %q", want)
-		}
+	if inDesc.Fields().ByName("request_id") == nil {
+		t.Fatal("HookInput must carry request_id")
 	}
-	if strings.Contains(text, "bool mutable = 3;") {
-		t.Error("mutable must not return to the global HookInput envelope")
+	if inDesc.Fields().ByName("abi_minor") == nil {
+		t.Fatal("HookInput must carry abi_minor")
+	}
+
+	payload := inDesc.Oneofs().ByName("payload")
+	if payload == nil {
+		t.Fatal("HookInput must have a payload oneof")
+	}
+	afterField := inDesc.Fields().ByName("after_response")
+	if afterField == nil {
+		t.Fatal("HookInput.payload must include after_response")
+	}
+	if afterField.ContainingOneof() != payload {
+		t.Fatal("after_response must be a member of the payload oneof")
+	}
+	if afterField.Message() == nil || string(afterField.Message().Name()) != "AfterResponse" {
+		t.Fatalf("after_response must point at AfterResponse, got %v", afterField.Message())
+	}
+	if inDesc.Fields().ByName("chat_response") != nil {
+		t.Fatal("bare chat_response must not remain on HookInput; use AfterResponse")
+	}
+
+	arDesc := (&v2.AfterResponse{}).ProtoReflect().Descriptor()
+	if arDesc.Fields().ByName("mutable") == nil {
+		t.Fatal("AfterResponse must carry mutable")
+	}
+	if arDesc.Fields().ByName("response") == nil {
+		t.Fatal("AfterResponse must carry response")
 	}
 }
 

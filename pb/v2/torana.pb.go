@@ -36,6 +36,20 @@ const (
 // is no second discriminator at the export name either. request_id is not a
 // WASM argument — it is only on HookInput — so the host cannot disagree with
 // the envelope about which request a call belongs to.
+//
+// Guests also export supported_hooks() -> u32. Bit N is set when Hook value N
+// is implemented (bit 0 is unused because HOOK_UNSPECIFIED is not a hook):
+//
+//	bit 1 = HOOK_BEFORE_REQUEST
+//	bit 2 = HOOK_AFTER_RESPONSE
+//	bit 3 = HOOK_ON_STREAM_CHUNK
+//	bit 4 = HOOK_ON_HTTP_REQUEST
+//	bit 5 = HOOK_ON_TICK
+//
+// The SDK derives the bitmap from actual registrations; the host compares it
+// with the manifest before enabling the plugin. A missing bit for a declared
+// hook is a load-time error. This is not a dispatch input — run_hook never
+// consults it.
 type Hook int32
 
 const (
@@ -1793,6 +1807,9 @@ func (x *HttpResponse) GetBody() []byte {
 // Requires env.background_tick. Running code with no request in flight is a
 // capability an operator should grant deliberately: a plugin holding it can act
 // — and spend — outside any request the operator can see.
+//
+// HookInput.request_id on a tick is a synthetic execution-scope id, not a
+// caller request — see that field's comment.
 type TickRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Monotonically increasing within one scheduler, starting at 1. Resets if the
@@ -1985,9 +2002,18 @@ type HookInput struct {
 	// Minor version of the v2 contract the host is speaking. Additive changes
 	// bump this; a plugin may use it to detect fields it can rely on.
 	AbiMinor uint32 `protobuf:"varint,1,opt,name=abi_minor,json=abiMinor,proto3" json:"abi_minor,omitempty"`
-	// Host-assigned request id, stable for the life of one request. Stream hooks
-	// for the same response share it. This is the only place the id appears —
+	// Host-assigned execution-scope id. This is the only place the id appears —
 	// it is not also a WASM argument.
+	//
+	// For request-scoped hooks (before_request, after_response, stream, http)
+	// this is the caller/request correlation id. Every stream event of one
+	// response shares it.
+	//
+	// For ticks — which fire with no request in flight — the host supplies a
+	// unique synthetic scope id so host-call scratch state stays isolated across
+	// ticks. Authors must not interpret a tick's request_id as a caller request;
+	// request-scoped host calls (original_request, meta keyed by request, etc.)
+	// remain unavailable on tick regardless of this field's value.
 	RequestId uint64 `protobuf:"varint,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	// Types that are valid to be assigned to Payload:
 	//

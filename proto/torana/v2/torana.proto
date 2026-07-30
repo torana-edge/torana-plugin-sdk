@@ -14,6 +14,12 @@ option go_package = "github.com/torana-edge/torana-plugin-sdk/pb/v2";
 //     "host called the wrong export" detectable rather than impossible — a tick
 //     payload delivered to run_before_request was a well-formed input to the
 //     wrong hook until someone remembered to check.
+//   - Guests ALSO export supported_hooks() -> u32, a bitmap of hooks the module
+//     actually implements. That is startup introspection, not a second dispatch
+//     discriminator: run_hook still routes only from the payload. Without it,
+//     collapsing five exports to one would erase the only artifact-level proof
+//     that a declared manifest hook has a handler — a plugin could declare five,
+//     register one, pass load, and fail on customer traffic.
 //   - Hook payloads are enveloped and self-describing. In v1 a mis-dispatched
 //     payload decoded as an EMPTY message of whatever type the hook expected,
 //     and every plugin treated that as a legitimate empty request.
@@ -310,6 +316,9 @@ message HttpResponse {
 // Requires env.background_tick. Running code with no request in flight is a
 // capability an operator should grant deliberately: a plugin holding it can act
 // — and spend — outside any request the operator can see.
+//
+// HookInput.request_id on a tick is a synthetic execution-scope id, not a
+// caller request — see that field's comment.
 message TickRequest {
   // Monotonically increasing within one scheduler, starting at 1. Resets if the
   // scheduler restarts, so treat it as an ordering hint rather than a durable
@@ -349,6 +358,20 @@ message TickOutcome {
 // is no second discriminator at the export name either. request_id is not a
 // WASM argument — it is only on HookInput — so the host cannot disagree with
 // the envelope about which request a call belongs to.
+//
+// Guests also export supported_hooks() -> u32. Bit N is set when Hook value N
+// is implemented (bit 0 is unused because HOOK_UNSPECIFIED is not a hook):
+//
+//   bit 1 = HOOK_BEFORE_REQUEST
+//   bit 2 = HOOK_AFTER_RESPONSE
+//   bit 3 = HOOK_ON_STREAM_CHUNK
+//   bit 4 = HOOK_ON_HTTP_REQUEST
+//   bit 5 = HOOK_ON_TICK
+//
+// The SDK derives the bitmap from actual registrations; the host compares it
+// with the manifest before enabling the plugin. A missing bit for a declared
+// hook is a load-time error. This is not a dispatch input — run_hook never
+// consults it.
 enum Hook {
   HOOK_UNSPECIFIED = 0;
   HOOK_BEFORE_REQUEST = 1;
@@ -381,9 +404,18 @@ message HookInput {
   // Minor version of the v2 contract the host is speaking. Additive changes
   // bump this; a plugin may use it to detect fields it can rely on.
   uint32 abi_minor = 1;
-  // Host-assigned request id, stable for the life of one request. Stream hooks
-  // for the same response share it. This is the only place the id appears —
+  // Host-assigned execution-scope id. This is the only place the id appears —
   // it is not also a WASM argument.
+  //
+  // For request-scoped hooks (before_request, after_response, stream, http)
+  // this is the caller/request correlation id. Every stream event of one
+  // response shares it.
+  //
+  // For ticks — which fire with no request in flight — the host supplies a
+  // unique synthetic scope id so host-call scratch state stays isolated across
+  // ticks. Authors must not interpret a tick's request_id as a caller request;
+  // request-scoped host calls (original_request, meta keyed by request, etc.)
+  // remain unavailable on tick regardless of this field's value.
   uint64 request_id = 2;
 
   oneof payload {
