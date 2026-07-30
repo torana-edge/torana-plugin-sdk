@@ -42,16 +42,18 @@ func (x *HostError) Validate() error {
 // Validate reports whether a HostCallResult is a usable host-call reply.
 //
 // The result oneof must be set. Empty bytes on the value arm are success with
-// no payload. The error arm must carry a validated HostError. Like HookResult,
-// every top-level field is a oneof member, so unknown top-level bytes are an
-// unrecognised result arm and are refused.
+// no payload. The error arm must carry a validated HostError. Unknown top-level
+// bytes are an unrecognised (future) result arm and are refused.
+//
+// This envelope is host-produced. Multiple known arms on the wire follow
+// protobuf last-known-arm-wins after unmarshal; Validate cannot and does not
+// detect that case. Guest-controlled HookResult uses DecodeHookResult instead.
 func (x *HostCallResult) Validate() error {
 	if x == nil {
 		return fmt.Errorf("host call result is nil")
 	}
 	if len(x.ProtoReflect().GetUnknown()) != 0 {
-		return fmt.Errorf("host call result carries a result arm this build does not " +
-			"recognise; either it was produced by a newer ABI, or it encodes more than one arm")
+		return fmt.Errorf("host call result carries a result arm this build does not recognise")
 	}
 	switch r := x.Result.(type) {
 	case nil:
@@ -124,6 +126,7 @@ func (x *SetIdentityArgs) Validate() error {
 }
 
 // Validate reports whether MetaAppendArgs can be appended to request metadata.
+// Empty fragment is valid — it is the no-op/read path (see ApplyMetaAppend).
 func (x *MetaAppendArgs) Validate() error {
 	if x == nil {
 		return fmt.Errorf("meta append args are nil")

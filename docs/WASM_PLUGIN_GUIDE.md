@@ -237,10 +237,14 @@ authority matches (assistant text on request and response). Topology is separate
   (Host enforcement vocabulary: package `outboundpolicy` — not imported by guests.)
 
 Host-call replies use `HostCallResult` (`value` or `HostError`). An empty result
-(no oneof arm) or `ERROR_CODE_UNSPECIFIED` is invalid. Verdict / `meta_append`
-arguments are the normative messages `BlockRequestArgs`, `RespondRequestArgs`,
-`RouteRequestArgs`, `SetIdentityArgs`, and `MetaAppendArgs` in
-`proto/torana/v2/torana.proto`.
+(no oneof arm) or `ERROR_CODE_UNSPECIFIED` is invalid. Unknown top-level fields
+are refused; multiple known arms follow last-wins (host-produced). Guest
+`HookResult` frames must go through `DecodeHookResult` before `ValidateFor` so
+two known action arms cannot last-wins past the host. Verdict / `meta_append`
+arguments are `BlockRequestArgs`, `RespondRequestArgs`, `RouteRequestArgs`,
+`SetIdentityArgs`, and `MetaAppendArgs` in `proto/torana/v2/torana.proto`.
+Command `env.meta_append` is authorised by permission `env.meta_set`; success
+value is the complete buffer (`ApplyMetaAppend`).
 
 ## 7. Summary Checklist for AI Agents
 1. Did I use a real allocator (not a bump allocator)?

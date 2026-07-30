@@ -1,10 +1,12 @@
 package v2_test
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
 	v2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -78,7 +80,9 @@ func TestHostCallResultErrorMustBeClassified(t *testing.T) {
 
 func TestHostCallResultRejectsUnknownTopLevelFields(t *testing.T) {
 	// Encode a result, then stuff unknown bytes at the top level the way a
-	// newer ABI arm or a double-arm handwritten frame would.
+	// newer ABI arm would. This is not a double-known-arm case: two known arms
+	// (fields 1 and 2) last-wins on unmarshal and leave no unknown bytes —
+	// HostCallResult accepts that because the envelope is host-produced.
 	ok := &v2.HostCallResult{Result: &v2.HostCallResult_Value{Value: []byte("x")}}
 	raw, err := proto.Marshal(ok)
 	if err != nil {
@@ -92,6 +96,81 @@ func TestHostCallResultRejectsUnknownTopLevelFields(t *testing.T) {
 	}
 	if err := got.Validate(); err == nil {
 		t.Fatal("unknown top-level field must be rejected")
+	}
+}
+
+func TestHostCallResultKnownDoubleArmLastWins(t *testing.T) {
+	// Document the honest rule: two known arms on the wire are not detectable
+	// after unmarshal. Field 1 then field 2 → error arm wins.
+	raw := protowire.AppendTag(nil, 1, protowire.BytesType)
+	raw = protowire.AppendBytes(raw, []byte("value"))
+	errBody, err := proto.Marshal(&v2.HostError{
+		Code:    v2.ErrorCode_ERROR_CODE_NOT_FOUND,
+		Message: "gone",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = protowire.AppendTag(raw, 2, protowire.BytesType)
+	raw = protowire.AppendBytes(raw, errBody)
+
+	var got v2.HostCallResult
+	if err := proto.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.ProtoReflect().GetUnknown()) != 0 {
+		t.Fatal("precondition: known double-arm must leave no unknown fields")
+	}
+	if got.GetError() == nil {
+		t.Fatal("precondition: last arm (error) should win")
+	}
+	if err := got.Validate(); err != nil {
+		t.Fatalf("host-produced last-wins frame must validate: %v", err)
+	}
+}
+
+func TestMetaAppendContract(t *testing.T) {
+	if v2.MetaAppendCommand != "env.meta_append" {
+		t.Fatalf("command: got %q", v2.MetaAppendCommand)
+	}
+	if v2.MetaAppendPermission != "env.meta_set" {
+		t.Fatalf("permission: got %q", v2.MetaAppendPermission)
+	}
+	// Dispatchers that derive the permission from the command string would
+	// look for env.meta_append — which is not a declared capability.
+	if v2.MetaAppendCommand == v2.MetaAppendPermission {
+		t.Fatal("command and permission must differ so the dispatcher special-case is load-bearing")
+	}
+
+	cases := []struct {
+		name     string
+		existing []byte
+		present  bool
+		fragment []byte
+		want     []byte
+		wantKey  bool
+	}{
+		{"absent empty", nil, false, nil, []byte{}, false},
+		{"absent empty slice", nil, false, []byte{}, []byte{}, false},
+		{"present empty", []byte("ab"), true, nil, []byte("ab"), true},
+		{"absent create", nil, false, []byte("xy"), []byte("xy"), true},
+		{"present append", []byte("ab"), true, []byte("cd"), []byte("abcd"), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, key := v2.ApplyMetaAppend(tc.existing, tc.present, tc.fragment)
+			if key != tc.wantKey {
+				t.Fatalf("presentOut=%v, want %v", key, tc.wantKey)
+			}
+			if !bytes.Equal(got, tc.want) {
+				t.Fatalf("complete=%q, want %q", got, tc.want)
+			}
+			// Success value is always the complete buffer (empty when absent+empty).
+			ok := &v2.HostCallResult{Result: &v2.HostCallResult_Value{Value: got}}
+			if err := ok.Validate(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

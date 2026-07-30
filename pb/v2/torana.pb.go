@@ -2505,6 +2505,12 @@ func (x *HostError) GetMessage() string {
 // The oneof must be set. An empty HostCallResult (no arm) is refused — there is
 // no pass-through meaning for a host-call reply the way there is for a hook
 // result. See HostCallResult.Validate.
+//
+// This envelope is host-produced. Validate refuses unknown top-level fields
+// (a future result arm). Multiple known arms on the wire follow protobuf's
+// last-known-arm-wins rule after unmarshal; that is accepted here because the
+// host, not a guest, authors the frame. Guest-controlled HookResult is stricter
+// — see DecodeHookResult.
 type HostCallResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Result:
@@ -2803,17 +2809,38 @@ func (x *SetIdentityArgs) GetIdentity() string {
 	return ""
 }
 
-// MetaAppendArgs is the argument body for the meta_append host command
-// (permission: env.meta_set). Atomically appends a fragment to
-// request-scoped metadata keyed by block index — the StreamHandler path
-// that must not use get-then-set under concurrency.
+// MetaAppendArgs is the argument body for host command env.meta_append.
+//
+// Contract (normative; pinned by pb/v2 MetaAppend* constants and tests):
+//
+//	command:    env.meta_append
+//	permission: env.meta_set  (dispatcher special-case — do NOT derive the
+//	            permission from the command string; "env.meta_append" is not
+//	            an operator-facing capability)
+//	args:       MetaAppendArgs
+//	success:    HostCallResult.value = the complete buffer for block_index
+//	            after the atomic update (the bytes the StreamAssembler /
+//	            StreamHandler must re-emit on fail-open, including at
+//	            ContentBlockStop which carries no final fragment)
+//
+// Buffer semantics for key (request-scoped, private to the calling plugin,
+// keyed by block_index):
+//
+//   - absent key + empty fragment  → no-op; value is empty bytes; key stays absent
+//   - present key + empty fragment → no-op/read; value is the existing buffer
+//   - absent key + non-empty frag  → create; value is the fragment
+//   - present key + non-empty frag → append; value is prior∥fragment
+//
+// Empty fragment is the supported read path so ContentBlockStop (and any
+// fail-open re-emission) can retrieve the assembled original without a racy
+// meta_get / meta_set pair. Host execution of this command lands in Migration B;
+// the SDK contract here is what B and StreamHandler must implement identically.
 type MetaAppendArgs struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Content-block index within the streamed message (ABI: unique, never
 	// reused). Must be non-negative.
 	BlockIndex int32 `protobuf:"varint,1,opt,name=block_index,json=blockIndex,proto3" json:"block_index,omitempty"`
-	// Fragment bytes to append. Empty is allowed (no-op append) so callers do
-	// not need a separate ping.
+	// Fragment bytes to append. Empty is the no-op/read path (see message docs).
 	Fragment      []byte `protobuf:"bytes,2,opt,name=fragment,proto3" json:"fragment,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

@@ -841,19 +841,14 @@ func TestUnknownInputPayloadIsRejected(t *testing.T) {
 	}
 }
 
-// A frame carrying a known action AND unknown fields is still honoured: the
-// action is understood, and the extra bytes are additive fields a newer ABI
-// attached to it.
 // A known action does not excuse an unknown top-level field.
 //
 // Every top-level field of HookResult is a member of the action oneof, so an
-// unknown one is a second action — either added by a later ABI, or encoded by a
-// handwritten guest that ignored the oneof. Executing the half this build
-// understands is the worst available outcome: the guest asked for two things,
-// one silently did not happen, and nothing anywhere reports it.
+// unknown one is a future action. Executing the half this build understands
+// while discarding the future arm is the worst available outcome.
 //
-// This test previously asserted the opposite, describing field 99 as additive
-// metadata. That distinction does not exist on the wire.
+// Multiple known arms are a separate case — see
+// TestDecodeHookResultRefusesMultipleKnownArms.
 func TestKnownActionWithAnUnknownTopLevelFieldIsRejected(t *testing.T) {
 	known, err := proto.Marshal(&v2.HookResult{
 		Action: &v2.HookResult_TickOutcome{TickOutcome: &v2.TickOutcome{Actions: 1}},
@@ -919,5 +914,57 @@ func TestUnknownFieldInsideAKnownActionIsAccepted(t *testing.T) {
 	}
 	if out.Actions != 1 {
 		t.Fatalf("the known part of the action did not survive: %+v", out)
+	}
+}
+
+// A handwritten guest can put two known action arms on the wire. Protobuf
+// unmarshal keeps only the last; ValidateFor then sees a clean single-arm
+// frame. DecodeHookResult refuses before that happens.
+func TestDecodeHookResultRefusesMultipleKnownArms(t *testing.T) {
+	suppress, err := proto.Marshal(&v2.Suppress{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tick, err := proto.Marshal(&v2.TickOutcome{Actions: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Fields 6 then 5: both known action arms.
+	raw := protowire.AppendTag(nil, 6, protowire.BytesType)
+	raw = protowire.AppendBytes(raw, suppress)
+	raw = protowire.AppendTag(raw, 5, protowire.BytesType)
+	raw = protowire.AppendBytes(raw, tick)
+
+	if _, err := v2.DecodeHookResult(raw); err == nil {
+		t.Fatal("DecodeHookResult must refuse two known action arms")
+	} else if !strings.Contains(err.Error(), "more than one known oneof arm") {
+		t.Fatalf("want multi-arm error, got %v", err)
+	}
+
+	// Post-unmarshal ValidateFor cannot see the overwritten arm — documenting
+	// why DecodeHookResult is load-bearing at the host boundary.
+	var r v2.HookResult
+	if err := proto.Unmarshal(raw, &r); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.ProtoReflect().GetUnknown()) != 0 {
+		t.Fatal("precondition: known double-arm leaves no unknown fields")
+	}
+	if r.GetTickOutcome() == nil {
+		t.Fatal("precondition: last arm should win under plain unmarshal")
+	}
+	if err := r.ValidateFor(v2.Hook_HOOK_ON_TICK); err != nil {
+		t.Fatalf("plain ValidateFor accepts last-wins; that is why Decode is required: %v", err)
+	}
+
+	// A single known arm still decodes.
+	ok := protowire.AppendTag(nil, 5, protowire.BytesType)
+	ok = protowire.AppendBytes(ok, tick)
+	got, err := v2.DecodeHookResult(ok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := got.ValidateFor(v2.Hook_HOOK_ON_TICK); err != nil {
+		t.Fatal(err)
 	}
 }

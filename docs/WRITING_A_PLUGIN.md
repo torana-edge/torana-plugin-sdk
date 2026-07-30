@@ -241,7 +241,8 @@ in package `outboundpolicy` (not for WASM guests).
 
 | Capability | SDK | Scope |
 | --- | --- | --- |
-| `env.meta_get` / `env.meta_set` | `sdk.HostCall` | One request, private to your plugin. Gone when the request ends. v2 also defines `meta_append` (`MetaAppendArgs`) under `env.meta_set` for atomic fragment appends by block index. |
+| `env.meta_get` / `env.meta_set` | `sdk.HostCall` | One request, private to your plugin. Gone when the request ends. |
+| `env.meta_append` (permission `env.meta_set`) | v2 `MetaAppendArgs` | Atomic append by block index. Success `HostCallResult.value` is the complete buffer after the update. Empty fragment is a no-op/read (absent key → empty bytes, key stays absent). Dispatcher maps the command onto `env.meta_set` — there is no separate grant. |
 | `env.cache_get` / `env.cache_set` | `sdk.HostCall` | Across requests, TTL'd, **shared with every other plugin**. Prefix your keys. |
 | `env.state_get` / `env.state_set` / `env.state_keys` | `sdk.StateGet`, `sdk.StateSet`, `sdk.StateKeys` | Across requests **and restarts**, private, never expires. You must delete your own keys. |
 
