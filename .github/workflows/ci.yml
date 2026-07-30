@@ -27,37 +27,13 @@ jobs:
       - uses: bufbuild/buf-setup-action@v1
       - run: buf lint
       - if: github.event_name == 'pull_request'
-        name: ABI compatibility (v1 only, while the v2 migration runs)
-        run: |
-          # v1 is NOT a supported surface. It is held unchanged only because
-          # torana-edge and the official plugins still import it while they move
-          # to v2 one repo at a time; breaking it mid-migration would strand a
-          # repo that has not moved yet. It is deleted in the coordinated v2 cut.
-          # Torana has not launched, so there is no installed base to preserve.
-          #
-          # v2 is not released. It has no consumers, nothing pins it, and it is
-          # still being designed: the shape has already changed several times
-          # under review, correctly. Protecting it now would freeze mistakes
-          # rather than prevent them.
-          #
-          # The guard below removes this exemption automatically. A v0.3.x tag
-          # means the migration is over, and this fails until it is resolved.
-          # The intended resolution is that the --path line is gone BECAUSE
-          # proto/torana/v1 is gone, leaving buf breaking protecting v2 across
-          # the whole tree. Do not satisfy it by protecting both versions.
-          if git tag -l 'v0.3.*' | grep -q .; then
-            echo "::error::A v0.3.x tag exists, so the v2 migration is complete." >&2
-            echo "::error::Delete proto/torana/v1 and remove the --path restriction" >&2
-            echo "::error::in this step, so buf breaking protects v2 instead." >&2
-            exit 1
-          fi
-          if git cat-file -e origin/main:proto/torana/v1/torana.proto 2>/dev/null; then
-            buf breaking \
-              --against 'https://github.com/torana-edge/torana-plugin-sdk.git#branch=main' \
-              --path proto/torana/v1
-          else
-            echo "No ABI baseline exists on main yet; this PR establishes v1."
-          fi
+        name: ABI compatibility
+        run: ./scripts/check-abi-breaking.sh
+      # The release preflight for v0.3+ lives in release.yml (and
+      # scripts/assert-v2-cut-for-release.sh). A tag-only guard here would run
+      # too late: release.yml is triggered by the tag itself.
+      - name: Release cut preflight covers both migration states
+        run: ./scripts/assert-v2-cut-for-release_test.sh
       - run: go test ./...
       - run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -buildvcs=false -o /tmp/go-logger.wasm ./examples/go-logger
       # The release workflow asserts the Rust crate version matches the tag, but

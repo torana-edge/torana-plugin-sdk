@@ -52,20 +52,22 @@ Adding a hook or host call touches more places than it looks:
   mid-flight. That is the only reason it is protected.
   - **Do not add v1 features, fixes, or a v1→v2 compatibility layer.** Work that
     would touch v1 belongs in v2.
-  - v1 and this `--path` restriction are **both deleted** in the coordinated v2
-    cut, once all three repos are on v2 and before release.
+  - The coordinated cut deletes v1. `scripts/check-abi-breaking.sh` then protects
+    **only v2** (scoped with `--path`), so comparing against a `main` that still
+    contains v1 does not report the intentional deletion as a breaking change.
+    After that PR merges, `main` has only v2 and the restriction can be
+    simplified.
   - Torana has not launched, so there is no installed base to preserve. The
     published `v0.2.0` tag keeps working regardless — module proxy tags are
     immutable, so deleting v1 from the tree cannot reach anyone who pinned it.
 - **`proto/torana/v2` is unreleased and may still be reshaped.** Nothing pins it
   and nothing consumes it, so freezing it would preserve design mistakes rather
   than prevent them — its shape has already improved several times under review.
-  CI exempts it while the migration runs, and the exemption removes itself: once
-  a `v0.3.x` tag exists the check fails until it is resolved. By then the
-  intended resolution is that the `--path` line is gone **because v1 is gone**,
-  leaving `buf breaking` protecting v2 across the whole tree — not both versions
-  protected forever. An exemption that outlives its reason is how a check
-  quietly stops protecting anything.
+  While `proto/torana/v1` still exists, CI protects only v1. The hard guarantee
+  that no `v0.3.x` (or later) tag can ship before the cut is
+  `scripts/assert-v2-cut-for-release.sh` in `release.yml`, which runs **before**
+  any package or publish step and refuses unless both v1 copies are gone and CI
+  protects v2. A guard that lived only on `pull_request` would notice too late.
 - Update `docs/WASM_PLUGIN_GUIDE.md` too. It is the document that makes this SDK
   usable by weaker models, and a capability missing from its checklist silently
   makes the guide insufficient.
