@@ -585,9 +585,105 @@ message HostError {
 // distinguishable from an error — unlike v1, where an empty string meant
 // "granted but no value", "cache miss", "key absent", "feature unconfigured",
 // and "the host refused to write an empty payload", all at once.
+//
+// The oneof must be set. An empty HostCallResult (no arm) is refused — there is
+// no pass-through meaning for a host-call reply the way there is for a hook
+// result. See HostCallResult.Validate.
+//
+// This envelope is host-produced. Validate refuses unknown top-level fields
+// (a future result arm). Multiple known arms on the wire follow protobuf's
+// last-known-arm-wins rule after unmarshal; that is accepted here because the
+// host, not a guest, authors the frame. Guest-controlled HookResult is stricter
+// — see DecodeHookResult.
 message HostCallResult {
   oneof result {
     bytes value = 1;
     HostError error = 2;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Host-call argument schemas (normative)
+//
+// Verdicts and MetaAppend move from JSON stuffed into ToranaMeta / opaque
+// host_call strings onto these messages. The host unmarshals args as the
+// message named by the command; Validate rejects frames that cannot be acted
+// on. Permission names stay as today (env.block_request, …) except
+// env.meta_append, which the dispatcher specially maps onto env.meta_set
+// (no separate operator grant — see MetaAppendArgs).
+// ---------------------------------------------------------------------------
+
+// BlockRequestArgs is the argument body for env.block_request.
+// Short-circuits the pipeline with a provider-shaped error.
+message BlockRequestArgs {
+  // HTTP-like status the caller sees (e.g. 422). Value-range checks are
+  // separate; structural validation requires a non-zero status.
+  int32 status = 1;
+  // Stable machine code (e.g. "pii_detected"). Required.
+  string code = 2;
+  // Human message for the caller. Must not contain secrets.
+  string message = 3;
+}
+
+// RespondRequestArgs is the argument body for env.respond_request.
+// Serves content without calling upstream.
+message RespondRequestArgs {
+  // Assistant content to return. Empty is allowed (an empty completion).
+  string content = 1;
+}
+
+// RouteRequestArgs is the argument body for env.route_request.
+// An empty provider with a non-empty model is a model-only override on the
+// original provider. At least one of provider or model must be set.
+message RouteRequestArgs {
+  string provider = 1;
+  string model = 2;
+}
+
+// SetIdentityArgs is the argument body for env.set_identity.
+// Overrides the rate-limit / identity key for this request.
+message SetIdentityArgs {
+  // Non-empty identity key. Empty is refused — clearing identity is not a
+  // defined operation of this call.
+  string identity = 1;
+}
+
+// MetaAppendArgs is the argument body for host command env.meta_append.
+//
+// Contract (normative; pinned by pb/v2 MetaAppend* constants and tests):
+//
+//   command:    env.meta_append
+//   permission: env.meta_set  (dispatcher special-case — do NOT derive the
+//               permission from the command string; "env.meta_append" is not
+//               an operator-facing capability)
+//   args:       MetaAppendArgs
+//
+// Success HostCallResult.value (constant-size ack vs read-back — do NOT return
+// the cumulative buffer after every delta; that would be O(total×fragments)
+// on the stream path):
+//
+//   - non-empty fragment → empty success value after atomic append
+//   - empty fragment     → complete current buffer (absent → empty bytes)
+//
+// Host storage: under the request lock, append with amortized/in-place growth.
+// Do not copy the full prefix on every fragment solely to populate the reply.
+//
+// Buffer / key effects (request-scoped, private to the calling plugin, keyed
+// by block_index):
+//
+//   - absent key + empty fragment  → no-op/read; value empty; key stays absent
+//   - present key + empty fragment → no-op/read; value is the existing buffer
+//   - absent key + non-empty frag  → create; value empty (ack)
+//   - present key + non-empty frag → append; value empty (ack)
+//
+// Empty fragment is the ContentBlockStop / fail-open read path so the guest
+// can retrieve the assembled original without a racy meta_get / meta_set pair
+// and without paying for a full buffer copy on every delta. Host execution
+// lands in Migration B; see MetaAppendSuccessValue.
+message MetaAppendArgs {
+  // Content-block index within the streamed message (ABI: unique, never
+  // reused). Must be non-negative.
+  int32 block_index = 1;
+  // Fragment bytes to append. Empty is the no-op/read path (see message docs).
+  bytes fragment = 2;
 }

@@ -257,27 +257,22 @@ func (x *HookResult) ValidateFor(hook Hook) error {
 		return fmt.Errorf("hook result is nil")
 	}
 	// Every top-level field of HookResult is a member of the action oneof, so
-	// an unknown top-level field is an action — there is no other kind of field
-	// it could be. Two cases produce one, and both must be refused:
+	// an unknown top-level field is a future action — there is no other kind of
+	// field it could be. Honouring the rest of the frame would silently DISCARD
+	// what a newer guest asked for. Checking this only when Action == nil caught
+	// the case when the future action arrived ALONE; a known action alongside a
+	// future one still validated, and the host executed the half it understood.
 	//
-	//   - a newer guest emitting an action added after this build. Honouring
-	//     the rest of the frame would silently DISCARD what it asked for, which
-	//     surfaces as "the plugin has no effect" rather than as an error — the
-	//     hardest kind to diagnose, and exactly what ABI-minor evolution will
-	//     produce as soon as an action is added.
-	//   - a handwritten guest encoding two actions at once. The oneof makes
-	//     that unrepresentable through generated code, not on the wire.
-	//
-	// Checking this only when Action == nil caught the first case just when the
-	// future action arrived ALONE. A known action alongside a future one still
-	// validated, and the host executed the half it understood.
+	// Multiple KNOWN arms are a different case: protobuf unmarshal applies
+	// last-known-arm-wins and leaves no unknown bytes, so this method cannot
+	// see them. The host must decode guest frames with DecodeHookResult, which
+	// inspects the wire before unmarshal.
 	//
 	// Additive evolution of an EXISTING action is unaffected: protobuf stores
 	// unknown fields of a nested message on that message, not here. See
 	// HookInput.Validate for why the same rule would be wrong there.
 	if len(x.ProtoReflect().GetUnknown()) != 0 {
-		return fmt.Errorf("hook result carries an action this build does not recognise; " +
-			"either it was produced by a newer ABI, or it encodes more than one action")
+		return fmt.Errorf("hook result carries an action this build does not recognise")
 	}
 	if x.Action == nil {
 		// Genuinely empty: indistinguishable on the wire from returning

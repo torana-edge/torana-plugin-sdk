@@ -2501,6 +2501,16 @@ func (x *HostError) GetMessage() string {
 // distinguishable from an error — unlike v1, where an empty string meant
 // "granted but no value", "cache miss", "key absent", "feature unconfigured",
 // and "the host refused to write an empty payload", all at once.
+//
+// The oneof must be set. An empty HostCallResult (no arm) is refused — there is
+// no pass-through meaning for a host-call reply the way there is for a hook
+// result. See HostCallResult.Validate.
+//
+// This envelope is host-produced. Validate refuses unknown top-level fields
+// (a future result arm). Multiple known arms on the wire follow protobuf's
+// last-known-arm-wins rule after unmarshal; that is accepted here because the
+// host, not a guest, authors the frame. Guest-controlled HookResult is stricter
+// — see DecodeHookResult.
 type HostCallResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Result:
@@ -2582,6 +2592,309 @@ type HostCallResult_Error struct {
 func (*HostCallResult_Value) isHostCallResult_Result() {}
 
 func (*HostCallResult_Error) isHostCallResult_Result() {}
+
+// BlockRequestArgs is the argument body for env.block_request.
+// Short-circuits the pipeline with a provider-shaped error.
+type BlockRequestArgs struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// HTTP-like status the caller sees (e.g. 422). Value-range checks are
+	// separate; structural validation requires a non-zero status.
+	Status int32 `protobuf:"varint,1,opt,name=status,proto3" json:"status,omitempty"`
+	// Stable machine code (e.g. "pii_detected"). Required.
+	Code string `protobuf:"bytes,2,opt,name=code,proto3" json:"code,omitempty"`
+	// Human message for the caller. Must not contain secrets.
+	Message       string `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BlockRequestArgs) Reset() {
+	*x = BlockRequestArgs{}
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BlockRequestArgs) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BlockRequestArgs) ProtoMessage() {}
+
+func (x *BlockRequestArgs) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BlockRequestArgs.ProtoReflect.Descriptor instead.
+func (*BlockRequestArgs) Descriptor() ([]byte, []int) {
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *BlockRequestArgs) GetStatus() int32 {
+	if x != nil {
+		return x.Status
+	}
+	return 0
+}
+
+func (x *BlockRequestArgs) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+func (x *BlockRequestArgs) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+// RespondRequestArgs is the argument body for env.respond_request.
+// Serves content without calling upstream.
+type RespondRequestArgs struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Assistant content to return. Empty is allowed (an empty completion).
+	Content       string `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RespondRequestArgs) Reset() {
+	*x = RespondRequestArgs{}
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RespondRequestArgs) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RespondRequestArgs) ProtoMessage() {}
+
+func (x *RespondRequestArgs) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RespondRequestArgs.ProtoReflect.Descriptor instead.
+func (*RespondRequestArgs) Descriptor() ([]byte, []int) {
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *RespondRequestArgs) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+// RouteRequestArgs is the argument body for env.route_request.
+// An empty provider with a non-empty model is a model-only override on the
+// original provider. At least one of provider or model must be set.
+type RouteRequestArgs struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Provider      string                 `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
+	Model         string                 `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RouteRequestArgs) Reset() {
+	*x = RouteRequestArgs{}
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RouteRequestArgs) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RouteRequestArgs) ProtoMessage() {}
+
+func (x *RouteRequestArgs) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RouteRequestArgs.ProtoReflect.Descriptor instead.
+func (*RouteRequestArgs) Descriptor() ([]byte, []int) {
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *RouteRequestArgs) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *RouteRequestArgs) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+// SetIdentityArgs is the argument body for env.set_identity.
+// Overrides the rate-limit / identity key for this request.
+type SetIdentityArgs struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Non-empty identity key. Empty is refused — clearing identity is not a
+	// defined operation of this call.
+	Identity      string `protobuf:"bytes,1,opt,name=identity,proto3" json:"identity,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetIdentityArgs) Reset() {
+	*x = SetIdentityArgs{}
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetIdentityArgs) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetIdentityArgs) ProtoMessage() {}
+
+func (x *SetIdentityArgs) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetIdentityArgs.ProtoReflect.Descriptor instead.
+func (*SetIdentityArgs) Descriptor() ([]byte, []int) {
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *SetIdentityArgs) GetIdentity() string {
+	if x != nil {
+		return x.Identity
+	}
+	return ""
+}
+
+// MetaAppendArgs is the argument body for host command env.meta_append.
+//
+// Contract (normative; pinned by pb/v2 MetaAppend* constants and tests):
+//
+//	command:    env.meta_append
+//	permission: env.meta_set  (dispatcher special-case — do NOT derive the
+//	            permission from the command string; "env.meta_append" is not
+//	            an operator-facing capability)
+//	args:       MetaAppendArgs
+//
+// Success HostCallResult.value (constant-size ack vs read-back — do NOT return
+// the cumulative buffer after every delta; that would be O(total×fragments)
+// on the stream path):
+//
+//   - non-empty fragment → empty success value after atomic append
+//   - empty fragment     → complete current buffer (absent → empty bytes)
+//
+// Host storage: under the request lock, append with amortized/in-place growth.
+// Do not copy the full prefix on every fragment solely to populate the reply.
+//
+// Buffer / key effects (request-scoped, private to the calling plugin, keyed
+// by block_index):
+//
+//   - absent key + empty fragment  → no-op/read; value empty; key stays absent
+//   - present key + empty fragment → no-op/read; value is the existing buffer
+//   - absent key + non-empty frag  → create; value empty (ack)
+//   - present key + non-empty frag → append; value empty (ack)
+//
+// Empty fragment is the ContentBlockStop / fail-open read path so the guest
+// can retrieve the assembled original without a racy meta_get / meta_set pair
+// and without paying for a full buffer copy on every delta. Host execution
+// lands in Migration B; see MetaAppendSuccessValue.
+type MetaAppendArgs struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Content-block index within the streamed message (ABI: unique, never
+	// reused). Must be non-negative.
+	BlockIndex int32 `protobuf:"varint,1,opt,name=block_index,json=blockIndex,proto3" json:"block_index,omitempty"`
+	// Fragment bytes to append. Empty is the no-op/read path (see message docs).
+	Fragment      []byte `protobuf:"bytes,2,opt,name=fragment,proto3" json:"fragment,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MetaAppendArgs) Reset() {
+	*x = MetaAppendArgs{}
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MetaAppendArgs) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MetaAppendArgs) ProtoMessage() {}
+
+func (x *MetaAppendArgs) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MetaAppendArgs.ProtoReflect.Descriptor instead.
+func (*MetaAppendArgs) Descriptor() ([]byte, []int) {
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *MetaAppendArgs) GetBlockIndex() int32 {
+	if x != nil {
+		return x.BlockIndex
+	}
+	return 0
+}
+
+func (x *MetaAppendArgs) GetFragment() []byte {
+	if x != nil {
+		return x.Fragment
+	}
+	return nil
+}
 
 var File_proto_torana_v2_torana_proto protoreflect.FileDescriptor
 
@@ -2744,7 +3057,22 @@ const file_proto_torana_v2_torana_proto_rawDesc = "" +
 	"\x0eHostCallResult\x12\x16\n" +
 	"\x05value\x18\x01 \x01(\fH\x00R\x05value\x12,\n" +
 	"\x05error\x18\x02 \x01(\v2\x14.torana.v2.HostErrorH\x00R\x05errorB\b\n" +
-	"\x06result*\x94\x01\n" +
+	"\x06result\"X\n" +
+	"\x10BlockRequestArgs\x12\x16\n" +
+	"\x06status\x18\x01 \x01(\x05R\x06status\x12\x12\n" +
+	"\x04code\x18\x02 \x01(\tR\x04code\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\".\n" +
+	"\x12RespondRequestArgs\x12\x18\n" +
+	"\acontent\x18\x01 \x01(\tR\acontent\"D\n" +
+	"\x10RouteRequestArgs\x12\x1a\n" +
+	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x14\n" +
+	"\x05model\x18\x02 \x01(\tR\x05model\"-\n" +
+	"\x0fSetIdentityArgs\x12\x1a\n" +
+	"\bidentity\x18\x01 \x01(\tR\bidentity\"M\n" +
+	"\x0eMetaAppendArgs\x12\x1f\n" +
+	"\vblock_index\x18\x01 \x01(\x05R\n" +
+	"blockIndex\x12\x1a\n" +
+	"\bfragment\x18\x02 \x01(\fR\bfragment*\x94\x01\n" +
 	"\x04Hook\x12\x14\n" +
 	"\x10HOOK_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13HOOK_BEFORE_REQUEST\x10\x01\x12\x17\n" +
@@ -2774,38 +3102,43 @@ func file_proto_torana_v2_torana_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_torana_v2_torana_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_proto_torana_v2_torana_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
+var file_proto_torana_v2_torana_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
 var file_proto_torana_v2_torana_proto_goTypes = []any{
-	(Hook)(0),                 // 0: torana.v2.Hook
-	(ErrorCode)(0),            // 1: torana.v2.ErrorCode
-	(*Message)(nil),           // 2: torana.v2.Message
-	(*ToolCall)(nil),          // 3: torana.v2.ToolCall
-	(*ToolDef)(nil),           // 4: torana.v2.ToolDef
-	(*Usage)(nil),             // 5: torana.v2.Usage
-	(*ChatRequest)(nil),       // 6: torana.v2.ChatRequest
-	(*ChatResponse)(nil),      // 7: torana.v2.ChatResponse
-	(*ToolCallRef)(nil),       // 8: torana.v2.ToolCallRef
-	(*ToolCallDelta)(nil),     // 9: torana.v2.ToolCallDelta
-	(*StreamError)(nil),       // 10: torana.v2.StreamError
-	(*MessageStart)(nil),      // 11: torana.v2.MessageStart
-	(*MessageStop)(nil),       // 12: torana.v2.MessageStop
-	(*TextBlock)(nil),         // 13: torana.v2.TextBlock
-	(*ThinkingBlock)(nil),     // 14: torana.v2.ThinkingBlock
-	(*ProviderBlock)(nil),     // 15: torana.v2.ProviderBlock
-	(*ContentBlockStart)(nil), // 16: torana.v2.ContentBlockStart
-	(*ContentBlockStop)(nil),  // 17: torana.v2.ContentBlockStop
-	(*StreamEvent)(nil),       // 18: torana.v2.StreamEvent
-	(*StreamEvents)(nil),      // 19: torana.v2.StreamEvents
-	(*HttpRequest)(nil),       // 20: torana.v2.HttpRequest
-	(*HttpResponse)(nil),      // 21: torana.v2.HttpResponse
-	(*TickRequest)(nil),       // 22: torana.v2.TickRequest
-	(*TickOutcome)(nil),       // 23: torana.v2.TickOutcome
-	(*AfterResponse)(nil),     // 24: torana.v2.AfterResponse
-	(*HookInput)(nil),         // 25: torana.v2.HookInput
-	(*Suppress)(nil),          // 26: torana.v2.Suppress
-	(*HookResult)(nil),        // 27: torana.v2.HookResult
-	(*HostError)(nil),         // 28: torana.v2.HostError
-	(*HostCallResult)(nil),    // 29: torana.v2.HostCallResult
+	(Hook)(0),                  // 0: torana.v2.Hook
+	(ErrorCode)(0),             // 1: torana.v2.ErrorCode
+	(*Message)(nil),            // 2: torana.v2.Message
+	(*ToolCall)(nil),           // 3: torana.v2.ToolCall
+	(*ToolDef)(nil),            // 4: torana.v2.ToolDef
+	(*Usage)(nil),              // 5: torana.v2.Usage
+	(*ChatRequest)(nil),        // 6: torana.v2.ChatRequest
+	(*ChatResponse)(nil),       // 7: torana.v2.ChatResponse
+	(*ToolCallRef)(nil),        // 8: torana.v2.ToolCallRef
+	(*ToolCallDelta)(nil),      // 9: torana.v2.ToolCallDelta
+	(*StreamError)(nil),        // 10: torana.v2.StreamError
+	(*MessageStart)(nil),       // 11: torana.v2.MessageStart
+	(*MessageStop)(nil),        // 12: torana.v2.MessageStop
+	(*TextBlock)(nil),          // 13: torana.v2.TextBlock
+	(*ThinkingBlock)(nil),      // 14: torana.v2.ThinkingBlock
+	(*ProviderBlock)(nil),      // 15: torana.v2.ProviderBlock
+	(*ContentBlockStart)(nil),  // 16: torana.v2.ContentBlockStart
+	(*ContentBlockStop)(nil),   // 17: torana.v2.ContentBlockStop
+	(*StreamEvent)(nil),        // 18: torana.v2.StreamEvent
+	(*StreamEvents)(nil),       // 19: torana.v2.StreamEvents
+	(*HttpRequest)(nil),        // 20: torana.v2.HttpRequest
+	(*HttpResponse)(nil),       // 21: torana.v2.HttpResponse
+	(*TickRequest)(nil),        // 22: torana.v2.TickRequest
+	(*TickOutcome)(nil),        // 23: torana.v2.TickOutcome
+	(*AfterResponse)(nil),      // 24: torana.v2.AfterResponse
+	(*HookInput)(nil),          // 25: torana.v2.HookInput
+	(*Suppress)(nil),           // 26: torana.v2.Suppress
+	(*HookResult)(nil),         // 27: torana.v2.HookResult
+	(*HostError)(nil),          // 28: torana.v2.HostError
+	(*HostCallResult)(nil),     // 29: torana.v2.HostCallResult
+	(*BlockRequestArgs)(nil),   // 30: torana.v2.BlockRequestArgs
+	(*RespondRequestArgs)(nil), // 31: torana.v2.RespondRequestArgs
+	(*RouteRequestArgs)(nil),   // 32: torana.v2.RouteRequestArgs
+	(*SetIdentityArgs)(nil),    // 33: torana.v2.SetIdentityArgs
+	(*MetaAppendArgs)(nil),     // 34: torana.v2.MetaAppendArgs
 }
 var file_proto_torana_v2_torana_proto_depIdxs = []int32{
 	3,  // 0: torana.v2.Message.tool_calls:type_name -> torana.v2.ToolCall
@@ -2895,7 +3228,7 @@ func file_proto_torana_v2_torana_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_torana_v2_torana_proto_rawDesc), len(file_proto_torana_v2_torana_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   28,
+			NumMessages:   33,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
