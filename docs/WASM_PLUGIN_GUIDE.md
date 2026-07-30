@@ -236,6 +236,12 @@ authority matches (assistant text on request and response). Topology is separate
   an index-only `ToolCallDelta` change needs topology only, not assistant.
   (Host enforcement vocabulary: package `outboundpolicy` — not imported by guests.)
 
+Host-call replies use `HostCallResult` (`value` or `HostError`). An empty result
+(no oneof arm) or `ERROR_CODE_UNSPECIFIED` is invalid. Verdict / `meta_append`
+arguments are the normative messages `BlockRequestArgs`, `RespondRequestArgs`,
+`RouteRequestArgs`, `SetIdentityArgs`, and `MetaAppendArgs` in
+`proto/torana/v2/torana.proto`.
+
 ## 7. Summary Checklist for AI Agents
 1. Did I use a real allocator (not a bump allocator)?
 2. Did I implement both `alloc` and `dealloc`?

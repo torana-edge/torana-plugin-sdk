@@ -186,10 +186,10 @@ helpers surface it as an error, so a plugin should degrade rather than assume.
 
 | Capability | SDK | Description |
 | --- | --- | --- |
-| `env.block_request` | `sdk.BlockRequest` | Reject the request with a provider-shaped error. |
-| `env.respond_request` | `sdk.RespondRequest` | Answer directly without going upstream. |
-| `env.route_request` | `sdk.RouteRequest` | Send the request to a different provider. |
-| `env.set_identity` | (v2 host call) | Override the rate-limit / identity key for this request. |
+| `env.set_identity` | (v2 host call; `SetIdentityArgs`) | Override the rate-limit / identity key for this request. |
+| `env.block_request` | `sdk.BlockRequest` → v2 `BlockRequestArgs` | Reject the request with a provider-shaped error. |
+| `env.respond_request` | `sdk.RespondRequest` → v2 `RespondRequestArgs` | Answer directly without going upstream. |
+| `env.route_request` | `sdk.RouteRequest` → v2 `RouteRequestArgs` | Send the request to a different provider. |
 
 **IR write grants — what a plugin may CHANGE**
 
@@ -241,7 +241,7 @@ in package `outboundpolicy` (not for WASM guests).
 
 | Capability | SDK | Scope |
 | --- | --- | --- |
-| `env.meta_get` / `env.meta_set` | `sdk.HostCall` | One request, private to your plugin. Gone when the request ends. |
+| `env.meta_get` / `env.meta_set` | `sdk.HostCall` | One request, private to your plugin. Gone when the request ends. v2 also defines `meta_append` (`MetaAppendArgs`) under `env.meta_set` for atomic fragment appends by block index. |
 | `env.cache_get` / `env.cache_set` | `sdk.HostCall` | Across requests, TTL'd, **shared with every other plugin**. Prefix your keys. |
 | `env.state_get` / `env.state_set` / `env.state_keys` | `sdk.StateGet`, `sdk.StateSet`, `sdk.StateKeys` | Across requests **and restarts**, private, never expires. You must delete your own keys. |
 
