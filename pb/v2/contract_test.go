@@ -17,7 +17,11 @@ func inputFor(h v2.Hook) *v2.HookInput {
 	case v2.Hook_HOOK_AFTER_RESPONSE:
 		return &v2.HookInput{Payload: &v2.HookInput_ChatResponse{ChatResponse: &v2.ChatResponse{Model: "m"}}}
 	case v2.Hook_HOOK_ON_STREAM_CHUNK:
-		return &v2.HookInput{Payload: &v2.HookInput_StreamEvent{StreamEvent: &v2.StreamEvent{}}}
+		// A real event: an empty StreamEvent carries no variant and is refused,
+		// which is the point of validating inputs at all.
+		return &v2.HookInput{Payload: &v2.HookInput_StreamEvent{
+			StreamEvent: &v2.StreamEvent{Event: &v2.StreamEvent_TextDelta{TextDelta: "x"}},
+		}}
 	case v2.Hook_HOOK_ON_HTTP_REQUEST:
 		return &v2.HookInput{Payload: &v2.HookInput_HttpRequest{HttpRequest: &v2.HttpRequest{Method: "GET"}}}
 	case v2.Hook_HOOK_ON_TICK:
@@ -602,5 +606,130 @@ func TestToolJSONSurvivesVerbatim(t *testing.T) {
 	if string(got.Tools[0].ParametersJson) != string(original) {
 		t.Errorf("tool parameters changed across the boundary:\n got %s\nwant %s",
 			got.Tools[0].ParametersJson, original)
+	}
+}
+
+// A oneof wrapper carrying a nil message is a well-formed protobuf frame that
+// names a hook and then hands over nothing. Checking only that the wrapper
+// exists let all of these through — so a handwritten guest could submit a frame
+// the normative validator accepted and the host then dereferenced.
+func TestNilNestedPayloadsAreRejected(t *testing.T) {
+	t.Run("results", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			hook v2.Hook
+			r    *v2.HookResult
+		}{
+			{"chat request", v2.Hook_HOOK_BEFORE_REQUEST, &v2.HookResult{
+				Disposition: v2.Disposition_DISPOSITION_REPLACE,
+				Payload:     &v2.HookResult_ChatRequest{}}},
+			{"chat response", v2.Hook_HOOK_AFTER_RESPONSE, &v2.HookResult{
+				Disposition: v2.Disposition_DISPOSITION_REPLACE,
+				Payload:     &v2.HookResult_ChatResponse{}}},
+			{"stream events", v2.Hook_HOOK_ON_STREAM_CHUNK, &v2.HookResult{
+				Disposition: v2.Disposition_DISPOSITION_REPLACE,
+				Payload:     &v2.HookResult_StreamEvents{}}},
+			{"http response", v2.Hook_HOOK_ON_HTTP_REQUEST, &v2.HookResult{
+				Disposition: v2.Disposition_DISPOSITION_REPLACE,
+				Payload:     &v2.HookResult_HttpResponse{}}},
+			{"tick outcome", v2.Hook_HOOK_ON_TICK, &v2.HookResult{
+				Disposition: v2.Disposition_DISPOSITION_REPLACE,
+				Payload:     &v2.HookResult_TickOutcome{}}},
+		} {
+			if err := tc.r.ValidateFor(tc.hook); err == nil {
+				t.Errorf("%s: a REPLACE with a nil payload was accepted", tc.name)
+			}
+		}
+	})
+
+	t.Run("inputs", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			in   *v2.HookInput
+		}{
+			{"chat request", &v2.HookInput{Payload: &v2.HookInput_ChatRequest{}}},
+			{"chat response", &v2.HookInput{Payload: &v2.HookInput_ChatResponse{}}},
+			{"stream event", &v2.HookInput{Payload: &v2.HookInput_StreamEvent{}}},
+			{"http request", &v2.HookInput{Payload: &v2.HookInput_HttpRequest{}}},
+			{"tick request", &v2.HookInput{Payload: &v2.HookInput_TickRequest{}}},
+		} {
+			if err := tc.in.Validate(); err == nil {
+				t.Errorf("%s: an input with a nil payload was accepted", tc.name)
+			}
+			if err := tc.in.ValidateFor(tc.in.HookOf()); err == nil {
+				t.Errorf("%s: ValidateFor accepted an input with a nil payload", tc.name)
+			}
+		}
+	})
+
+	// An input carrying a malformed stream event must be refused too — the host
+	// validates guest output, and this is the mirror on the way in.
+	t.Run("input carrying an empty stream event", func(t *testing.T) {
+		in := &v2.HookInput{Payload: &v2.HookInput_StreamEvent{StreamEvent: &v2.StreamEvent{}}}
+		if err := in.Validate(); err == nil {
+			t.Error("an input carrying an event with no variant set was accepted")
+		}
+	})
+}
+
+// A oneof wrapper can be a TYPED nil: Payload: (*HookInput_ChatRequest)(nil).
+// The interface is non-nil because it carries a type, so a bare field access
+// dereferences nothing and panics.
+//
+// A validator that crashes on malformed input is worse than one that misses it.
+// The host runs this on bytes a guest controls, so a panic here hands the guest
+// the choice of when the host dies. Every case must return an error instead.
+func TestTypedNilWrappersAreRejectedNotPanics(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		check func() error
+	}{
+		{"HookInput chat request", func() error {
+			return (&v2.HookInput{Payload: (*v2.HookInput_ChatRequest)(nil)}).Validate()
+		}},
+		{"HookInput chat response", func() error {
+			return (&v2.HookInput{Payload: (*v2.HookInput_ChatResponse)(nil)}).Validate()
+		}},
+		{"HookInput stream event", func() error {
+			return (&v2.HookInput{Payload: (*v2.HookInput_StreamEvent)(nil)}).Validate()
+		}},
+		{"HookInput http request", func() error {
+			return (&v2.HookInput{Payload: (*v2.HookInput_HttpRequest)(nil)}).Validate()
+		}},
+		{"HookInput tick request", func() error {
+			return (&v2.HookInput{Payload: (*v2.HookInput_TickRequest)(nil)}).Validate()
+		}},
+		{"HookResult chat request", func() error {
+			return (&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
+				Payload: (*v2.HookResult_ChatRequest)(nil)}).ValidateFor(v2.Hook_HOOK_BEFORE_REQUEST)
+		}},
+		{"HookResult stream events", func() error {
+			return (&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
+				Payload: (*v2.HookResult_StreamEvents)(nil)}).ValidateFor(v2.Hook_HOOK_ON_STREAM_CHUNK)
+		}},
+		{"HookResult tick outcome", func() error {
+			return (&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
+				Payload: (*v2.HookResult_TickOutcome)(nil)}).ValidateFor(v2.Hook_HOOK_ON_TICK)
+		}},
+		{"StreamEvent content block start", func() error {
+			return (&v2.StreamEvent{Event: (*v2.StreamEvent_ContentBlockStart)(nil)}).Validate()
+		}},
+		{"ContentBlockStart tool call", func() error {
+			return (&v2.ContentBlockStart{Block: (*v2.ContentBlockStart_ToolCall)(nil)}).Validate()
+		}},
+		{"ContentBlockStart provider", func() error {
+			return (&v2.ContentBlockStart{Block: (*v2.ContentBlockStart_Provider)(nil)}).Validate()
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("validation panicked instead of returning an error: %v", r)
+				}
+			}()
+			if err := tc.check(); err == nil {
+				t.Error("a typed-nil wrapper was accepted")
+			}
+		})
 	}
 }
