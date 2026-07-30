@@ -499,10 +499,15 @@ var outboundMessageFieldPolicies = map[protoreflect.FullName]map[string]FieldPol
 //   - parallel tool calls: mutating block B args must not be gated by block A's signature
 //   - multi-block: signature_delta binds current text/thinking block only
 //
-// Topology / indexes:
+// Topology / indexes / stream state:
 //   - one-for-one TextDelta rewrite → assistant only
 //   - suppress TextDelta → topology + assistant
-//   - block indexes unique within one streamed message; delta/stop match open start
+//   - indexes unique across the entire streamed message; never reused after close
+//   - at most one content block open; second start before stop → reject
+//   - text/thinking/CurrentContentBlock signature_delta with no open block → reject
+//   - duplicate index after prior block closed → reject
+//   - MessageStop/end-of-stream with open block → reject
+//   - sequential parallel tool-call blocks with distinct indexes → accept
 //   - parallel tool calls: two indexes, only first signed → second args unbound by first sig
 //   - Gemini adapters must stop emitting Index:0 for every function-call part
 //
@@ -526,41 +531,139 @@ func init() {
 	}
 }
 
-// Validate checks the registry against protobuf descriptors and kind/field
-// invariants (PolicyContainer only on message fields, PolicyDelegate only on
-// message/wrapper fields). Hosts and linters should call this once at process
-// start. Guests must not import this package.
+// Validate checks that the outbound enforcement inventory is complete and
+// consistent with protobuf descriptors. Hosts and linters should call this
+// once at process start. Guests must not import this package.
+//
+// Checks:
+//   - every protobuf field in every reachable registered message has exactly
+//     one policy; no policy names a missing field;
+//   - every nested message reachable without an explicit empty Delegate is
+//     registered; every DelegateKind has a target entry and every named target
+//     has a registry;
+//   - PolicyContainer / PolicyDelegate only on message-valued fields;
+//   - signature bindings validate against proto + host-owned signature fields.
 func Validate() error {
 	descs := outboundDescriptors()
-	for msg, fields := range outboundMessageFieldPolicies {
-		desc, ok := descs[msg]
+
+	for _, d := range []DelegateKind{
+		DelegateRequest, DelegateResponse, DelegateStream, DelegateHTTP, DelegateTick,
+	} {
+		targets, ok := outboundDelegateTargets[d]
 		if !ok {
-			// Empty fieldless registries (TextBlock, Suppress, …) still need a descriptor.
-			return fmt.Errorf("outbound policy message %s has no protobuf descriptor", msg)
+			return fmt.Errorf("delegate %v has no target entry", d)
 		}
-		for name, p := range fields {
-			fd := desc.Fields().ByName(protoreflect.Name(name))
-			if fd == nil {
-				return fmt.Errorf("%s.%s missing from protobuf", msg, name)
+		for _, target := range targets {
+			if _, ok := outboundMessageFieldPolicies[target]; !ok {
+				return fmt.Errorf("delegate %v target %s has no field-policy registry", d, target)
 			}
-			switch p.Kind() {
-			case PolicyContainer:
-				if fd.Kind() != protoreflect.MessageKind {
-					return fmt.Errorf("%s.%s: PolicyContainer requires a message field, got %v", msg, name, fd.Kind())
-				}
-			case PolicyDelegate:
-				if fd.Kind() != protoreflect.MessageKind {
-					return fmt.Errorf("%s.%s: PolicyDelegate requires a message field, got %v", msg, name, fd.Kind())
-				}
+			if _, ok := descs[target]; !ok {
+				return fmt.Errorf("delegate %v target %s has no protobuf descriptor", d, target)
 			}
 		}
 	}
+
+	roots := []proto.Message{
+		&pbv2.ChatResponse{},
+		&pbv2.StreamEvent{},
+		&pbv2.StreamEvents{},
+		&pbv2.HookResult{},
+		&pbv2.Suppress{},
+	}
+	seen := map[protoreflect.FullName]bool{}
+	for _, root := range roots {
+		if err := validateMessageCompleteness(root.ProtoReflect().Descriptor(), seen, descs); err != nil {
+			return err
+		}
+	}
+
 	for _, b := range signatureBindings {
 		if err := b.validateShape(); err != nil {
 			return err
 		}
 		if err := validateSignatureBindingAgainstProto(b, descs); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func validateMessageCompleteness(
+	desc protoreflect.MessageDescriptor,
+	seen map[protoreflect.FullName]bool,
+	descs map[protoreflect.FullName]protoreflect.MessageDescriptor,
+) error {
+	name := desc.FullName()
+	if seen[name] {
+		return nil
+	}
+	seen[name] = true
+
+	fields, ok := outboundMessageFieldPolicies[name]
+	if !ok {
+		return fmt.Errorf("%s is reachable from an outbound root but has no field-policy registry", name)
+	}
+	if _, ok := descs[name]; !ok {
+		return fmt.Errorf("%s has a registry but no protobuf descriptor", name)
+	}
+
+	protoFields := map[string]protoreflect.FieldDescriptor{}
+	fds := desc.Fields()
+	for i := 0; i < fds.Len(); i++ {
+		fd := fds.Get(i)
+		fname := string(fd.Name())
+		protoFields[fname] = fd
+		p, ok := fields[fname]
+		if !ok {
+			return fmt.Errorf("%s.%s belongs to no grant/policy — inventory incomplete", name, fname)
+		}
+		if err := p.validate(); err != nil {
+			return fmt.Errorf("%s.%s: %w", name, fname, err)
+		}
+		switch p.Kind() {
+		case PolicyContainer, PolicyDelegate:
+			if fd.Kind() != protoreflect.MessageKind {
+				return fmt.Errorf("%s.%s: %v requires a message field, got %v", name, fname, p.Kind(), fd.Kind())
+			}
+		}
+
+		if p.Kind() == PolicyDelegate {
+			d, ok := p.Delegate()
+			if !ok {
+				return fmt.Errorf("%s.%s: PolicyDelegate without kind", name, fname)
+			}
+			targets, ok := outboundDelegateTargets[d]
+			if !ok {
+				return fmt.Errorf("%s.%s delegates to unknown verifier %v", name, fname, d)
+			}
+			for _, target := range targets {
+				td, ok := descs[target]
+				if !ok {
+					return fmt.Errorf("%s.%s delegate target %s has no descriptor", name, fname, target)
+				}
+				if err := validateMessageCompleteness(td, seen, descs); err != nil {
+					return err
+				}
+			}
+			// Empty targets (request/http/tick deferred) intentionally skip the
+			// field's protobuf message type — inventory lives elsewhere.
+			continue
+		}
+
+		if fd.Kind() != protoreflect.MessageKind {
+			continue
+		}
+		child := fd.Message()
+		if _, ok := outboundMessageFieldPolicies[child.FullName()]; !ok {
+			return fmt.Errorf("%s.%s points at unregistered nested message %s", name, fname, child.FullName())
+		}
+		if err := validateMessageCompleteness(child, seen, descs); err != nil {
+			return err
+		}
+	}
+	for fname := range fields {
+		if _, ok := protoFields[fname]; !ok {
+			return fmt.Errorf("%s.%s is mapped but no longer exists in the proto", name, fname)
 		}
 	}
 	return nil

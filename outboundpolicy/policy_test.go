@@ -1,11 +1,10 @@
 package outboundpolicy
 
 import (
+	"strings"
 	"testing"
 
 	plugin_sdk "github.com/torana-edge/torana-plugin-sdk"
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
@@ -25,121 +24,31 @@ func TestOutboundWriteGrantsAreRequestable(t *testing.T) {
 }
 
 func TestRecursiveOutboundInventory(t *testing.T) {
-	roots := []proto.Message{
-		&pbv2.ChatResponse{},
-		&pbv2.StreamEvent{},
-		&pbv2.StreamEvents{},
-		&pbv2.HookResult{},
-		&pbv2.Suppress{},
-	}
-	seen := map[protoreflect.FullName]bool{}
-	for _, root := range roots {
-		walkOutboundInventory(t, root.ProtoReflect().Descriptor(), seen)
-	}
-	for _, d := range []DelegateKind{
-		DelegateRequest, DelegateResponse, DelegateStream, DelegateHTTP, DelegateTick,
-	} {
-		if _, ok := OutboundDelegateTargets(d); !ok {
-			t.Errorf("delegate %v missing from OutboundDelegateTargets", d)
-		}
+	// Validate is the production completeness guard hosts call at startup.
+	if err := Validate(); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func walkOutboundInventory(t *testing.T, desc protoreflect.MessageDescriptor, seen map[protoreflect.FullName]bool) {
-	t.Helper()
-	name := desc.FullName()
-	if seen[name] {
-		return
-	}
-	seen[name] = true
-
-	if !OutboundMessageRegistered(name) {
-		t.Errorf("%s is reachable from an outbound root but has no field policy", name)
-		return
-	}
-	fieldNames, _ := OutboundFieldNames(name)
-	seenFields := map[string]bool{}
-	for _, fname := range fieldNames {
-		seenFields[fname] = true
-	}
-
-	fields := desc.Fields()
-	protoFields := map[string]protoreflect.FieldDescriptor{}
-	for i := 0; i < fields.Len(); i++ {
-		fd := fields.Get(i)
-		protoFields[string(fd.Name())] = fd
-		fname := string(fd.Name())
-		p, ok := OutboundFieldPolicy(name, fname)
-		if !ok {
-			t.Errorf("%s.%s belongs to no policy", name, fname)
+func TestValidateFailsWhenFieldPolicyMissing(t *testing.T) {
+	old := chatResponseFieldPolicies
+	// Copy without finish_reason — proto still has the field.
+	bad := map[string]FieldPolicy{}
+	for k, v := range old {
+		if k == "finish_reason" {
 			continue
 		}
-		if err := p.validate(); err != nil {
-			t.Errorf("%s.%s: %v", name, fname, err)
-			continue
-		}
-
-		if p.Kind() == PolicyDelegate {
-			d, ok := p.Delegate()
-			if !ok {
-				t.Errorf("%s.%s Delegate without kind", name, fname)
-				continue
-			}
-			targets, ok := OutboundDelegateTargets(d)
-			if !ok {
-				t.Errorf("%s.%s delegates to unknown verifier %v", name, fname, d)
-				continue
-			}
-			for _, target := range targets {
-				if !OutboundMessageRegistered(target) {
-					t.Errorf("%s.%s delegates to %s but that message has no policy",
-						name, fname, target)
-					continue
-				}
-				walkDelegateTarget(t, target, seen)
-			}
-			continue
-		}
-
-		if fd.Kind() != protoreflect.MessageKind {
-			continue
-		}
-		child := fd.Message()
-		if OutboundMessageRegistered(child.FullName()) {
-			walkOutboundInventory(t, child, seen)
-			continue
-		}
-		t.Errorf("%s.%s points at unregistered nested message %s", name, fname, child.FullName())
+		bad[k] = v
 	}
-	for fname := range seenFields {
-		if _, ok := protoFields[fname]; !ok {
-			t.Errorf("%s.%s is mapped but no longer exists in the proto", name, fname)
-		}
+	outboundMessageFieldPolicies["torana.v2.ChatResponse"] = bad
+	defer func() { outboundMessageFieldPolicies["torana.v2.ChatResponse"] = old }()
+	err := Validate()
+	if err == nil {
+		t.Fatal("expected Validate to fail when a proto field lacks a policy")
 	}
-	for fname := range protoFields {
-		if !seenFields[fname] {
-			t.Errorf("%s.%s belongs to no policy", name, fname)
-		}
+	if !strings.Contains(err.Error(), "finish_reason") {
+		t.Fatalf("error should name the missing field, got %v", err)
 	}
-}
-
-func walkDelegateTarget(t *testing.T, name protoreflect.FullName, seen map[protoreflect.FullName]bool) {
-	t.Helper()
-	var msg proto.Message
-	switch name {
-	case "torana.v2.ChatResponse":
-		msg = &pbv2.ChatResponse{}
-	case "torana.v2.StreamEvents":
-		msg = &pbv2.StreamEvents{}
-	case "torana.v2.StreamEvent":
-		msg = &pbv2.StreamEvent{}
-	case "torana.v2.Suppress":
-		msg = &pbv2.Suppress{}
-	default:
-		t.Errorf("no prototype for delegate target %s", name)
-		return
-	}
-	walkOutboundInventory(t, msg.ProtoReflect().Descriptor(), seen)
 }
 
 func TestHookResultActionsAreHonestDelegates(t *testing.T) {

@@ -220,8 +220,12 @@ authority matches (assistant text on request and response). Topology is separate
   a trailing signature-only part (Code Assist) is standalone — preserve it, do
   not synthesize an empty block, and bind the preceding attributed
   text/thinking of the turn.
-* Block indexes are unique within one streamed message; delta/stop must match
-  the open start. Duplicate/open-missing/stop-missing sequences are invalid.
+* Block indexes are unique across the entire streamed message and are never
+  reused after close; delta/stop must match the currently open start. At most
+  one content block may be open — a second start before stop is invalid;
+  MessageStop/end-of-stream with an open block is invalid. Duplicate/open-missing
+  sequences are invalid. Parallel tool calls are sequential blocks with distinct
+  indexes.
 * `StreamError` is host-owned. Do not forge provider-looking upstream failures;
   suppress under topology, trap under `failure_mode`, or use attributed verdicts.
 * Nested message fields use `PolicyContainer` (or presence-sensitive

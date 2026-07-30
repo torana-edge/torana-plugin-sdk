@@ -1211,14 +1211,21 @@ func (x *ProviderBlock) GetKind() string {
 // A string would allow "tool_call" with no tool metadata, and "text" carrying
 // some — contradictions a reader would have to know were impossible. A oneof
 // makes them unrepresentable.
+//
+// Stream-state rule: within one message, at most one ContentBlockStart may be
+// open. A second start before the matching ContentBlockStop is invalid.
+// "Parallel" tool calls are sequential blocks with distinct indexes — they are
+// not simultaneously open. TextDelta / ThinkingDelta / signature_delta under
+// CurrentContentBlock belong to that single open block (and are invalid when
+// no compatible block is open).
 type ContentBlockStart struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Unique within one streamed message for the lifetime of the block.
-	// Deltas and ContentBlockStop must use this same index. Duplicate indexes,
-	// deltas/stops with no matching open start, and stops that leave a block
-	// open are invalid. Adapters MUST assign distinct indexes to parallel
-	// tool-call parts (emitting Index:0 for every Gemini functionCall is not
-	// conformant). SignatureScopeToolCallBlockByIndex depends on this.
+	// Unique across the entire streamed message; never reused after the block
+	// closes. Deltas and ContentBlockStop must use this same index. A
+	// ContentBlockStop / ToolCallDelta whose index does not name the currently
+	// open start is invalid. Adapters MUST assign distinct indexes to sequential
+	// parallel tool-call parts (emitting Index:0 for every Gemini functionCall
+	// is not conformant). SignatureScopeToolCallBlockByIndex depends on this.
 	Index int32 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
 	// Types that are valid to be assigned to Block:
 	//
@@ -1341,7 +1348,7 @@ func (*ContentBlockStart_Provider) isContentBlockStart_Block() {}
 
 type ContentBlockStop struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Must match the ContentBlockStart.index being closed.
+	// Must match the currently open ContentBlockStart.index.
 	Index         int32 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1402,12 +1409,19 @@ func (x *ContentBlockStop) GetIndex() int32 {
 // StreamError may replace the remainder at any point. Everything else is
 // ordered as shown, and every block is opened and closed exactly once.
 //
-// Block index invariants (ABI): indexes are unique within one streamed
-// message; every ToolCallDelta / ContentBlockStop index must name exactly one
-// currently open ContentBlockStart; duplicate, open-missing, and stop-missing
-// sequences are invalid. Host Migration B must fix adapters that violate this
-// (e.g. Gemini emitting Index:0 for every parallel functionCall) before
-// enabling ToolCallBlockByIndex signature enforcement.
+// Stream-state / index invariants (ABI):
+//   - At most one content block is open at a time. A second ContentBlockStart
+//     before the matching stop is invalid.
+//   - Indexes are unique across the entire streamed message and are never
+//     reused after close.
+//   - Every ToolCallDelta / ContentBlockStop index must name the currently
+//     open ContentBlockStart; open-missing indexes are invalid.
+//   - TextDelta / ThinkingDelta / CurrentContentBlock signature_delta require
+//     a compatible open block; otherwise invalid.
+//   - MessageStop / end-of-stream while any block remains open is invalid.
+//   - Host Migration B must fix adapters that violate index uniqueness (e.g.
+//     Gemini emitting Index:0 for every parallel functionCall) before enabling
+//     ToolCallBlockByIndex signature enforcement.
 type StreamEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Outbound mutations compose topology + semantics (see package
