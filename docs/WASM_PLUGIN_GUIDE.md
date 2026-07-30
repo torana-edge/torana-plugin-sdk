@@ -214,11 +214,14 @@ authority matches (assistant text on request and response). Topology is separate
   `ToolCallRef.signature`, `signature_delta`) bind provider tokens to content.
   Mutating signed content while leaving the signature in place is invalid; the
   host must reject that mutation or clear the signature. Streamed tool-call
-  signatures also cover the matching block's assembled `arguments_delta`.
-  `signature_delta` is cross-event — the stream assembler/host verifier owns
-  that pairing.
+  signatures bind `id`/`name` and assembled `arguments_delta` for the **same
+  content-block index**. `signature_delta` binds the current text/thinking
+  block only (not tool calls).
 * `StreamError` is host-owned. Do not forge provider-looking upstream failures;
   suppress under topology, trap under `failure_mode`, or use attributed verdicts.
+* Nested message fields use `PolicyContainer` (or presence-sensitive
+  Section/Topology): same presence recurses without auto-charging the parent;
+  an index-only `ToolCallDelta` change needs topology only, not assistant.
 
 ## 7. Summary Checklist for AI Agents
 1. Did I use a real allocator (not a bump allocator)?

@@ -218,10 +218,10 @@ Opaque signatures (`thinking_signature`, `ToolCall.signature`,
 `ToolCallRef.signature`) bind provider tokens to content. Mutating signed
 content while leaving the signature in place is invalid — the host must reject
 that mutation or clear the signature. On the stream path, `ToolCallRef.signature`
-also covers the matching block's assembled `ToolCallDelta.arguments_delta`.
-Streamed `signature_delta` is cross-event state owned by the stream
-assembler/host verifier. `StreamError` is host-owned (do not forge upstream
-failures).
+binds `id`/`name` and `ToolCallDelta.arguments_delta` for the **same content-block
+index** (parallel tool calls must not cross-bind). Streamed `signature_delta`
+binds the **current** text/thinking block only — not the tool-call path.
+`StreamError` is host-owned (do not forge upstream failures).
 
 **Reading the request**
 
