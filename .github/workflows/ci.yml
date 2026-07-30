@@ -27,12 +27,13 @@ jobs:
       - uses: bufbuild/buf-setup-action@v1
       - run: buf lint
       - if: github.event_name == 'pull_request'
-        run: |
-          if git cat-file -e origin/main:proto/torana/v1/torana.proto 2>/dev/null; then
-            buf breaking --against 'https://github.com/torana-edge/torana-plugin-sdk.git#branch=main'
-          else
-            echo "No ABI baseline exists on main yet; this PR establishes v1."
-          fi
+        name: ABI compatibility
+        run: ./scripts/check-abi-breaking.sh
+      # The release preflight for v0.3+ lives in release.yml (and
+      # scripts/assert-v2-cut-for-release.sh). A tag-only guard here would run
+      # too late: release.yml is triggered by the tag itself.
+      - name: Release cut preflight covers both migration states
+        run: ./scripts/assert-v2-cut-for-release_test.sh
       - run: go test ./...
       - run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -buildvcs=false -o /tmp/go-logger.wasm ./examples/go-logger
       # The release workflow asserts the Rust crate version matches the tag, but

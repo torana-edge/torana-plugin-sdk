@@ -3,6 +3,8 @@ package plugin_sdk
 import (
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
 	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
 
@@ -24,20 +26,15 @@ func TestEveryConstructorProducesAValidResult(t *testing.T) {
 		hook  pbv2.Hook
 		build func() (*pbv2.HookResult, error)
 	}{
-		{"PassRequest", pbv2.Hook_HOOK_BEFORE_REQUEST, PassRequest().hookResult},
 		{"ReplaceRequest", pbv2.Hook_HOOK_BEFORE_REQUEST,
 			ReplaceRequest(&pbv2.ChatRequest{Model: "m"}).hookResult},
-		{"PassResponse", pbv2.Hook_HOOK_AFTER_RESPONSE, PassResponse().hookResult},
 		{"ReplaceResponse", pbv2.Hook_HOOK_AFTER_RESPONSE,
 			ReplaceResponse(&pbv2.ChatResponse{Model: "m"}).hookResult},
-		{"PassEvent", pbv2.Hook_HOOK_ON_STREAM_CHUNK, PassEvent().hookResult},
 		{"SuppressEvent", pbv2.Hook_HOOK_ON_STREAM_CHUNK, SuppressEvent().hookResult},
 		{"EmitEvents one", pbv2.Hook_HOOK_ON_STREAM_CHUNK, EmitEvents(ev).hookResult},
 		{"EmitEvents fan-out", pbv2.Hook_HOOK_ON_STREAM_CHUNK, EmitEvents(ev, ev).hookResult},
-		{"PassHTTP", pbv2.Hook_HOOK_ON_HTTP_REQUEST, PassHTTP().hookResult},
 		{"ServeHTTP", pbv2.Hook_HOOK_ON_HTTP_REQUEST,
 			ServeHTTP(&pbv2.HttpResponse{Status: 200}).hookResult},
-		{"TickIdle", pbv2.Hook_HOOK_ON_TICK, TickIdle().hookResult},
 		{"TickDid", pbv2.Hook_HOOK_ON_TICK, TickDid(3, "warmed").hookResult},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -52,33 +49,58 @@ func TestEveryConstructorProducesAValidResult(t *testing.T) {
 	}
 }
 
-// The zero value must be a pass. `return RequestResult{}, err` is the reflex on
-// an error path, and a handler that returns before deciding anything should
-// change nothing.
-func TestZeroValueIsAPass(t *testing.T) {
+// Pass produces no frame at all. Zero bytes is the ABI's pass-through and its
+// only encoding — an explicit PASS frame would marshal to zero bytes anyway,
+// which is how the earlier two-axis shape ended up with a rule it could not
+// enforce.
+func TestPassProducesNoFrame(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		hook  pbv2.Hook
 		build func() (*pbv2.HookResult, error)
 	}{
-		{"request", pbv2.Hook_HOOK_BEFORE_REQUEST, RequestResult{}.hookResult},
-		{"response", pbv2.Hook_HOOK_AFTER_RESPONSE, ResponseResult{}.hookResult},
-		{"stream", pbv2.Hook_HOOK_ON_STREAM_CHUNK, StreamResult{}.hookResult},
-		{"http", pbv2.Hook_HOOK_ON_HTTP_REQUEST, HTTPResult{}.hookResult},
-		{"tick", pbv2.Hook_HOOK_ON_TICK, TickResult{}.hookResult},
+		{"PassRequest", PassRequest().hookResult},
+		{"PassResponse", PassResponse().hookResult},
+		{"PassEvent", PassEvent().hookResult},
+		{"PassHTTP", PassHTTP().hookResult},
+		{"TickIdle", TickIdle().hookResult},
+		{"zero request", RequestResult{}.hookResult},
+		{"zero response", ResponseResult{}.hookResult},
+		{"zero stream", StreamResult{}.hookResult},
+		{"zero http", HTTPResult{}.hookResult},
+		{"zero tick", TickResult{}.hookResult},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := tc.build()
 			if err != nil {
-				t.Fatalf("zero value reported an error: %v", err)
+				t.Fatalf("reported an error: %v", err)
 			}
-			if got.Disposition != pbv2.Disposition_DISPOSITION_PASS {
-				t.Errorf("zero value has disposition %v, want PASS", got.Disposition)
-			}
-			if err := got.ValidateFor(tc.hook); err != nil {
-				t.Errorf("zero value is invalid: %v", err)
+			if got != nil {
+				t.Fatalf("produced a frame, want none: %+v", got)
 			}
 		})
+	}
+}
+
+// Suppress must produce a frame, or it would be indistinguishable from pass.
+// An empty message inside a oneof still marshals to a tag and a zero length,
+// which is what makes suppression expressible as an action.
+func TestSuppressProducesADistinguishableFrame(t *testing.T) {
+	got, err := SuppressEvent().hookResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("suppress produced no frame, so it would read as pass-through")
+	}
+	raw, err := proto.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) == 0 {
+		t.Fatal("suppress marshalled to zero bytes, which the ABI reads as pass-through")
+	}
+	if err := got.ValidateFor(pbv2.Hook_HOOK_ON_STREAM_CHUNK); err != nil {
+		t.Fatalf("the host would reject this: %v", err)
 	}
 }
 

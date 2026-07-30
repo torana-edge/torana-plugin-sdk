@@ -45,7 +45,32 @@ Adding a hook or host call touches more places than it looks:
   `sdk_other.go`, or plugins stop compiling for host-side tests.
 - Regenerate protobuf with `./scripts/generate-go.sh` and commit the result — CI
   diffs it. Use the exact `protoc-gen-go` version in the generated file header.
-- Proto changes must be additive; CI runs `buf breaking` against `main`.
+- **`proto/torana/v1` is held unchanged for the duration of the migration, then
+  deleted.** It is not a supported surface. torana-edge and the official plugins
+  still import it while they move to v2 one repo at a time, and CI runs
+  `buf breaking` against `main` for this path so that migration is not disturbed
+  mid-flight. That is the only reason it is protected.
+  - **Do not add v1 features, fixes, or a v1→v2 compatibility layer.** Work that
+    would touch v1 belongs in v2.
+  - The coordinated cut deletes v1. `scripts/check-abi-breaking.sh` then protects
+    **only v2** (scoped with `--path`), so comparing against a `main` that still
+    contains v1 does not report the intentional deletion as a breaking change.
+    After that PR merges, `main` has only v2 and the restriction can be
+    simplified.
+  - Torana has not launched, so there is no installed base to preserve. The
+    published `v0.2.0` tag keeps working regardless — module proxy tags are
+    immutable, so deleting v1 from the tree cannot reach anyone who pinned it.
+- **`proto/torana/v2` is unreleased and may still be reshaped.** Nothing pins it
+  and nothing consumes it, so freezing it would preserve design mistakes rather
+  than prevent them — its shape has already improved several times under review.
+  While `proto/torana/v1` still exists, CI protects only v1. The hard guarantee
+  that no `v0.3.x` (or later) tag can ship before the cut is
+  `scripts/assert-v2-cut-for-release.sh` in `release.yml`, which runs **before**
+  any package or publish step. It proves behaviour, not string presence:
+  `check-abi-breaking.sh --print-path` must return `proto/torana/v2`, `ci.yml`
+  must actually `run:` that script, both v2 sources must exist, both v1 sources
+  and `pb/torana.pb.go` must be gone. A guard that lived only on `pull_request`
+  would notice too late.
 - Update `docs/WASM_PLUGIN_GUIDE.md` too. It is the document that makes this SDK
   usable by weaker models, and a capability missing from its checklist silently
   makes the guide insufficient.
