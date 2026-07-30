@@ -8,15 +8,27 @@ import (
 	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
 
+// validator is implemented by host-call argument messages with structural rules.
+type validator interface {
+	Validate() error
+}
+
 // HostCall invokes a host command with a protobuf argument body.
 //
 // args may be nil (no body). On success it returns the HostCallResult.value
 // bytes (possibly empty). On a classified host failure it returns a non-nil
-//*HostError. Transport/decode failures return a Go error.
-//
-// Verdict helpers are fire-and-forget: they call HostCall and discard the
-// result; a refused permission is logged by the host.
+// *HostError. Empty command, invalid args, empty/malformed replies, and
+// transport failures return a Go error — callers that must not fail open
+// (verdicts) panic on those.
 func HostCall(cmd string, args proto.Message) ([]byte, *pbv2.HostError, error) {
+	if cmd == "" {
+		return nil, nil, fmt.Errorf("torana: host-call command is required")
+	}
+	if v, ok := args.(validator); ok {
+		if err := v.Validate(); err != nil {
+			return nil, nil, fmt.Errorf("torana: host-call args: %w", err)
+		}
+	}
 	var argBytes []byte
 	if args != nil {
 		b, err := proto.Marshal(args)
@@ -30,11 +42,8 @@ func HostCall(cmd string, args proto.Message) ([]byte, *pbv2.HostError, error) {
 		return nil, nil, err
 	}
 	if len(raw) == 0 {
-		// Empty reply is not a valid HostCallResult (oneof required). Treat as
-		// success with no payload for hosts that still return zero on some
-		// fire-and-forget paths during migration — Migration B makes the
-		// envelope mandatory on every reply.
-		return nil, nil, nil
+		return nil, nil, fmt.Errorf("torana: host-call returned an empty reply; " +
+			"HostCallResult requires a result arm")
 	}
 	var res pbv2.HostCallResult
 	if err := proto.Unmarshal(raw, &res); err != nil {
@@ -53,15 +62,21 @@ func HostCall(cmd string, args proto.Message) ([]byte, *pbv2.HostError, error) {
 	}
 }
 
-// hostCallRaw is the platform-specific import / test-host seam.
+// mustHostCall is for fire-and-forget verdicts: classified host refusals are
+// discarded (the host logs them), but local/protocol failures trap the guest.
+func mustHostCall(cmd string, args proto.Message) {
+	_, _, err := HostCall(cmd, args)
+	if err != nil {
+		panic("torana plugin: " + cmd + ": " + err.Error())
+	}
+}
+
 func hostCallRaw(cmd string, args []byte) ([]byte, error) {
 	return hostCallRawImpl(cmd, args)
 }
 
 // hostCallString is the transitional JSON/string host-call path used by
-// cache/state/meta helpers that still speak the v1 argument shapes. Migration B
-// moves those commands onto typed envelopes; until then they share the same
-// WASM import but treat the reply as an opaque string (not HostCallResult).
+// cache/state/meta helpers that still speak the v1 argument shapes.
 func hostCallString(cmd, args string) (string, error) {
 	raw, err := hostCallRaw(cmd, []byte(args))
 	if err != nil {

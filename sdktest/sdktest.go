@@ -19,7 +19,7 @@
 //			return `{"completion":"EMAIL"}`, nil
 //		})
 //
-//		res := h.BeforeRequest(&pb.ChatRequest{Messages: []*pb.Message{
+//		res := h.BeforeRequest(&pbv2.ChatRequest{Messages: []*pbv2.Message{
 //			{Role: "tool", Content: "contact: someone@example.com"},
 //		}})
 //
@@ -172,9 +172,15 @@ func (h *Harness) StubHostCall(cmd string, fn func(args string) (string, error))
 }
 
 // DenyPermission makes cmd answer with the host's permission-denied envelope,
-// byte for byte, so a plugin's handling of a refused capability is testable.
+// so a plugin's handling of a refused capability is testable. Typed v2 commands
+// get a HostCallResult error arm; transitional JSON commands keep the legacy
+// denial string.
 func (h *Harness) DenyPermission(cmd string) *Harness {
 	return h.StubHostCall(cmd, func(string) (string, error) {
+		if typedHostReply(cmd) {
+			return string(hostCallResultError(
+				pbv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "permission denied")), nil
+		}
 		return `{"status":"error","message":"permission denied"}`, nil
 	})
 }
@@ -324,14 +330,53 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 	defer h.mu.Unlock()
 
 	switch cmd {
-	case "env.block_request", "env.respond_request", "env.route_request", "env.set_identity":
-		// Fire-and-forget: record via hostCallBytes caller; ack empty value.
+	case "env.block_request":
+		var a pbv2.BlockRequestArgs
+		if err := proto.Unmarshal(args, &a); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid BlockRequestArgs"), nil
+		}
+		if err := a.Validate(); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+		}
+		return hostCallResultValue(nil), nil
+
+	case "env.respond_request":
+		var a pbv2.RespondRequestArgs
+		if err := proto.Unmarshal(args, &a); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid RespondRequestArgs"), nil
+		}
+		if err := a.Validate(); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+		}
+		return hostCallResultValue(nil), nil
+
+	case "env.route_request":
+		var a pbv2.RouteRequestArgs
+		if err := proto.Unmarshal(args, &a); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid RouteRequestArgs"), nil
+		}
+		if err := a.Validate(); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+		}
+		return hostCallResultValue(nil), nil
+
+	case "env.set_identity":
+		var a pbv2.SetIdentityArgs
+		if err := proto.Unmarshal(args, &a); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid SetIdentityArgs"), nil
+		}
+		if err := a.Validate(); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+		}
 		return hostCallResultValue(nil), nil
 
 	case pbv2.MetaAppendCommand:
 		var a pbv2.MetaAppendArgs
 		if err := proto.Unmarshal(args, &a); err != nil {
 			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid MetaAppendArgs"), nil
+		}
+		if err := a.Validate(); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
 		}
 		key := "block:" + strconv.FormatInt(int64(a.BlockIndex), 10)
 		existing, present := h.meta[key]

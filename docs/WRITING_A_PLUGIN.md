@@ -68,14 +68,14 @@ import (
 	"strings"
 
 	sdk "github.com/torana-edge/torana-plugin-sdk"
-	"github.com/torana-edge/torana-plugin-sdk/pb"
+	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
 
 func main() {}
 
 func init() {
 	// Register a hook to run before chat completion requests are forwarded upstream.
-	sdk.OnBeforeRequest(func(ctx context.Context, req *pb.ChatRequest) (*pb.ChatRequest, error) {
+	sdk.OnBeforeRequest(func(ctx context.Context, req *pbv2.ChatRequest) (sdk.RequestResult, error) {
 		modified := false
 
 		for _, msg := range req.Messages {
@@ -86,26 +86,29 @@ func init() {
 		}
 
 		if !modified {
-			return nil, nil // Return nil, nil if request was not modified
+			return sdk.PassRequest(), nil
 		}
-		return req, nil
+		return sdk.ReplaceRequest(req), nil
 	})
 }
 ```
 
 ### SDK Hook Signatures
 
-- `sdk.OnBeforeRequest(fn func(ctx context.Context, req *pb.ChatRequest) (*pb.ChatRequest, error))`
-- `sdk.OnAfterResponse(fn func(ctx context.Context, resp *pb.ChatRequest) (*pb.ChatRequest, error))`
-- `sdk.OnStreamChunk(fn func(ctx context.Context, chunk *pb.StreamEvent) (*pb.StreamEventResult, error))`
-- `sdk.OnHTTPRequest(fn func(ctx context.Context, req *pb.HttpRequest) (*pb.HttpResponse, error))`
-- `sdk.OnTick(fn func(ctx context.Context, tick *pb.TickRequest) (*pb.TickResult, error))`
+- `sdk.OnBeforeRequest(fn func(ctx context.Context, req *pbv2.ChatRequest) (sdk.RequestResult, error))`
+- `sdk.OnAfterResponse(fn func(ctx context.Context, resp *pbv2.ChatResponse, mutable bool) (sdk.ResponseResult, error))`
+- `sdk.OnStreamChunk(fn func(ctx context.Context, chunk *pbv2.StreamEvent) (sdk.StreamResult, error))`
+- `sdk.OnHTTPRequest(fn func(ctx context.Context, req *pbv2.HttpRequest) (sdk.HTTPResult, error))`
+- `sdk.OnTick(fn func(ctx context.Context, tick *pbv2.TickRequest) (sdk.TickResult, error))`
 
-Returning `nil` means pass-through in every case. For hooks whose result type
-has a `Handled` field (`StreamEventResult`, `HttpResponse`, `TickResult`) you
-must set it on any result you mean — an all-defaults protobuf message encodes to
-zero bytes, which the host reads as "did nothing".
-
+Returning `Pass*` (or a zero result) means pass-through. Prefer the typed
+constructors (`PassRequest`, `ReplaceRequest`, `PassEvent`, `SuppressEvent`,
+`EmitEvents`, `ServeHTTP`, `TickIdle`, …). A non-nil error traps the guest so
+the host applies `failure_mode`. Verdicts (`BlockRequest`, `RespondRequest`,
+`RouteRequest`, `SetIdentity`) are attributed host calls — invalid arguments
+and protocol failures panic; classified host refusals are fire-and-forget.
+Typed `HostCall(cmd, args)` returns `(value, *HostError, error)`. For stream
+tool-call assembly prefer `sdk.NewStreamHandler().OnToolCall(...).Register()`.
 ---
 
 ## 4. Writing the Manifest (`plugin.json`)
@@ -446,7 +449,7 @@ package main
 import (
 	"testing"
 
-	"github.com/torana-edge/torana-plugin-sdk/pb"
+	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 	"github.com/torana-edge/torana-plugin-sdk/sdktest"
 )
 
@@ -457,16 +460,16 @@ func TestBlocksOnDetectedPII(t *testing.T) {
 		return `{"completion":"EMAIL"}`, nil
 	})
 
-	res := h.BeforeRequest(&pb.ChatRequest{Messages: []*pb.Message{
+	res := h.BeforeRequest(&pbv2.ChatRequest{Messages: []*pbv2.Message{
 		{Role: "tool", Content: "contact: someone@example.com"},
 	}})
 
-	if res.Block == nil {
+	if len(h.BlockCalls()) == 0 {
 		t.Fatal("expected the request to be blocked")
 	}
+	_ = res
 }
 ```
-
 Your plugin's `init()` has already registered its handlers by the time a test
 runs, so there is nothing to wire up.
 
@@ -474,9 +477,10 @@ runs, so there is nothing to wire up.
 
 | | |
 |---|---|
-| `BeforeRequest` / `AfterResponse` | dispatch a request hook; the result reports `PassedThrough` and any `Block`/`Respond`/`Route` verdict |
-| `StreamChunk` / `StreamChunks` | dispatch one event, or a whole sequence, returning what the host would forward |
+| `BeforeRequest` / `AfterResponse` | dispatch a request/response hook; results report `PassedThrough` and any `ReplaceRequest` / `ReplaceResponse` |
+| `StreamChunk` | dispatch one stream event; prefer `StreamHandler` in the plugin under test for tool assembly |
 | `HTTPRequest` / `Tick` | dispatch the remaining hooks |
+| `BlockCalls` / `Calls` | assert attributed verdicts and other host calls |
 | `SetConfig` | what `sdk.PluginConfig()` returns |
 | `StubHostCall` / `DenyPermission` | override one command, or make it answer with the host's permission-denied envelope |
 | `SeedCache` / `SeedState` / `Cache` / `State` | start from a warm store, and assert what the plugin wrote |

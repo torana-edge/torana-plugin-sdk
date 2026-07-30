@@ -11,19 +11,29 @@ import (
 func TestDuplicateRegistrationPanics(t *testing.T) {
 	register := map[string]func(){
 		HookBeforeRequest: func() {
-			OnBeforeRequest(func(context.Context, *pbv2.ChatRequest) RequestResult { return PassRequest() })
+			OnBeforeRequest(func(context.Context, *pbv2.ChatRequest) (RequestResult, error) {
+				return PassRequest(), nil
+			})
 		},
 		HookAfterResponse: func() {
-			OnAfterResponse(func(context.Context, *pbv2.ChatResponse, bool) ResponseResult { return PassResponse() })
+			OnAfterResponse(func(context.Context, *pbv2.ChatResponse, bool) (ResponseResult, error) {
+				return PassResponse(), nil
+			})
 		},
 		HookStreamChunk: func() {
-			OnStreamChunk(func(context.Context, *pbv2.StreamEvent) StreamResult { return PassEvent() })
+			OnStreamChunk(func(context.Context, *pbv2.StreamEvent) (StreamResult, error) {
+				return PassEvent(), nil
+			})
 		},
 		HookHTTPRequest: func() {
-			OnHTTPRequest(func(context.Context, *pbv2.HttpRequest) HTTPResult { return PassHTTP() })
+			OnHTTPRequest(func(context.Context, *pbv2.HttpRequest) (HTTPResult, error) {
+				return PassHTTP(), nil
+			})
 		},
 		HookTick: func() {
-			OnTick(func(context.Context, *pbv2.TickRequest) TickResult { return TickIdle() })
+			OnTick(func(context.Context, *pbv2.TickRequest) (TickResult, error) {
+				return TickIdle(), nil
+			})
 		},
 	}
 
@@ -56,11 +66,21 @@ func TestSingleRegistrationSucceeds(t *testing.T) {
 	resetRegistrations()
 	t.Cleanup(resetRegistrations)
 
-	OnBeforeRequest(func(context.Context, *pbv2.ChatRequest) RequestResult { return PassRequest() })
-	OnAfterResponse(func(context.Context, *pbv2.ChatResponse, bool) ResponseResult { return PassResponse() })
-	OnStreamChunk(func(context.Context, *pbv2.StreamEvent) StreamResult { return PassEvent() })
-	OnHTTPRequest(func(context.Context, *pbv2.HttpRequest) HTTPResult { return PassHTTP() })
-	OnTick(func(context.Context, *pbv2.TickRequest) TickResult { return TickIdle() })
+	OnBeforeRequest(func(context.Context, *pbv2.ChatRequest) (RequestResult, error) {
+		return PassRequest(), nil
+	})
+	OnAfterResponse(func(context.Context, *pbv2.ChatResponse, bool) (ResponseResult, error) {
+		return PassResponse(), nil
+	})
+	OnStreamChunk(func(context.Context, *pbv2.StreamEvent) (StreamResult, error) {
+		return PassEvent(), nil
+	})
+	OnHTTPRequest(func(context.Context, *pbv2.HttpRequest) (HTTPResult, error) {
+		return PassHTTP(), nil
+	})
+	OnTick(func(context.Context, *pbv2.TickRequest) (TickResult, error) {
+		return TickIdle(), nil
+	})
 
 	for _, hook := range []string{
 		HookBeforeRequest, HookAfterResponse, HookStreamChunk, HookHTTPRequest, HookTick,

@@ -81,28 +81,48 @@ func DispatchHook(in *pbv2.HookInput) ([]byte, error) {
 		if beforeRequestHandler == nil {
 			return nil, nil
 		}
-		hr, err = beforeRequestHandler(ctx, in.GetChatRequest()).hookResult()
+		res, herr := beforeRequestHandler(ctx, in.GetChatRequest())
+		if herr != nil {
+			return nil, herr
+		}
+		hr, err = res.hookResult()
 	case pbv2.Hook_HOOK_AFTER_RESPONSE:
 		if afterResponseHandler == nil {
 			return nil, nil
 		}
 		ar := in.GetAfterResponse()
-		hr, err = afterResponseHandler(ctx, ar.GetResponse(), ar.GetMutable()).hookResult()
+		res, herr := afterResponseHandler(ctx, ar.GetResponse(), ar.GetMutable())
+		if herr != nil {
+			return nil, herr
+		}
+		hr, err = res.hookResult()
 	case pbv2.Hook_HOOK_ON_STREAM_CHUNK:
 		if streamChunkHandler == nil {
 			return nil, nil
 		}
-		hr, err = streamChunkHandler(ctx, in.GetStreamEvent()).hookResult()
+		res, herr := streamChunkHandler(ctx, in.GetStreamEvent())
+		if herr != nil {
+			return nil, herr
+		}
+		hr, err = res.hookResult()
 	case pbv2.Hook_HOOK_ON_HTTP_REQUEST:
 		if httpRequestHandler == nil {
 			return nil, nil
 		}
-		hr, err = httpRequestHandler(ctx, in.GetHttpRequest()).hookResult()
+		res, herr := httpRequestHandler(ctx, in.GetHttpRequest())
+		if herr != nil {
+			return nil, herr
+		}
+		hr, err = res.hookResult()
 	case pbv2.Hook_HOOK_ON_TICK:
 		if tickHandler == nil {
 			return nil, nil
 		}
-		hr, err = tickHandler(ctx, in.GetTickRequest()).hookResult()
+		res, herr := tickHandler(ctx, in.GetTickRequest())
+		if herr != nil {
+			return nil, herr
+		}
+		hr, err = res.hookResult()
 	default:
 		return nil, fmt.Errorf("unhandled hook %v", hook)
 	}

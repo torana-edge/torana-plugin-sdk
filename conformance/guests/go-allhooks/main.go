@@ -11,19 +11,19 @@ import (
 func main() {}
 
 func init() {
-	sdk.OnBeforeRequest(func(context.Context, *pbv2.ChatRequest) sdk.RequestResult {
-		return sdk.PassRequest()
+	sdk.OnBeforeRequest(func(context.Context, *pbv2.ChatRequest) (sdk.RequestResult, error) {
+		return sdk.PassRequest(), nil
 	})
-	sdk.OnAfterResponse(func(context.Context, *pbv2.ChatResponse, bool) sdk.ResponseResult {
-		return sdk.PassResponse()
+	sdk.OnAfterResponse(func(context.Context, *pbv2.ChatResponse, bool) (sdk.ResponseResult, error) {
+		return sdk.PassResponse(), nil
 	})
-	sdk.OnStreamChunk(func(context.Context, *pbv2.StreamEvent) sdk.StreamResult {
-		return sdk.PassEvent()
+	sdk.OnStreamChunk(func(context.Context, *pbv2.StreamEvent) (sdk.StreamResult, error) {
+		return sdk.PassEvent(), nil
 	})
-	sdk.OnHTTPRequest(func(context.Context, *pbv2.HttpRequest) sdk.HTTPResult {
-		return sdk.ServeHTTP(&pbv2.HttpResponse{Status: 204})
+	sdk.OnHTTPRequest(func(context.Context, *pbv2.HttpRequest) (sdk.HTTPResult, error) {
+		return sdk.ServeHTTP(&pbv2.HttpResponse{Status: 204}), nil
 	})
-	sdk.OnTick(func(context.Context, *pbv2.TickRequest) sdk.TickResult {
-		return sdk.TickIdle()
+	sdk.OnTick(func(context.Context, *pbv2.TickRequest) (sdk.TickResult, error) {
+		return sdk.TickIdle(), nil
 	})
 }

@@ -22,41 +22,44 @@ func withRequestID(ctx context.Context, id uint64) context.Context {
 }
 
 var (
-	beforeRequestHandler func(context.Context, *pbv2.ChatRequest) RequestResult
-	afterResponseHandler func(context.Context, *pbv2.ChatResponse, bool) ResponseResult
-	streamChunkHandler   func(context.Context, *pbv2.StreamEvent) StreamResult
-	httpRequestHandler   func(context.Context, *pbv2.HttpRequest) HTTPResult
-	tickHandler          func(context.Context, *pbv2.TickRequest) TickResult
+	beforeRequestHandler func(context.Context, *pbv2.ChatRequest) (RequestResult, error)
+	afterResponseHandler func(context.Context, *pbv2.ChatResponse, bool) (ResponseResult, error)
+	streamChunkHandler   func(context.Context, *pbv2.StreamEvent) (StreamResult, error)
+	httpRequestHandler   func(context.Context, *pbv2.HttpRequest) (HTTPResult, error)
+	tickHandler          func(context.Context, *pbv2.TickRequest) (TickResult, error)
 )
 
 // OnBeforeRequest registers the before-request handler.
-func OnBeforeRequest(handler func(context.Context, *pbv2.ChatRequest) RequestResult) {
+// A non-nil error traps the guest so the host applies failure_mode.
+func OnBeforeRequest(handler func(context.Context, *pbv2.ChatRequest) (RequestResult, error)) {
 	claimHook(HookBeforeRequest, handler)
 	beforeRequestHandler = handler
 }
 
 // OnAfterResponse registers the after-response handler.
 // mutable is false for observational dispatches (streamed or errored responses).
-func OnAfterResponse(handler func(context.Context, *pbv2.ChatResponse, bool) ResponseResult) {
+func OnAfterResponse(handler func(context.Context, *pbv2.ChatResponse, bool) (ResponseResult, error)) {
 	claimHook(HookAfterResponse, handler)
 	afterResponseHandler = handler
 }
 
 // OnStreamChunk registers the stream-chunk handler.
 // Prefer StreamHandler for tool-call assembly and multiple stream interests.
-func OnStreamChunk(handler func(context.Context, *pbv2.StreamEvent) StreamResult) {
+// Errors from a raw stream handler trap; StreamHandler.Handle consumes its
+// own semantic-callback errors for fail-open re-emission.
+func OnStreamChunk(handler func(context.Context, *pbv2.StreamEvent) (StreamResult, error)) {
 	claimHook(HookStreamChunk, handler)
 	streamChunkHandler = handler
 }
 
 // OnHTTPRequest registers the plugin-served HTTP handler.
-func OnHTTPRequest(handler func(context.Context, *pbv2.HttpRequest) HTTPResult) {
+func OnHTTPRequest(handler func(context.Context, *pbv2.HttpRequest) (HTTPResult, error)) {
 	claimHook(HookHTTPRequest, handler)
 	httpRequestHandler = handler
 }
 
 // OnTick registers the background-tick handler.
-func OnTick(handler func(context.Context, *pbv2.TickRequest) TickResult) {
+func OnTick(handler func(context.Context, *pbv2.TickRequest) (TickResult, error)) {
 	claimHook(HookTick, handler)
 	tickHandler = handler
 }

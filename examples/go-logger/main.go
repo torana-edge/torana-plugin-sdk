@@ -10,8 +10,8 @@ import (
 func main() {}
 
 func init() {
-	sdk.OnBeforeRequest(func(_ context.Context, request *pbv2.ChatRequest) sdk.RequestResult {
+	sdk.OnBeforeRequest(func(_ context.Context, request *pbv2.ChatRequest) (sdk.RequestResult, error) {
 		sdk.Log("received request for model "+request.Model, sdk.LogLevelInfo)
-		return sdk.PassRequest()
+		return sdk.PassRequest(), nil
 	})
 }

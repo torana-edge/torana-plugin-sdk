@@ -73,28 +73,48 @@ func run_hook(ptr, size uint32) uint64 {
 		if beforeRequestHandler == nil {
 			return 0
 		}
-		hr, err = beforeRequestHandler(ctx, in.GetChatRequest()).hookResult()
+		res, herr := beforeRequestHandler(ctx, in.GetChatRequest())
+		if herr != nil {
+			panic("torana plugin: " + hook.String() + ": " + herr.Error())
+		}
+		hr, err = res.hookResult()
 	case pbv2.Hook_HOOK_AFTER_RESPONSE:
 		if afterResponseHandler == nil {
 			return 0
 		}
 		ar := in.GetAfterResponse()
-		hr, err = afterResponseHandler(ctx, ar.GetResponse(), ar.GetMutable()).hookResult()
+		res, herr := afterResponseHandler(ctx, ar.GetResponse(), ar.GetMutable())
+		if herr != nil {
+			panic("torana plugin: " + hook.String() + ": " + herr.Error())
+		}
+		hr, err = res.hookResult()
 	case pbv2.Hook_HOOK_ON_STREAM_CHUNK:
 		if streamChunkHandler == nil {
 			return 0
 		}
-		hr, err = streamChunkHandler(ctx, in.GetStreamEvent()).hookResult()
+		res, herr := streamChunkHandler(ctx, in.GetStreamEvent())
+		if herr != nil {
+			panic("torana plugin: " + hook.String() + ": " + herr.Error())
+		}
+		hr, err = res.hookResult()
 	case pbv2.Hook_HOOK_ON_HTTP_REQUEST:
 		if httpRequestHandler == nil {
 			return 0
 		}
-		hr, err = httpRequestHandler(ctx, in.GetHttpRequest()).hookResult()
+		res, herr := httpRequestHandler(ctx, in.GetHttpRequest())
+		if herr != nil {
+			panic("torana plugin: " + hook.String() + ": " + herr.Error())
+		}
+		hr, err = res.hookResult()
 	case pbv2.Hook_HOOK_ON_TICK:
 		if tickHandler == nil {
 			return 0
 		}
-		hr, err = tickHandler(ctx, in.GetTickRequest()).hookResult()
+		res, herr := tickHandler(ctx, in.GetTickRequest())
+		if herr != nil {
+			panic("torana plugin: " + hook.String() + ": " + herr.Error())
+		}
+		hr, err = res.hookResult()
 	default:
 		panic("torana sdk: unhandled hook " + hook.String())
 	}

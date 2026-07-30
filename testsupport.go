@@ -12,8 +12,6 @@ import (
 
 // TestHost is the seam the sdktest package drives. Excluded from wasip1 builds.
 type TestHost struct {
-	// HostCall returns HostCallResult protobuf bytes for typed calls, or opaque
-	// legacy string bytes for transitional JSON commands (cache/state/meta).
 	HostCall func(cmd string, args []byte) ([]byte, error)
 	Log      func(msg string, level int32)
 	Metric   func(name string, metricType int32, value float64, labels map[string]string)
@@ -26,10 +24,8 @@ var (
 
 func testHostOf() *TestHost { return testHostPtr.Load() }
 
-// ResetRegistrations clears every registered hook.
 func ResetRegistrations() { resetRegistrations() }
 
-// WithTestHost installs h for the duration of fn.
 func WithTestHost(h *TestHost, fn func()) {
 	dispatchMu.Lock()
 	defer dispatchMu.Unlock()
@@ -41,27 +37,26 @@ func WithTestHost(h *TestHost, fn func()) {
 	fn()
 }
 
-func RegisteredBeforeRequest() func(context.Context, *pbv2.ChatRequest) RequestResult {
+func RegisteredBeforeRequest() func(context.Context, *pbv2.ChatRequest) (RequestResult, error) {
 	return beforeRequestHandler
 }
 
-func RegisteredAfterResponse() func(context.Context, *pbv2.ChatResponse, bool) ResponseResult {
+func RegisteredAfterResponse() func(context.Context, *pbv2.ChatResponse, bool) (ResponseResult, error) {
 	return afterResponseHandler
 }
 
-func RegisteredStreamChunk() func(context.Context, *pbv2.StreamEvent) StreamResult {
+func RegisteredStreamChunk() func(context.Context, *pbv2.StreamEvent) (StreamResult, error) {
 	return streamChunkHandler
 }
 
-func RegisteredHTTPRequest() func(context.Context, *pbv2.HttpRequest) HTTPResult {
+func RegisteredHTTPRequest() func(context.Context, *pbv2.HttpRequest) (HTTPResult, error) {
 	return httpRequestHandler
 }
 
-func RegisteredTick() func(context.Context, *pbv2.TickRequest) TickResult {
+func RegisteredTick() func(context.Context, *pbv2.TickRequest) (TickResult, error) {
 	return tickHandler
 }
 
-// RegisteredHooks names the hooks the plugin registered, in ABI order.
 func RegisteredHooks() []string {
 	var out []string
 	if beforeRequestHandler != nil {

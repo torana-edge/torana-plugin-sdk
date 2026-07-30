@@ -47,8 +47,16 @@ func (h *Harness) BeforeRequest(req *pbv2.ChatRequest) RequestResult {
 	return res
 }
 
+// ResponseResult is the outcome of an after-response dispatch.
+type ResponseResult struct {
+	Response      *pbv2.ChatResponse
+	PassedThrough bool
+	Err           error
+	Raw           *pbv2.HookResult
+}
+
 // AfterResponse dispatches run_after_response.
-func (h *Harness) AfterResponse(resp *pbv2.ChatResponse, mutable bool) RequestResult {
+func (h *Harness) AfterResponse(resp *pbv2.ChatResponse, mutable bool) ResponseResult {
 	h.t.Helper()
 	if sdk.RegisteredAfterResponse() == nil {
 		h.t.Fatal("sdktest: no run_after_response handler registered")
@@ -63,7 +71,7 @@ func (h *Harness) AfterResponse(resp *pbv2.ChatResponse, mutable bool) RequestRe
 	var raw []byte
 	var err error
 	h.with(func() { raw, err = sdk.DispatchHook(in) })
-	res := RequestResult{Err: err, PassedThrough: len(raw) == 0}
+	res := ResponseResult{Err: err, PassedThrough: len(raw) == 0}
 	if len(raw) == 0 {
 		return res
 	}
@@ -73,6 +81,7 @@ func (h *Harness) AfterResponse(resp *pbv2.ChatResponse, mutable bool) RequestRe
 		return res
 	}
 	res.Raw = &hr
+	res.Response = hr.GetReplaceResponse()
 	return res
 }
 

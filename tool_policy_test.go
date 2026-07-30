@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/torana-edge/torana-plugin-sdk/pb"
+	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
 
 func TestToolNamesByCallID(t *testing.T) {
-	names := ToolNamesByCallID([]*pb.Message{{Role: "assistant", ToolCalls: []*pb.ToolCall{{Id: "call-1", Name: "read_file"}}}})
+	names := ToolNamesByCallID([]*pbv2.Message{{Role: "assistant", ToolCalls: []*pbv2.ToolCall{{Id: "call-1", Name: "read_file"}}}})
 	if names["call-1"] != "read_file" {
 		t.Fatalf("tool name not recovered: %v", names)
 	}
