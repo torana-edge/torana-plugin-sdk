@@ -671,3 +671,65 @@ func TestNilNestedPayloadsAreRejected(t *testing.T) {
 		}
 	})
 }
+
+// A oneof wrapper can be a TYPED nil: Payload: (*HookInput_ChatRequest)(nil).
+// The interface is non-nil because it carries a type, so a bare field access
+// dereferences nothing and panics.
+//
+// A validator that crashes on malformed input is worse than one that misses it.
+// The host runs this on bytes a guest controls, so a panic here hands the guest
+// the choice of when the host dies. Every case must return an error instead.
+func TestTypedNilWrappersAreRejectedNotPanics(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		check func() error
+	}{
+		{"HookInput chat request", func() error {
+			return (&v2.HookInput{Payload: (*v2.HookInput_ChatRequest)(nil)}).Validate()
+		}},
+		{"HookInput chat response", func() error {
+			return (&v2.HookInput{Payload: (*v2.HookInput_ChatResponse)(nil)}).Validate()
+		}},
+		{"HookInput stream event", func() error {
+			return (&v2.HookInput{Payload: (*v2.HookInput_StreamEvent)(nil)}).Validate()
+		}},
+		{"HookInput http request", func() error {
+			return (&v2.HookInput{Payload: (*v2.HookInput_HttpRequest)(nil)}).Validate()
+		}},
+		{"HookInput tick request", func() error {
+			return (&v2.HookInput{Payload: (*v2.HookInput_TickRequest)(nil)}).Validate()
+		}},
+		{"HookResult chat request", func() error {
+			return (&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
+				Payload: (*v2.HookResult_ChatRequest)(nil)}).ValidateFor(v2.Hook_HOOK_BEFORE_REQUEST)
+		}},
+		{"HookResult stream events", func() error {
+			return (&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
+				Payload: (*v2.HookResult_StreamEvents)(nil)}).ValidateFor(v2.Hook_HOOK_ON_STREAM_CHUNK)
+		}},
+		{"HookResult tick outcome", func() error {
+			return (&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
+				Payload: (*v2.HookResult_TickOutcome)(nil)}).ValidateFor(v2.Hook_HOOK_ON_TICK)
+		}},
+		{"StreamEvent content block start", func() error {
+			return (&v2.StreamEvent{Event: (*v2.StreamEvent_ContentBlockStart)(nil)}).Validate()
+		}},
+		{"ContentBlockStart tool call", func() error {
+			return (&v2.ContentBlockStart{Block: (*v2.ContentBlockStart_ToolCall)(nil)}).Validate()
+		}},
+		{"ContentBlockStart provider", func() error {
+			return (&v2.ContentBlockStart{Block: (*v2.ContentBlockStart_Provider)(nil)}).Validate()
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("validation panicked instead of returning an error: %v", r)
+				}
+			}()
+			if err := tc.check(); err == nil {
+				t.Error("a typed-nil wrapper was accepted")
+			}
+		})
+	}
+}

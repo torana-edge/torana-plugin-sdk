@@ -28,7 +28,7 @@ func (x *StreamEvent) Validate() error {
 		return fmt.Errorf("stream event carries no event")
 	}
 	if b, ok := x.Event.(*StreamEvent_ContentBlockStart); ok {
-		if b.ContentBlockStart == nil {
+		if b == nil || b.ContentBlockStart == nil {
 			return fmt.Errorf("content block start is nil")
 		}
 		if err := b.ContentBlockStart.Validate(); err != nil {
@@ -55,7 +55,7 @@ func (x *ContentBlockStart) Validate() error {
 		return fmt.Errorf("content block start at index %d names no block kind", x.Index)
 
 	case *ContentBlockStart_ToolCall:
-		if b.ToolCall == nil {
+		if b == nil || b.ToolCall == nil {
 			return fmt.Errorf("tool-call block at index %d carries no tool call", x.Index)
 		}
 		if b.ToolCall.Id == "" {
@@ -67,7 +67,7 @@ func (x *ContentBlockStart) Validate() error {
 		}
 
 	case *ContentBlockStart_Provider:
-		if b.Provider == nil {
+		if b == nil || b.Provider == nil {
 			return fmt.Errorf("provider block at index %d carries no block", x.Index)
 		}
 		if b.Provider.Kind == "" {
@@ -109,18 +109,23 @@ func (x *HookInput) HookOf() Hook {
 // and then hands over nothing. Checking only that the wrapper exists let all of
 // those through — so a handwritten guest could submit a frame the normative
 // validator accepted and the host then dereferenced.
+// A oneof wrapper can also be a TYPED nil — Payload: (*HookInput_ChatRequest)(nil).
+// The interface is non-nil because it carries a type, so a bare `p.ChatRequest`
+// dereferences nothing and panics. A validator that crashes on malformed input
+// is worse than one that misses it: the host runs this on bytes a guest
+// controls, so the guest picks when the host dies.
 func (x *HookInput) payloadPresent() bool {
 	switch p := x.Payload.(type) {
 	case *HookInput_ChatRequest:
-		return p.ChatRequest != nil
+		return p != nil && p.ChatRequest != nil
 	case *HookInput_ChatResponse:
-		return p.ChatResponse != nil
+		return p != nil && p.ChatResponse != nil
 	case *HookInput_StreamEvent:
-		return p.StreamEvent != nil
+		return p != nil && p.StreamEvent != nil
 	case *HookInput_HttpRequest:
-		return p.HttpRequest != nil
+		return p != nil && p.HttpRequest != nil
 	case *HookInput_TickRequest:
-		return p.TickRequest != nil
+		return p != nil && p.TickRequest != nil
 	}
 	return false
 }
@@ -171,15 +176,15 @@ func (x *HookInput) ValidateFor(hook Hook) error {
 func (x *HookResult) payloadPresent() bool {
 	switch p := x.Payload.(type) {
 	case *HookResult_ChatRequest:
-		return p.ChatRequest != nil
+		return p != nil && p.ChatRequest != nil
 	case *HookResult_ChatResponse:
-		return p.ChatResponse != nil
+		return p != nil && p.ChatResponse != nil
 	case *HookResult_StreamEvents:
-		return p.StreamEvents != nil
+		return p != nil && p.StreamEvents != nil
 	case *HookResult_HttpResponse:
-		return p.HttpResponse != nil
+		return p != nil && p.HttpResponse != nil
 	case *HookResult_TickOutcome:
-		return p.TickOutcome != nil
+		return p != nil && p.TickOutcome != nil
 	}
 	return false
 }
