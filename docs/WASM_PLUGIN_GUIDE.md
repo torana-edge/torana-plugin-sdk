@@ -223,11 +223,14 @@ authority matches (assistant text on request and response). Topology is separate
 * Block indexes are unique across the entire streamed message and are never
   reused after close; delta/stop must match the currently open start. At most
   one content block may be open — a second start before stop is invalid;
-  MessageStop/end-of-stream with an open block is invalid. Duplicate/open-missing
-  sequences are invalid. Parallel tool calls are sequential blocks with distinct
-  indexes.
-* `StreamError` is host-owned. Do not forge provider-looking upstream failures;
-  suppress under topology, trap under `failure_mode`, or use attributed verdicts.
+  MessageStop/end-of-stream with an open block is invalid unless that block was
+  terminally aborted by `StreamError`. Duplicate/open-missing sequences are
+  invalid. Parallel tool calls are sequential blocks with distinct indexes.
+* `StreamError` is a **terminal abort**: may arrive mid-block; abandons the open
+  block and incomplete tool-call buffers without a synthetic `ContentBlockStop`;
+  ends the stream (no `MessageStop` required); any later event is invalid. It is
+  also host-owned — do not forge provider-looking upstream failures; suppress
+  under topology, trap under `failure_mode`, or use attributed verdicts.
 * Nested message fields use `PolicyContainer` (or presence-sensitive
   Section/Topology): same presence recurses without auto-charging the parent;
   an index-only `ToolCallDelta` change needs topology only, not assistant.

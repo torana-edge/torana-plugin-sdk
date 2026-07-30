@@ -506,7 +506,12 @@ var outboundMessageFieldPolicies = map[protoreflect.FullName]map[string]FieldPol
 //   - at most one content block open; second start before stop → reject
 //   - text/thinking/CurrentContentBlock signature_delta with no open block → reject
 //   - duplicate index after prior block closed → reject
-//   - MessageStop/end-of-stream with open block → reject
+//   - MessageStop/end-of-stream with open block → reject (unless already
+//     terminally aborted by StreamError)
+//   - start(tool), partial args, StreamError → valid terminal abort (discard buffer)
+//   - start(text), text delta, StreamError → valid terminal abort
+//   - StreamError then any later event → reject
+//   - start(...), ordinary EOF without stop/error → reject
 //   - sequential parallel tool-call blocks with distinct indexes → accept
 //   - parallel tool calls: two indexes, only first signed → second args unbound by first sig
 //   - Gemini adapters must stop emitting Index:0 for every function-call part

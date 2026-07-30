@@ -221,11 +221,13 @@ that mutation or clear the signature. On the stream path, `ToolCallRef.signature
 binds `id`/`name` and `ToolCallDelta.arguments_delta` for the **same unique
 content-block index** (never reused after close; parallel tool calls are
 sequential blocks with distinct indexes). At most one content block may be open.
-Streamed `signature_delta` with open text/thinking binds that block; a trailing
-signature-only part (Code Assist) is standalone — preserve it without
-synthesizing an empty block. `StreamError` is host-owned (do not forge upstream
-failures). Host enforcement tables live in package `outboundpolicy` (not for
-WASM guests).
+`StreamError` is a terminal abort: it may arrive mid-block, abandons the open
+block and incomplete tool-call buffers without a synthetic stop, ends the
+stream, and makes any later event invalid. Streamed `signature_delta` with open
+text/thinking binds that block; a trailing signature-only part (Code Assist) is
+standalone — preserve it without synthesizing an empty block. `StreamError` is
+also host-owned (do not forge upstream failures). Host enforcement tables live
+in package `outboundpolicy` (not for WASM guests).
 
 **Reading the request**
 

@@ -909,9 +909,14 @@ func (x *ToolCallDelta) GetArgumentsDelta() string {
 }
 
 type StreamError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Terminal abort of the streamed message. See StreamEvent stream-state rules:
+	// may arrive while a content block is open; abandons that block without a
+	// ContentBlockStop; ends the stream (no MessageStop required); no further
+	// events. Incomplete tool-call argument buffers must be discarded, not
+	// assembled into an executable call.
+	Code          int32  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1405,9 +1410,11 @@ func (x *ContentBlockStop) GetIndex() int32 {
 //	Usage
 //	MessageStop{finish_reason}
 //
-// Usage may arrive before or after MessageStop depending on the provider, and
-// StreamError may replace the remainder at any point. Everything else is
-// ordered as shown, and every block is opened and closed exactly once.
+// Usage may arrive before or after MessageStop depending on the provider.
+// StreamError is a terminal abort (see invariants below) and may replace the
+// remainder at any point, including mid-block. Everything else is ordered as
+// shown, and every successfully completed block is opened and closed exactly
+// once.
 //
 // Stream-state / index invariants (ABI):
 //   - At most one content block is open at a time. A second ContentBlockStart
@@ -1418,7 +1425,16 @@ func (x *ContentBlockStop) GetIndex() int32 {
 //     open ContentBlockStart; open-missing indexes are invalid.
 //   - TextDelta / ThinkingDelta / CurrentContentBlock signature_delta require
 //     a compatible open block; otherwise invalid.
-//   - MessageStop / end-of-stream while any block remains open is invalid.
+//   - StreamError is a terminal abort: it may occur at any point, including
+//     while a content block is open. It implicitly abandons/clears that open
+//     block and any buffered incomplete tool-call arguments — this is not a
+//     successful ContentBlockStop and must not be represented as one. It
+//     terminates the message/stream; neither MessageStop nor a synthetic block
+//     stop is required. Any event after StreamError is invalid.
+//   - MessageStop / end-of-stream while any block remains open is invalid,
+//     unless that open block was terminally aborted by StreamError (in which
+//     case the stream already ended at the error — ordinary EOF after a
+//     non-error open block is still invalid).
 //   - Host Migration B must fix adapters that violate index uniqueness (e.g.
 //     Gemini emitting Index:0 for every parallel functionCall) before enabling
 //     ToolCallBlockByIndex signature enforcement.
