@@ -1808,8 +1808,9 @@ func (x *HttpResponse) GetBody() []byte {
 // capability an operator should grant deliberately: a plugin holding it can act
 // — and spend — outside any request the operator can see.
 //
-// HookInput.request_id on a tick is a synthetic execution-scope id, not a
-// caller request — see that field's comment.
+// HookInput.request_id on a tick is a synthetic execution-scope id for
+// plugin-private ephemeral metadata (env.meta_*), discarded when the tick
+// ends — not a caller request. Caller content remains unavailable.
 type TickRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Monotonically increasing within one scheduler, starting at 1. Resets if the
@@ -2007,13 +2008,15 @@ type HookInput struct {
 	//
 	// For request-scoped hooks (before_request, after_response, stream, http)
 	// this is the caller/request correlation id. Every stream event of one
-	// response shares it.
+	// response shares it. Caller content (original_request, original_response,
+	// credentials, …) is available under that id.
 	//
 	// For ticks — which fire with no request in flight — the host supplies a
-	// unique synthetic scope id so host-call scratch state stays isolated across
-	// ticks. Authors must not interpret a tick's request_id as a caller request;
-	// request-scoped host calls (original_request, meta keyed by request, etc.)
-	// remain unavailable on tick regardless of this field's value.
+	// unique synthetic scope id. Plugin-private ephemeral metadata (env.meta_*)
+	// is available inside that scope and is discarded when the tick ends; that
+	// is why the id must be unique and must not reuse a live request's. Caller
+	// content and identity remain unavailable: there is no caller. Authors must
+	// not interpret a tick's request_id as a caller request.
 	RequestId uint64 `protobuf:"varint,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	// Types that are valid to be assigned to Payload:
 	//
