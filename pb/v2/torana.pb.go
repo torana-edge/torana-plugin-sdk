@@ -2812,6 +2812,212 @@ func (x *SetIdentityArgs) GetIdentity() string {
 	return ""
 }
 
+// MetaGetArgs is the argument body for host command env.meta_get.
+// A key that was never set reads back as empty, not as an error: absence is an
+// ordinary state for request-scoped metadata.
+type MetaGetArgs struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Key within this plugin's request-scoped namespace. Must be non-empty.
+	Key           string `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MetaGetArgs) Reset() {
+	*x = MetaGetArgs{}
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MetaGetArgs) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MetaGetArgs) ProtoMessage() {}
+
+func (x *MetaGetArgs) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MetaGetArgs.ProtoReflect.Descriptor instead.
+func (*MetaGetArgs) Descriptor() ([]byte, []int) {
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *MetaGetArgs) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+// MetaSetArgs is the argument body for host command env.meta_set.
+type MetaSetArgs struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Key within this plugin's request-scoped namespace. Must be non-empty.
+	Key string `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	// Value to store. Empty is a legitimate value, not a delete — v1 conflated
+	// the two because it could not tell an absent JSON field from an empty one.
+	Value         string `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MetaSetArgs) Reset() {
+	*x = MetaSetArgs{}
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MetaSetArgs) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MetaSetArgs) ProtoMessage() {}
+
+func (x *MetaSetArgs) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MetaSetArgs.ProtoReflect.Descriptor instead.
+func (*MetaSetArgs) Descriptor() ([]byte, []int) {
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *MetaSetArgs) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *MetaSetArgs) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
+}
+
+// CacheGetArgs is the argument body for host command env.cache_get.
+type CacheGetArgs struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Cache key. Shared across plugins and requests, so callers should namespace
+	// it themselves when they do not intend sharing. Must be non-empty.
+	Key           string `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CacheGetArgs) Reset() {
+	*x = CacheGetArgs{}
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CacheGetArgs) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CacheGetArgs) ProtoMessage() {}
+
+func (x *CacheGetArgs) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CacheGetArgs.ProtoReflect.Descriptor instead.
+func (*CacheGetArgs) Descriptor() ([]byte, []int) {
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *CacheGetArgs) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+// CacheSetArgs is the argument body for host command env.cache_set.
+type CacheSetArgs struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Cache key. See CacheGetArgs. Must be non-empty.
+	Key string `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	// Value to store. Empty is a legitimate value.
+	Value         string `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CacheSetArgs) Reset() {
+	*x = CacheSetArgs{}
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CacheSetArgs) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CacheSetArgs) ProtoMessage() {}
+
+func (x *CacheSetArgs) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CacheSetArgs.ProtoReflect.Descriptor instead.
+func (*CacheSetArgs) Descriptor() ([]byte, []int) {
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *CacheSetArgs) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *CacheSetArgs) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
+}
+
 // MetaAppendArgs is the argument body for host command env.meta_append.
 //
 // Contract (normative; pinned by pb/v2 MetaAppend* constants and tests):
@@ -2857,7 +3063,7 @@ type MetaAppendArgs struct {
 
 func (x *MetaAppendArgs) Reset() {
 	*x = MetaAppendArgs{}
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[32]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2869,7 +3075,7 @@ func (x *MetaAppendArgs) String() string {
 func (*MetaAppendArgs) ProtoMessage() {}
 
 func (x *MetaAppendArgs) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_torana_v2_torana_proto_msgTypes[32]
+	mi := &file_proto_torana_v2_torana_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2882,7 +3088,7 @@ func (x *MetaAppendArgs) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetaAppendArgs.ProtoReflect.Descriptor instead.
 func (*MetaAppendArgs) Descriptor() ([]byte, []int) {
-	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{32}
+	return file_proto_torana_v2_torana_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *MetaAppendArgs) GetBlockIndex() int32 {
@@ -3071,7 +3277,17 @@ const file_proto_torana_v2_torana_proto_rawDesc = "" +
 	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\"-\n" +
 	"\x0fSetIdentityArgs\x12\x1a\n" +
-	"\bidentity\x18\x01 \x01(\tR\bidentity\"M\n" +
+	"\bidentity\x18\x01 \x01(\tR\bidentity\"\x1f\n" +
+	"\vMetaGetArgs\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\"5\n" +
+	"\vMetaSetArgs\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value\" \n" +
+	"\fCacheGetArgs\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\"6\n" +
+	"\fCacheSetArgs\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value\"M\n" +
 	"\x0eMetaAppendArgs\x12\x1f\n" +
 	"\vblock_index\x18\x01 \x01(\x05R\n" +
 	"blockIndex\x12\x1a\n" +
@@ -3105,7 +3321,7 @@ func file_proto_torana_v2_torana_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_torana_v2_torana_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_proto_torana_v2_torana_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
+var file_proto_torana_v2_torana_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
 var file_proto_torana_v2_torana_proto_goTypes = []any{
 	(Hook)(0),                  // 0: torana.v2.Hook
 	(ErrorCode)(0),             // 1: torana.v2.ErrorCode
@@ -3141,7 +3357,11 @@ var file_proto_torana_v2_torana_proto_goTypes = []any{
 	(*RespondRequestArgs)(nil), // 31: torana.v2.RespondRequestArgs
 	(*RouteRequestArgs)(nil),   // 32: torana.v2.RouteRequestArgs
 	(*SetIdentityArgs)(nil),    // 33: torana.v2.SetIdentityArgs
-	(*MetaAppendArgs)(nil),     // 34: torana.v2.MetaAppendArgs
+	(*MetaGetArgs)(nil),        // 34: torana.v2.MetaGetArgs
+	(*MetaSetArgs)(nil),        // 35: torana.v2.MetaSetArgs
+	(*CacheGetArgs)(nil),       // 36: torana.v2.CacheGetArgs
+	(*CacheSetArgs)(nil),       // 37: torana.v2.CacheSetArgs
+	(*MetaAppendArgs)(nil),     // 38: torana.v2.MetaAppendArgs
 }
 var file_proto_torana_v2_torana_proto_depIdxs = []int32{
 	3,  // 0: torana.v2.Message.tool_calls:type_name -> torana.v2.ToolCall
@@ -3231,7 +3451,7 @@ func file_proto_torana_v2_torana_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_torana_v2_torana_proto_rawDesc), len(file_proto_torana_v2_torana_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   33,
+			NumMessages:   37,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
