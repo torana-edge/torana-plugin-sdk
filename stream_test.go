@@ -3,12 +3,14 @@
 package plugin_sdk
 
 import (
+	"bytes"
 	"encoding/binary"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
@@ -238,10 +240,8 @@ func TestEmitAssembledToolCallClearsSignatureOnReplace(t *testing.T) {
 	}
 }
 
-func TestToolFrameRoundTripPreservesUnknownFields(t *testing.T) {
+func TestToolFrameRoundTripPreservesFraming(t *testing.T) {
 	ref := &pbv2.ToolCallRef{Id: "id", Name: "name", Signature: "sig"}
-	// Simulate an unknown field via proto marshaling of an extended message is
-	// hard without the field number; pin length-prefix framing instead.
 	frame, err := encodeToolFrameHeader(ref)
 	if err != nil {
 		t.Fatal(err)
@@ -256,5 +256,114 @@ func TestToolFrameRoundTripPreservesUnknownFields(t *testing.T) {
 	}
 	if binary.BigEndian.Uint32(frame[:4]) != uint32(len(frame)-4-len(args)) {
 		t.Fatal("length prefix mismatch")
+	}
+}
+
+// refWithUnknownField builds a ToolCallRef carrying a field this build does
+// not know, the way a newer host would send one.
+func refWithUnknownField(t *testing.T, id, name, sig string) *pbv2.ToolCallRef {
+	t.Helper()
+	raw, err := proto.Marshal(&pbv2.ToolCallRef{Id: id, Name: name, Signature: sig})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = protowire.AppendTag(raw, 99, protowire.BytesType)
+	raw = protowire.AppendBytes(raw, []byte("from-a-newer-host"))
+
+	ref := &pbv2.ToolCallRef{}
+	if err := proto.Unmarshal(raw, ref); err != nil {
+		t.Fatal(err)
+	}
+	if len(ref.ProtoReflect().GetUnknown()) == 0 {
+		t.Fatal("fixture retained no unknown field, so it would prove nothing")
+	}
+	return ref
+}
+
+func unknownOf(t *testing.T, events []*pbv2.StreamEvent) []byte {
+	t.Helper()
+	for _, ev := range events {
+		s, ok := ev.Event.(*pbv2.StreamEvent_ContentBlockStart)
+		if !ok {
+			continue
+		}
+		tc, ok := s.ContentBlockStart.Block.(*pbv2.ContentBlockStart_ToolCall)
+		if !ok {
+			t.Fatal("block start is not a tool call")
+		}
+		return tc.ToolCall.ProtoReflect().GetUnknown()
+	}
+	t.Fatal("no content block start emitted")
+	return nil
+}
+
+// A field a newer host added must survive the assembler.
+//
+// The previous test of this name inserted no unknown field at all — its own
+// comment said so — so it pinned nothing while reading as coverage. Dropping
+// these fields is worst on the two paths that promise to leave the call alone:
+// pass, and callback-error fail-open.
+func TestAssembledToolCallPreservesUnknownFields(t *testing.T) {
+	const origArgs = `{"path":"/a"}`
+	ref := refWithUnknownField(t, "call_1", "read_file", "sig")
+	want := ref.ProtoReflect().GetUnknown()
+
+	call := ToolCall{
+		Index: 2, ID: ref.Id, Name: ref.Name,
+		Signature: ref.Signature, Arguments: origArgs, ref: ref,
+	}
+
+	for _, tc := range []struct {
+		name string
+		args string
+	}{
+		{"pass re-emits unchanged", origArgs},
+		{"fail-open re-emits the assembled original", origArgs},
+		{"argument replacement keeps unrelated fields", `{"path":"/b"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := unknownOf(t, EmitAssembledToolCall(call, tc.args))
+			if !bytes.Equal(got, want) {
+				t.Fatalf("unknown field lost: got %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// Replacing arguments must still clear the signature even when cloning a ref,
+// or preserving unknown fields would quietly reintroduce a stale token.
+func TestClonedRefStillClearsSignatureOnReplace(t *testing.T) {
+	ref := refWithUnknownField(t, "call_1", "read_file", "sig")
+	call := ToolCall{
+		Index: 2, ID: ref.Id, Name: ref.Name,
+		Signature: ref.Signature, Arguments: `{"path":"/a"}`, ref: ref,
+	}
+	events := EmitAssembledToolCall(call, `{"path":"/b"}`)
+	for _, ev := range events {
+		if s, ok := ev.Event.(*pbv2.StreamEvent_ContentBlockStart); ok {
+			tc := s.ContentBlockStart.Block.(*pbv2.ContentBlockStart_ToolCall)
+			if tc.ToolCall.Signature != "" {
+				t.Fatalf("signature survived an argument replacement: %q", tc.ToolCall.Signature)
+			}
+		}
+	}
+}
+
+// Cloning must not alias: mutating the emitted ref must not reach back into
+// the buffered call, or a fan-out would corrupt its own source.
+func TestReemitDoesNotAliasTheStoredRef(t *testing.T) {
+	ref := refWithUnknownField(t, "call_1", "read_file", "sig")
+	call := ToolCall{
+		Index: 2, ID: ref.Id, Name: ref.Name,
+		Signature: ref.Signature, Arguments: `{"path":"/a"}`, ref: ref,
+	}
+	events := EmitAssembledToolCall(call, `{"path":"/a"}`)
+	for _, ev := range events {
+		if s, ok := ev.Event.(*pbv2.StreamEvent_ContentBlockStart); ok {
+			s.ContentBlockStart.Block.(*pbv2.ContentBlockStart_ToolCall).ToolCall.Id = "mutated"
+		}
+	}
+	if call.ref.Id != "call_1" {
+		t.Fatalf("emitted ref aliased the stored one: %q", call.ref.Id)
 	}
 }

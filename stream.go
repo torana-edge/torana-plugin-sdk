@@ -121,6 +121,7 @@ func (a *StreamAssembler) Feed(ev *pbv2.StreamEvent) FeedResult {
 				Name:      ref.Name,
 				Signature: ref.Signature,
 				Arguments: args,
+				ref:       ref,
 			},
 		}
 
@@ -131,6 +132,26 @@ func (a *StreamAssembler) Feed(ev *pbv2.StreamEvent) FeedResult {
 	default:
 		return FeedResult{Emit: []*pbv2.StreamEvent{ev}}
 	}
+}
+
+// reemitRef rebuilds the ContentBlockStart ref for an assembled tool call.
+//
+// When the assembler decoded a ref, that ref is cloned and only the fields the
+// action deliberately changes are touched, so anything a newer host added
+// travels through unaltered. Rebuilding from scratch would drop it, which is
+// the opposite of what pass and fail-open promise.
+//
+// A caller that constructed the ToolCall itself has no ref to preserve, so one
+// is built from the known fields.
+func reemitRef(call ToolCall, sig string) *pbv2.ToolCallRef {
+	if call.ref == nil {
+		return &pbv2.ToolCallRef{Id: call.ID, Name: call.Name, Signature: sig}
+	}
+	out, _ := proto.Clone(call.ref).(*pbv2.ToolCallRef)
+	out.Id = call.ID
+	out.Name = call.Name
+	out.Signature = sig
+	return out
 }
 
 // encodeToolFrameHeader builds the initial meta_append fragment for a tool
@@ -181,9 +202,7 @@ func EmitAssembledToolCall(call ToolCall, args string) []*pbv2.StreamEvent {
 		{Event: &pbv2.StreamEvent_ContentBlockStart{
 			ContentBlockStart: &pbv2.ContentBlockStart{
 				Index: call.Index,
-				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{
-					Id: call.ID, Name: call.Name, Signature: sig,
-				}},
+				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: reemitRef(call, sig)},
 			},
 		}},
 		{Event: &pbv2.StreamEvent_ToolCallDelta{
@@ -207,6 +226,20 @@ type ToolCall struct {
 	Name      string
 	Signature string
 	Arguments string
+
+	// ref is the ToolCallRef the host actually sent, kept whole so re-emission
+	// can preserve fields this build does not know about.
+	//
+	// Copying the four scalars out and rebuilding a fresh ref silently dropped
+	// any additive field a newer host added — on pass and on callback-error
+	// fail-open, the two paths whose entire purpose is to leave the call
+	// untouched. Forward compatibility that survives only until a plugin
+	// buffers a tool call is not forward compatibility.
+	//
+	// Nil when the caller constructed the ToolCall itself rather than
+	// receiving it from the assembler; EmitAssembledToolCall builds a fresh
+	// ref in that case.
+	ref *pbv2.ToolCallRef
 }
 
 // ToolCallAction is what OnToolCall returns.
