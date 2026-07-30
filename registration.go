@@ -1,6 +1,10 @@
 package plugin_sdk
 
-import "reflect"
+import (
+	"reflect"
+
+	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+)
 
 // Hook registration is static configuration, so registering one twice is a
 // programming error and fails during initialization.
@@ -56,8 +60,8 @@ func resetRegistrations() {
 	for k := range registered {
 		delete(registered, k)
 	}
-	chatRequestHandler = nil
-	chatResponseHandler = nil
+	beforeRequestHandler = nil
+	afterResponseHandler = nil
 	streamChunkHandler = nil
 	httpRequestHandler = nil
 	tickHandler = nil
@@ -71,3 +75,43 @@ const (
 	HookHTTPRequest   = "run_on_http_request"
 	HookTick          = "run_on_tick"
 )
+
+// registeredHookBitmap is the supported_hooks() export value derived from
+// which handlers are installed. Bit N ↔ Hook enum value N.
+func registeredHookBitmap() pbv2.HookBitmap {
+	var hooks []pbv2.Hook
+	if beforeRequestHandler != nil {
+		hooks = append(hooks, pbv2.Hook_HOOK_BEFORE_REQUEST)
+	}
+	if afterResponseHandler != nil {
+		hooks = append(hooks, pbv2.Hook_HOOK_AFTER_RESPONSE)
+	}
+	if streamChunkHandler != nil {
+		hooks = append(hooks, pbv2.Hook_HOOK_ON_STREAM_CHUNK)
+	}
+	if httpRequestHandler != nil {
+		hooks = append(hooks, pbv2.Hook_HOOK_ON_HTTP_REQUEST)
+	}
+	if tickHandler != nil {
+		hooks = append(hooks, pbv2.Hook_HOOK_ON_TICK)
+	}
+	return pbv2.BitmapOf(hooks...)
+}
+
+// ManifestHookName maps a plugin.json hook name to the v2 Hook enum.
+func ManifestHookName(name string) (pbv2.Hook, bool) {
+	switch name {
+	case HookBeforeRequest:
+		return pbv2.Hook_HOOK_BEFORE_REQUEST, true
+	case HookAfterResponse:
+		return pbv2.Hook_HOOK_AFTER_RESPONSE, true
+	case HookStreamChunk:
+		return pbv2.Hook_HOOK_ON_STREAM_CHUNK, true
+	case HookHTTPRequest:
+		return pbv2.Hook_HOOK_ON_HTTP_REQUEST, true
+	case HookTick:
+		return pbv2.Hook_HOOK_ON_TICK, true
+	default:
+		return pbv2.Hook_HOOK_UNSPECIFIED, false
+	}
+}

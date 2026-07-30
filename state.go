@@ -39,7 +39,7 @@ func StateGet(key string) (string, error) {
 	if key == "" {
 		return "", fmt.Errorf("torana: state key is required")
 	}
-	res, err := HostCall("env.state_get", key)
+	res, err := hostCallString("env.state_get", key)
 	if err != nil {
 		return "", err
 	}
@@ -63,7 +63,7 @@ func StateSet(key, value string) error {
 	if err != nil {
 		return err
 	}
-	res, err := HostCall("env.state_set", string(payload))
+	res, err := hostCallString("env.state_set", string(payload))
 	if err != nil {
 		return err
 	}
@@ -80,7 +80,7 @@ func StateDelete(key string) error {
 // StateKeys lists this plugin's durable keys, sorted. Useful when a plugin
 // stores one key per conversation and must enumerate them on a tick.
 func StateKeys() ([]string, error) {
-	res, err := HostCall("env.state_keys", "")
+	res, err := hostCallString("env.state_keys", "")
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +199,7 @@ func isPermissionDenied(res string) bool {
 // multiplies the operator's token spend. Torana's determinism test exists to
 // catch exactly this. Use it to decide *whether* to act, never as content.
 func Now() (int64, error) {
-	res, err := HostCall("env.now", "")
+	res, err := hostCallString("env.now", "")
 	if err != nil {
 		return 0, err
 	}

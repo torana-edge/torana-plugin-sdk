@@ -4,23 +4,14 @@ package plugin_sdk
 
 import (
 	"context"
+	"fmt"
 
-	"github.com/torana-edge/torana-plugin-sdk/pb"
+	"google.golang.org/protobuf/proto"
+
+	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
 
-// This is the non-WASM build of the SDK. It exists so a plugin module compiles
-// and tests under `go test`, where GOOS is the host rather than wasip1.
-//
-// It used to no-op everything — registrations were dropped on the floor and
-// every host call returned an empty string. That made a plugin's own hooks
-// unreachable from its tests: `init()` registered nothing, so there was no way
-// to invoke a handler, and authors were forced to restructure plugins so the
-// hook body lived in separately-testable pure functions. It also meant a test
-// suite could stay green while the hook it was meant to cover was broken.
-//
-// So this build now records what a plugin registers and routes host calls to a
-// pluggable fake. The sdktest package drives it. Nothing here is compiled into
-// a real plugin: wasip1 builds use sdk.go instead.
+// Non-WASM build: registrations and host calls are driven by sdktest.
 
 //nolint:unused
 func alloc(size uint32) uint32 { return 0 }
@@ -29,48 +20,6 @@ func alloc(size uint32) uint32 { return 0 }
 func dealloc(ptr uint32, size uint32)   {}
 func ReadBytes(ptr, size uint32) []byte { return nil }
 func WriteResult(data []byte) uint64    { return 0 }
-
-var (
-	chatRequestHandler  func(ctx context.Context, req *pb.ChatRequest) (*pb.ChatRequest, error)
-	chatResponseHandler func(ctx context.Context, resp *pb.ChatRequest) (*pb.ChatRequest, error)
-	streamChunkHandler  func(ctx context.Context, chunk *pb.StreamEvent) (*pb.StreamEventResult, error)
-	httpRequestHandler  func(ctx context.Context, req *pb.HttpRequest) (*pb.HttpResponse, error)
-	tickHandler         func(ctx context.Context, req *pb.TickRequest) (*pb.TickResult, error)
-)
-
-func OnBeforeRequest(handler func(ctx context.Context, req *pb.ChatRequest) (*pb.ChatRequest, error)) {
-	claimHook(HookBeforeRequest, handler)
-	chatRequestHandler = handler
-}
-
-func OnAfterResponse(handler func(ctx context.Context, resp *pb.ChatRequest) (*pb.ChatRequest, error)) {
-	claimHook(HookAfterResponse, handler)
-	chatResponseHandler = handler
-}
-
-func OnStreamChunk(handler func(ctx context.Context, chunk *pb.StreamEvent) (*pb.StreamEventResult, error)) {
-	claimHook(HookStreamChunk, handler)
-	streamChunkHandler = handler
-}
-
-func OnHTTPRequest(handler func(ctx context.Context, req *pb.HttpRequest) (*pb.HttpResponse, error)) {
-	claimHook(HookHTTPRequest, handler)
-	httpRequestHandler = handler
-}
-
-func OnTick(handler func(ctx context.Context, req *pb.TickRequest) (*pb.TickResult, error)) {
-	claimHook(HookTick, handler)
-	tickHandler = handler
-}
-
-func Pass() *pb.StreamEventResult     { return nil }
-func Suppress() *pb.StreamEventResult { return &pb.StreamEventResult{Handled: true} }
-func Replace(ev *pb.StreamEvent) *pb.StreamEventResult {
-	return &pb.StreamEventResult{Handled: true, Events: []*pb.StreamEvent{ev}}
-}
-func Emit(evs ...*pb.StreamEvent) *pb.StreamEventResult {
-	return &pb.StreamEventResult{Handled: true, Events: evs}
-}
 
 const (
 	LogLevelDebug = 0
@@ -95,24 +44,96 @@ func EmitMetric(name string, metricType int32, value float64, labels map[string]
 	}
 }
 
-// HostCall routes to the installed test host. With no host installed it
-// returns an empty string, matching the previous behaviour so a plugin that is
-// compiled but not exercised under sdktest still builds and runs.
-//
-// The error is always nil, mirroring the wasip1 implementation exactly
-// (sdk.go:371) — a divergence here would let a test pass on an error path that
-// cannot occur in production.
-func HostCall(cmd string, args string) (string, error) {
-	if h := testHostOf(); h != nil && h.HostCall != nil {
-		return h.HostCall(cmd, args)
+func hostCallRawImpl(cmd string, args []byte) ([]byte, error) {
+	h := testHostOf()
+	if h == nil || h.HostCall == nil {
+		return nil, nil
 	}
-	return "", nil
+	return h.HostCall(cmd, args)
 }
 
 func PluginConfig() string {
-	res, _ := HostCall("env.plugin_config", "")
-	if res == "" || isPermissionDenied(res) {
+	res, err := hostCallString("env.plugin_config", "")
+	if err != nil || res == "" || isPermissionDenied(res) {
 		return "{}"
 	}
 	return res
+}
+
+// DispatchHook runs the registered handler for in and returns the framed
+// result bytes (nil for pass-through). Used by sdktest; mirrors run_hook.
+func DispatchHook(in *pbv2.HookInput) ([]byte, error) {
+	if in == nil {
+		return nil, fmt.Errorf("hook input is nil")
+	}
+	if err := in.Validate(); err != nil {
+		return nil, err
+	}
+	hook := in.HookOf()
+	ctx := withRequestID(context.Background(), in.RequestId)
+
+	var (
+		hr  *pbv2.HookResult
+		err error
+	)
+	switch hook {
+	case pbv2.Hook_HOOK_BEFORE_REQUEST:
+		if beforeRequestHandler == nil {
+			return nil, nil
+		}
+		res, herr := beforeRequestHandler(ctx, in.GetChatRequest())
+		if herr != nil {
+			return nil, herr
+		}
+		hr, err = res.hookResult()
+	case pbv2.Hook_HOOK_AFTER_RESPONSE:
+		if afterResponseHandler == nil {
+			return nil, nil
+		}
+		ar := in.GetAfterResponse()
+		res, herr := afterResponseHandler(ctx, ar.GetResponse(), ar.GetMutable())
+		if herr != nil {
+			return nil, herr
+		}
+		hr, err = res.hookResult()
+	case pbv2.Hook_HOOK_ON_STREAM_CHUNK:
+		if streamChunkHandler == nil {
+			return nil, nil
+		}
+		res, herr := streamChunkHandler(ctx, in.GetStreamEvent())
+		if herr != nil {
+			return nil, herr
+		}
+		hr, err = res.hookResult()
+	case pbv2.Hook_HOOK_ON_HTTP_REQUEST:
+		if httpRequestHandler == nil {
+			return nil, nil
+		}
+		res, herr := httpRequestHandler(ctx, in.GetHttpRequest())
+		if herr != nil {
+			return nil, herr
+		}
+		hr, err = res.hookResult()
+	case pbv2.Hook_HOOK_ON_TICK:
+		if tickHandler == nil {
+			return nil, nil
+		}
+		res, herr := tickHandler(ctx, in.GetTickRequest())
+		if herr != nil {
+			return nil, herr
+		}
+		hr, err = res.hookResult()
+	default:
+		return nil, fmt.Errorf("unhandled hook %v", hook)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if hr == nil {
+		return nil, nil
+	}
+	if err := hr.ValidateFor(hook); err != nil {
+		return nil, err
+	}
+	return proto.Marshal(hr)
 }

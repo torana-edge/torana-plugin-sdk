@@ -22,14 +22,15 @@ waits to be called. See
 [docs/PLUGIN_SEMANTICS.md](docs/PLUGIN_SEMANTICS.md).
 
 Use the Go package as `github.com/torana-edge/torana-plugin-sdk` and the
-protobuf API as `github.com/torana-edge/torana-plugin-sdk/pb`.
+protobuf API as `github.com/torana-edge/torana-plugin-sdk/pb/v2`. Go guests
+export the v2 surface (`run_hook`, `supported_hooks`). Declare
+`"abi_version": "v2"` in `plugin.json`.
 
 The Rust crate is packaged as `torana-plugin-sdk` and is published to
 [crates.io](https://crates.io/crates/torana-plugin-sdk) by the version-tag
-release workflow. Its source lives in `rust/torana-plugin-sdk`. The crate
-carries a protobuf copy whose descriptor is checked against the canonical v1
-contract in CI. Rust builds require `protoc` and the WASI target configured by
-the caller.
+release workflow. Its source lives in `rust/torana-plugin-sdk`. Rust guests
+still speak the **v1** trampoline until Migration C; keep
+`"abi_version": "v1"` there and do not mix v1 exports with v2 manifests.
 
 After changing the ABI, regenerate the checked-in Go bindings with
 `./scripts/generate-go.sh`, then run the conformance suite.
@@ -41,7 +42,7 @@ After changing the ABI, regenerate the checked-in Go bindings with
 | [Writing a plugin](docs/WRITING_A_PLUGIN.md) | Start here — scaffold, build, install, activate |
 | [Plugin semantics and gotchas](docs/PLUGIN_SEMANTICS.md) | Hook behaviour, protobuf decoding, prompt-cache and tool-output safety |
 | [Implementing the WASM contract](docs/WASM_PLUGIN_GUIDE.md) | **AI agents and humans** writing a plugin or an SDK from scratch — the boundary, and why every mistake there fails silently |
-| [ABI v1](ABI.md) | The normative contract |
+| [ABI v1](ABI.md) | Frozen v1 trampoline contract (Rust guests until Migration C). Go authors use the v2 guides below — do not treat ABI.md as the active Go ABI. |
 
 Official plugins built on this SDK live in
 [torana-plugins](https://github.com/torana-edge/torana-plugins). The proxy itself is

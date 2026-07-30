@@ -88,13 +88,30 @@ func TestObservedResponseFactsAreHostOwned(t *testing.T) {
 			t.Errorf("ChatResponse.%s must be host-owned", field)
 		}
 	}
-	mustHost := []struct{ msg, field string }{
-		{"torana.v2.Message", "role"},
+	// Bound signatures are host-owned in authority — a plugin can never mint
+	// one — but they are NOT unconditionally immutable: clearing is the
+	// prescribed response to changing the content they cover. They carry
+	// PolicyBoundSignature and are asserted separately below.
+	mustBoundSignature := []struct{ msg, field string }{
 		{"torana.v2.Message", "thinking_signature"},
 		{"torana.v2.ToolCall", "signature"},
-		{"torana.v2.MessageStart", "model"},
 		{"torana.v2.ToolCallRef", "signature"},
 		{"torana.v2.StreamEvent", "signature_delta"},
+	}
+	for _, tc := range mustBoundSignature {
+		p, ok := OutboundFieldPolicy(protoreflect.FullName(tc.msg), tc.field)
+		if !ok || !p.IsBoundSignature() {
+			t.Errorf("%s.%s must be PolicyBoundSignature, got kind=%v", tc.msg, tc.field, p.Kind())
+		}
+		if p.IsHostOwned() {
+			t.Errorf("%s.%s must not be unconditionally host-owned: a verifier built "+
+				"from that would reject EmitAssembledToolCall clearing the token", tc.msg, tc.field)
+		}
+	}
+
+	mustHost := []struct{ msg, field string }{
+		{"torana.v2.Message", "role"},
+		{"torana.v2.MessageStart", "model"},
 		{"torana.v2.StreamEvent", "usage"},
 		{"torana.v2.StreamEvent", "error"},
 		{"torana.v2.StreamError", "code"},

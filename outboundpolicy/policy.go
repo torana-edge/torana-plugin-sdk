@@ -33,7 +33,23 @@ import (
 //
 // Host-owned means immutable under plugin mutation: an identical re-emit or
 // pass-through needs no grant. Suppressing, forging, or altering a host-owned
-// fact is forbidden. Enforcement (recursive field diff + fingerprinting) is
+// fact is forbidden.
+//
+// Bound signatures are the ONE exception, and PolicyBoundSignature marks them
+// rather than prose. An opaque provider token is host-owned — a plugin can
+// never mint one — but CLEARING it is the prescribed response to legitimately
+// changing the content it covers, so an unconditional host-owned rule would
+// reject the SDK's own EmitAssembledToolCall output. ClassifySignatureMutation
+// is the normative rule; do not restate it anywhere else.
+//
+// Signature comparison is TRANSACTIONAL over the binding's scope, never
+// per-event. A tool block is compared as a whole — start id/name plus every
+// arguments_delta sharing the index — between the accepted stream and the
+// plugin's output. Judging at the initial suppression would reject every
+// buffering assembler, which is precisely what StreamHandler does on the pass
+// path: suppress fragments, then re-emit them byte-identically.
+//
+// Enforcement (recursive field diff + fingerprinting) is
 // Migration B and must not land on the per-event stream path without a
 // stream-specific benchmark covering one-for-one TextDelta/ToolCallDelta and
 // fan-out/suppress cases. This file is vocabulary and inventory only — no
@@ -74,6 +90,21 @@ const (
 	// be re-emitted; changed/removed/added values reject. On a message field
 	// this covers the whole subtree.
 	PolicyHostOwned
+	// PolicyBoundSignature marks an opaque provider signature that is host
+	// owned but NOT unconditionally immutable: clearing it is the prescribed
+	// response to legitimately mutating the content it covers.
+	//
+	// A plain PolicyHostOwned here would forbid the one mutation the SDK must
+	// perform. EmitAssembledToolCall clears ToolCallRef.signature when a
+	// plugin replaces the arguments, because the token no longer describes
+	// what is being sent; a verifier built from an unconditional host-owned
+	// rule would reject the SDK's own output.
+	//
+	// ClassifySignatureMutation is the single normative rule. Every field
+	// carrying this kind must appear as a SignatureBinding.SignatureField and
+	// vice versa — Validate enforces the pairing, so the two tables cannot
+	// drift.
+	PolicyBoundSignature
 	// PolicyDelegate hands the nested value to another verifier (request,
 	// response, stream, HTTP, tick). Not a field grant and not host-owned.
 	PolicyDelegate
@@ -159,6 +190,104 @@ func sectionPolicy(s plugin_sdk.WriteSection) FieldPolicy {
 	return FieldPolicy{kind: PolicySection, section: s}
 }
 
+func boundSignaturePolicy() FieldPolicy {
+	return FieldPolicy{kind: PolicyBoundSignature}
+}
+
+// SignatureMutation classifies what happened to a bound signature between the
+// accepted value and a plugin's output. It is the ONE rule: the package
+// comment, the registry, the SDK's emit path and the tests all state it
+// through this function rather than restating it in prose.
+type SignatureMutation int
+
+const (
+	// SignatureMutationInvalid is the zero value and never returned.
+	SignatureMutationInvalid SignatureMutation = iota
+	// SignatureIntact: bound content identical and token identical. Allowed —
+	// this is pass-through and temporary suppress-then-re-emit. Buffering a
+	// tool block and replaying it byte-identically is not deletion.
+	SignatureIntact
+	// SignatureCleared: bound content changed and the token was emptied.
+	// Allowed, and required: the token no longer describes what ships.
+	SignatureCleared
+	// SignatureDropped: the token was emptied while the content it covers was
+	// left identical. Rejected.
+	//
+	// The exception that lets a signature be cleared is narrowly "cleared
+	// BECAUSE the covered content changed". Removing provenance from content
+	// the provider did sign is just removing a host-owned fact, which the
+	// package rule forbids, and it is indistinguishable from laundering.
+	//
+	// Nor is it merely lossy: providers can require the token on a later turn
+	// (Gemini/Code Assist thoughtSignature is the live case), so dropping it
+	// breaks replay rather than degrading gracefully.
+	SignatureDropped
+	// SignatureStale: bound content changed but the token was kept. Rejected —
+	// this is the dangerous case, a valid-looking provider signature over
+	// content the provider never signed.
+	SignatureStale
+	// SignatureForged: the token was replaced with a different non-empty
+	// value. Always rejected, whether or not bound content changed. A plugin
+	// cannot manufacture a provider signature.
+	SignatureForged
+	// SignatureAdded: a token appeared where the accepted value had none.
+	// Always rejected, for the same reason as forgery.
+	SignatureAdded
+)
+
+func (m SignatureMutation) Allowed() bool {
+	return m == SignatureIntact || m == SignatureCleared
+}
+
+func (m SignatureMutation) String() string {
+	switch m {
+	case SignatureIntact:
+		return "intact"
+	case SignatureCleared:
+		return "cleared"
+	case SignatureDropped:
+		return "dropped"
+	case SignatureStale:
+		return "stale"
+	case SignatureForged:
+		return "forged"
+	case SignatureAdded:
+		return "added"
+	}
+	return "invalid"
+}
+
+// ClassifySignatureMutation applies the settled bound-signature rule.
+//
+// boundContentChanged is decided over the WHOLE signature scope, not one
+// event: for SignatureScopeToolCallBlockByIndex that means the assembled tool
+// block (start id/name plus every arguments_delta sharing the index), compared
+// between the accepted stream and the plugin's output. Classifying at the
+// initial suppression would reject every buffering assembler, which is exactly
+// what StreamHandler does on the pass path.
+func ClassifySignatureMutation(accepted, returned string, boundContentChanged bool) SignatureMutation {
+	switch {
+	case accepted == returned:
+		if accepted == "" {
+			return SignatureIntact
+		}
+		if boundContentChanged {
+			return SignatureStale
+		}
+		return SignatureIntact
+	case returned == "":
+		if !boundContentChanged {
+			// Provenance stripped from content the provider actually signed.
+			return SignatureDropped
+		}
+		return SignatureCleared
+	case accepted == "":
+		return SignatureAdded
+	default:
+		return SignatureForged
+	}
+}
+
 func hostOwnedPolicy() FieldPolicy {
 	return FieldPolicy{kind: PolicyHostOwned}
 }
@@ -178,6 +307,11 @@ func containerPolicy() FieldPolicy {
 func (p FieldPolicy) Kind() PolicyKind { return p.kind }
 
 func (p FieldPolicy) IsHostOwned() bool { return p.kind == PolicyHostOwned }
+
+// IsBoundSignature reports whether the field is an opaque provider token whose
+// mutation is governed by ClassifySignatureMutation rather than by the
+// unconditional host-owned rule.
+func (p FieldPolicy) IsBoundSignature() bool { return p.kind == PolicyBoundSignature }
 
 func (p FieldPolicy) IsContainer() bool { return p.kind == PolicyContainer }
 
@@ -216,6 +350,10 @@ func (p FieldPolicy) validate() error {
 	case PolicyHostOwned:
 		if p.section != "" || p.delegate != DelegateUnspecified {
 			return fmt.Errorf("PolicyHostOwned must not set Section or Delegate")
+		}
+	case PolicyBoundSignature:
+		if p.section != "" || p.delegate != DelegateUnspecified {
+			return fmt.Errorf("PolicyBoundSignature must not set Section or Delegate")
 		}
 	case PolicyDelegate:
 		if !p.delegate.valid() {
@@ -371,7 +509,7 @@ var responseMessageFieldPolicies = map[string]FieldPolicy{
 	"content":            sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 	"content_parts_json": sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 	"thinking":           sectionPolicy(plugin_sdk.SectionMessagesAssistant),
-	"thinking_signature": hostOwnedPolicy(),
+	"thinking_signature": boundSignaturePolicy(),
 	"redacted_thinking":  sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 	"tool_calls":         sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 	"tool_call_id":       sectionPolicy(plugin_sdk.SectionMessagesAssistant),
@@ -383,7 +521,7 @@ var responseToolCallFieldPolicies = map[string]FieldPolicy{
 	"id":             sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 	"name":           sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 	"arguments_json": sectionPolicy(plugin_sdk.SectionMessagesAssistant),
-	"signature":      hostOwnedPolicy(),
+	"signature":      boundSignaturePolicy(),
 }
 
 var usageFieldPolicies = map[string]FieldPolicy{
@@ -399,7 +537,7 @@ var streamEventVariantPolicies = map[string]FieldPolicy{
 	"tool_call_delta":     containerPolicy(), // index vs args decided by nested fields
 	"usage":               hostOwnedPolicy(),
 	"error":               hostOwnedPolicy(),
-	"signature_delta":     hostOwnedPolicy(),
+	"signature_delta":     boundSignaturePolicy(),
 	"message_start":       hostOwnedPolicy(),
 	"message_stop":        containerPolicy(),
 	"content_block_start": topologyPolicy(), // presence/kind; same presence → recurse only
@@ -437,7 +575,7 @@ var contentBlockStartFieldPolicies = map[string]FieldPolicy{
 var toolCallRefFieldPolicies = map[string]FieldPolicy{
 	"id":        sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 	"name":      sectionPolicy(plugin_sdk.SectionMessagesAssistant),
-	"signature": hostOwnedPolicy(),
+	"signature": boundSignaturePolicy(),
 }
 
 var providerBlockFieldPolicies = map[string]FieldPolicy{
@@ -496,6 +634,11 @@ var outboundMessageFieldPolicies = map[protoreflect.FullName]map[string]FieldPol
 //   - identical Usage/MessageStart/signature_delta/TextDelta re-emit → no grant
 //   - suppress Usage / forge StreamError → reject
 //   - change args deltas for signed tool-call block index → reject or clear signature
+//   - StreamHandler ReplaceToolArguments clears ToolCallRef.signature in the
+//     re-emitted ContentBlockStart (SDK encodes this; host may also clear)
+//   - transactional tool-call buffering: suppress start+deltas then re-emit an
+//     identical assembled block (pass / fail-open) is NOT suppress/forge of the
+//     host-owned signature — verify across the whole tool block, not per event
 //   - parallel tool calls: mutating block B args must not be gated by block A's signature
 //   - multi-block: signature_delta binds current text/thinking block only
 //
@@ -588,6 +731,94 @@ func Validate() error {
 		}
 		if err := validateSignatureBindingAgainstProto(b, descs); err != nil {
 			return err
+		}
+	}
+	if err := validateBoundSignaturePairing(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateBoundSignaturePairing checks that the field registry and the
+// signature-binding table describe the same set of tokens.
+//
+// The two are separate structures saying related things: the registry says
+// "this field is a bound signature", the binding says "this is the content it
+// covers". Either alone is silently wrong. A bound signature with no binding
+// is a token nothing defines the scope of, so a verifier cannot compute
+// boundContentChanged and has no basis to allow clearing. A binding over a
+// field the registry still calls unconditionally host-owned is precisely the
+// contradiction this pairing exists to prevent — the SDK clears the token and
+// a faithful verifier rejects it.
+//
+// Enforcing the correspondence here means the drift cannot survive a host
+// start, rather than being caught by whoever notices the behaviour.
+func validateBoundSignaturePairing() error {
+	bound := map[protoreflect.FullName]map[string]bool{}
+	for msg, fields := range outboundMessageFieldPolicies {
+		for name, p := range fields {
+			if p.kind == PolicyBoundSignature {
+				if bound[msg] == nil {
+					bound[msg] = map[string]bool{}
+				}
+				bound[msg][name] = true
+			}
+		}
+	}
+	type bindingKey struct {
+		msg   protoreflect.FullName
+		field string
+	}
+	claimed := map[bindingKey]bool{}
+
+	for _, b := range signatureBindings {
+		fields, ok := outboundMessageFieldPolicies[b.Message]
+		if !ok {
+			return fmt.Errorf("signature binding %s.%s: message has no field registry",
+				b.Message, b.SignatureField)
+		}
+		p, ok := fields[b.SignatureField]
+		if !ok {
+			return fmt.Errorf("signature binding %s.%s: field has no policy",
+				b.Message, b.SignatureField)
+		}
+		if p.kind != PolicyBoundSignature {
+			return fmt.Errorf("signature binding %s.%s: policy is %v, want PolicyBoundSignature — "+
+				"a binding says the token may be cleared when its content changes, so an "+
+				"unconditionally host-owned policy would reject the SDK's own output",
+				b.Message, b.SignatureField, p.kind)
+		}
+		// One token, one scope. Deleting from the tracking map is idempotent,
+		// so a second binding for the same field used to pass silently and give
+		// that token two different definitions of what it covers — a verifier
+		// iterating the exported bindings would have no unique contract to
+		// implement.
+		key := bindingKey{b.Message, b.SignatureField}
+		if claimed[key] {
+			return fmt.Errorf("signature binding %s.%s is declared more than once: "+
+				"a token must have exactly one definition of the content it covers",
+				b.Message, b.SignatureField)
+		}
+		claimed[key] = true
+
+		// Duplicate content refs within one binding are redundant at best and
+		// contradictory at worst, and make a verifier's scope ambiguous.
+		seenRef := map[SignatureContentRef]bool{}
+		for _, c := range b.Content {
+			if seenRef[c] {
+				return fmt.Errorf("signature binding %s.%s lists content ref %s.%s (scope %v) twice",
+					b.Message, b.SignatureField, c.Message, c.Field, c.Scope)
+			}
+			seenRef[c] = true
+		}
+
+		delete(bound[b.Message], b.SignatureField)
+	}
+	for msg, fields := range bound {
+		for name := range fields {
+			return fmt.Errorf("%s.%s is PolicyBoundSignature with no SignatureBinding: "+
+				"nothing defines what content the token covers, so a verifier cannot tell "+
+				"a legitimate clear from a discarded fact", msg, name)
 		}
 	}
 	return nil
@@ -725,11 +956,9 @@ func validateSignatureBindingAgainstProto(b SignatureBinding, descs map[protoref
 	if sigFD == nil {
 		return fmt.Errorf("%s has no field %s", b.Message, b.SignatureField)
 	}
-	// signature_delta is a StreamEvent oneof arm named signature_delta.
-	sigPolicy, ok := outboundMessageFieldPolicies[b.Message][b.SignatureField]
-	if !ok || !sigPolicy.IsHostOwned() {
-		return fmt.Errorf("%s.%s must be host-owned in the field policy registry", b.Message, b.SignatureField)
-	}
+	// The registry pairing (PolicyBoundSignature ⇔ SignatureBinding) is checked
+	// once, in validateBoundSignaturePairing. Repeating a weaker version of it
+	// here is how the two tables drifted in the first place.
 	for i, c := range b.Content {
 		msgName := c.Message
 		if msgName == "" || c.Scope == SignatureScopeSameMessage {

@@ -1,7 +1,7 @@
 package plugin_sdk
 
 import (
-	"github.com/torana-edge/torana-plugin-sdk/pb"
+	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -12,12 +12,12 @@ import (
 //
 // Requires the env.original_request permission grant. Returns ok=false when
 // the grant is missing, the call runs outside a request, or decoding fails.
-func OriginalRequest() (*pb.ChatRequest, bool) {
-	res, err := HostCall("env.original_request", "")
+func OriginalRequest() (*pbv2.ChatRequest, bool) {
+	res, err := hostCallString("env.original_request", "")
 	if err != nil || res == "" || res == `{"status":"error","message":"permission denied"}` {
 		return nil, false
 	}
-	var req pb.ChatRequest
+	var req pbv2.ChatRequest
 	if proto.Unmarshal([]byte(res), &req) != nil {
 		return nil, false
 	}
@@ -32,7 +32,7 @@ func OriginalRequest() (*pb.ChatRequest, bool) {
 // Requires the env.original_response permission grant. Returns ok=false when
 // unavailable.
 func OriginalResponse() ([]byte, bool) {
-	res, err := HostCall("env.original_response", "")
+	res, err := hostCallString("env.original_response", "")
 	if err != nil || res == "" || res == `{"status":"error","message":"permission denied"}` {
 		return nil, false
 	}

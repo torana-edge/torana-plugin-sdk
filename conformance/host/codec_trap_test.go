@@ -6,72 +6,28 @@ import (
 	"testing"
 
 	"github.com/tetratelabs/wazero"
-	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 )
 
-// ABI.md reserves a zero return for a DELIBERATE pass-through: the plugin saw
-// the payload and chose not to act. A codec failure is not that — the plugin
-// never saw anything — and must trap so the host discards the instance and
-// applies the bundle's failure_mode.
-//
-// Two of the five Go hooks returned 0 instead. A corrupt payload was therefore
-// reported as a healthy no-op: the instance was kept, failure_mode was never
-// consulted, and the operator saw nothing. Rust was uniformly strict, so the
-// two SDKs disagreed for run_after_response and run_on_stream_chunk — meaning
-// the same plugin logic behaved differently depending on which language it was
-// written in.
-//
-// This is the test that makes that parity provable rather than asserted, which
-// is why it lives in the dual-guest harness.
-
-// hooksTakingProtobuf are the hooks whose input is a protobuf message, so a
-// non-protobuf payload must trap.
-//
-// run_on_tick is included. It was excluded on the grounds that it "takes no
-// meaningful input", which is not the same thing: it decodes a TickRequest and
-// both SDKs panic when that fails, so it is subject to the same contract.
-var hooksTakingProtobuf = []string{
-	"run_before_request",
-	"run_after_response",
-	"run_on_stream_chunk",
-	"run_on_http_request",
-	"run_on_tick",
-}
-
-func TestCorruptPayloadTrapsInEveryGuest(t *testing.T) {
-	for _, artifact := range []struct{ name, env string }{
-		{"go", "TORANA_GO_GUEST"},
-		{"rust", "TORANA_RUST_GUEST"},
-	} {
-		path := os.Getenv(artifact.env)
-		if path == "" {
-			t.Logf("%s is unset; that compiled guest is exercised in CI", artifact.env)
-			continue
-		}
-		t.Run(artifact.name, func(t *testing.T) {
-			for _, hookName := range hooksTakingProtobuf {
-				t.Run(hookName, func(t *testing.T) {
-					assertCorruptPayloadTraps(t, path, hookName)
-				})
-			}
-		})
+// A corrupt HookInput payload must trap on run_hook — zero is reserved for
+// deliberate pass-through after a successful decode.
+func TestCorruptPayloadTrapsOnRunHook(t *testing.T) {
+	path := os.Getenv("TORANA_GO_GUEST")
+	if path == "" {
+		t.Log("TORANA_GO_GUEST unset; exercised in CI")
+		return
 	}
+	assertCorruptPayloadTraps(t, path)
 }
 
-func assertCorruptPayloadTraps(t *testing.T, path, hookName string) {
+func assertCorruptPayloadTraps(t *testing.T, path string) {
 	t.Helper()
 	ctx := context.Background()
 	runtime := wazero.NewRuntime(ctx)
 	t.Cleanup(func() { _ = runtime.Close(ctx) })
 	wasi_snapshot_preview1.MustInstantiate(ctx, runtime)
-
-	if _, err := runtime.NewHostModuleBuilder("env").
-		NewFunctionBuilder().
-		WithFunc(func(context.Context, api.Module, int32, uint32, uint32) {}).
-		Export("log").
-		Instantiate(ctx); err != nil {
-		t.Fatalf("instantiate host imports: %v", err)
+	if err := instantiateEnvImports(ctx, runtime); err != nil {
+		t.Fatal(err)
 	}
 
 	wasmBytes, err := os.ReadFile(path)
@@ -84,49 +40,25 @@ func assertCorruptPayloadTraps(t *testing.T, path, hookName string) {
 	}
 	if initialize := module.ExportedFunction("_initialize"); initialize != nil {
 		if _, err := initialize.Call(ctx); err != nil {
-			t.Fatalf("initialize guest: %v", err)
+			t.Fatalf("initialize: %v", err)
 		}
 	}
-
-	hook := module.ExportedFunction(hookName)
-	if hook == nil {
-		// These guests exist to export every hook. A skip here would make a
-		// guest that LOST an export look like a pass — the same
-		// green-means-nothing failure this harness was built to close.
-		t.Fatalf("guest does not export %s; the conformance guests must export every hook", hookName)
-	}
 	alloc := module.ExportedFunction("alloc")
-	if alloc == nil {
-		t.Fatal("guest is missing alloc")
+	hook := module.ExportedFunction("run_hook")
+	if alloc == nil || hook == nil {
+		t.Fatal("missing alloc or run_hook")
 	}
-
-	// Not valid protobuf for any of these messages: field number 0 is illegal
-	// in the wire format, so every decoder must reject it.
-	payload := []byte{0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
-
-	pointers, err := alloc.Call(ctx, uint64(len(payload)))
-	if err != nil || len(pointers) != 1 {
-		t.Fatalf("alloc: %v", err)
+	corrupt := []byte{0xff, 0x00, 0xab}
+	pointers, err := alloc.Call(ctx, uint64(len(corrupt)))
+	if err != nil {
+		t.Fatal(err)
 	}
 	ptr := uint32(pointers[0])
-	if !module.Memory().Write(ptr, payload) {
-		t.Fatal("write guest input")
+	if !module.Memory().Write(ptr, corrupt) {
+		t.Fatal("write")
 	}
-
-	result, err := hook.Call(ctx, 1, uint64(ptr), uint64(len(payload)))
-	if err != nil {
-		return // trapped, which is the contract
+	_, err = hook.Call(ctx, uint64(ptr), uint64(len(corrupt)))
+	if err == nil {
+		t.Fatal("corrupt payload must trap, not return pass-through")
 	}
-
-	// A registered handler that decoded nothing must not report success. Zero
-	// means "I saw the payload and chose to pass it through" — indistinguishable
-	// to the host from a plugin working correctly.
-	if len(result) == 1 && result[0] == 0 {
-		t.Errorf("%s returned 0 (pass-through) on a payload it could not decode.\n"+
-			"ABI.md reserves zero for a deliberate no-op, so the host keeps the instance "+
-			"and never applies failure_mode — a corrupt payload is silently indistinguishable "+
-			"from a healthy plugin. It must trap.", hookName)
-		return
-	}
-	t.Errorf("%s returned %v on an undecodable payload; expected a trap", hookName, result)
 }

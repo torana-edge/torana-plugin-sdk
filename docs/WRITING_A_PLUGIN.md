@@ -68,14 +68,14 @@ import (
 	"strings"
 
 	sdk "github.com/torana-edge/torana-plugin-sdk"
-	"github.com/torana-edge/torana-plugin-sdk/pb"
+	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
 
 func main() {}
 
 func init() {
 	// Register a hook to run before chat completion requests are forwarded upstream.
-	sdk.OnBeforeRequest(func(ctx context.Context, req *pb.ChatRequest) (*pb.ChatRequest, error) {
+	sdk.OnBeforeRequest(func(ctx context.Context, req *pbv2.ChatRequest) (sdk.RequestResult, error) {
 		modified := false
 
 		for _, msg := range req.Messages {
@@ -86,26 +86,29 @@ func init() {
 		}
 
 		if !modified {
-			return nil, nil // Return nil, nil if request was not modified
+			return sdk.PassRequest(), nil
 		}
-		return req, nil
+		return sdk.ReplaceRequest(req), nil
 	})
 }
 ```
 
 ### SDK Hook Signatures
 
-- `sdk.OnBeforeRequest(fn func(ctx context.Context, req *pb.ChatRequest) (*pb.ChatRequest, error))`
-- `sdk.OnAfterResponse(fn func(ctx context.Context, resp *pb.ChatRequest) (*pb.ChatRequest, error))`
-- `sdk.OnStreamChunk(fn func(ctx context.Context, chunk *pb.StreamEvent) (*pb.StreamEventResult, error))`
-- `sdk.OnHTTPRequest(fn func(ctx context.Context, req *pb.HttpRequest) (*pb.HttpResponse, error))`
-- `sdk.OnTick(fn func(ctx context.Context, tick *pb.TickRequest) (*pb.TickResult, error))`
+- `sdk.OnBeforeRequest(fn func(ctx context.Context, req *pbv2.ChatRequest) (sdk.RequestResult, error))`
+- `sdk.OnAfterResponse(fn func(ctx context.Context, resp *pbv2.ChatResponse, mutable bool) (sdk.ResponseResult, error))`
+- `sdk.OnStreamChunk(fn func(ctx context.Context, chunk *pbv2.StreamEvent) (sdk.StreamResult, error))`
+- `sdk.OnHTTPRequest(fn func(ctx context.Context, req *pbv2.HttpRequest) (sdk.HTTPResult, error))`
+- `sdk.OnTick(fn func(ctx context.Context, tick *pbv2.TickRequest) (sdk.TickResult, error))`
 
-Returning `nil` means pass-through in every case. For hooks whose result type
-has a `Handled` field (`StreamEventResult`, `HttpResponse`, `TickResult`) you
-must set it on any result you mean — an all-defaults protobuf message encodes to
-zero bytes, which the host reads as "did nothing".
-
+Returning `Pass*` (or a zero result) means pass-through. Prefer the typed
+constructors (`PassRequest`, `ReplaceRequest`, `PassEvent`, `SuppressEvent`,
+`EmitEvents`, `ServeHTTP`, `TickIdle`, …). A non-nil error traps the guest so
+the host applies `failure_mode`. Verdicts (`BlockRequest`, `RespondRequest`,
+`RouteRequest`, `SetIdentity`) are attributed host calls — invalid arguments
+and protocol failures panic; classified host refusals are fire-and-forget.
+Typed `HostCall(cmd, args)` returns `(value, *HostError, error)`. For stream
+tool-call assembly prefer `sdk.NewStreamHandler().OnToolCall(...).Register()`.
 ---
 
 ## 4. Writing the Manifest (`plugin.json`)
@@ -119,7 +122,7 @@ Every plugin directory must contain a `plugin.json` file describing its metadata
   "name": "my-custom-plugin",
   "version": "0.1.0",
   "description": "Redacts sensitive terms from user prompts",
-  "abi_version": "v1",
+  "abi_version": "v2",
   "minimum_torana_version": "0.1.0",
   "failure_mode": "block",
   "repository": "https://github.com/your-org/my-custom-plugin",
@@ -139,7 +142,9 @@ Every plugin directory must contain a `plugin.json` file describing its metadata
 - **`id`**: Stable machine-readable plugin identifier.
 - **`version`**: Semantic version string (e.g. `"0.1.0"`).
 - **`description`**: Human-readable description.
-- **`abi_version`**: Torana plugin ABI version. Use `"v1"`.
+- **`abi_version`**: Torana plugin ABI version. Go guests use `"v2"`
+  (`run_hook` / `supported_hooks`). Rust guests remain `"v1"` until Migration C —
+  do not mix a v2 export surface with a v1 manifest (or the reverse).
 - **`minimum_torana_version`**: Optional oldest compatible Torana Edge version.
 - **`maximum_torana_version`**: Optional newest compatible Torana Edge version.
 - **`failure_mode`**: Recommended operator policy, `"pass"` or `"block"`.
@@ -152,13 +157,12 @@ Every plugin directory must contain a `plugin.json` file describing its metadata
   - **`name`**: Capability permission string.
   - **`description`**: Rationale for requesting the capability.
 
-Manifest permissions are requests, not grants. In production, Torana only
-exposes capabilities present in an operator-owned approval, and that approval
-is bound to the digest of the exact `plugin.json`, `plugin.wasm`,
-`schema.json`, and optional `agent.json` bundle. A changed bundle must be
-reviewed and approved again.
-The Control Plane shows the digest and requested capabilities before enabling a
-plugin.
+Manifest permissions are an all-or-nothing set under v2: every declared
+permission must be approved against the exact bundle digest, or the plugin
+cannot be enabled. Approvals are bound to the digest of `plugin.json`,
+`plugin.wasm`, `schema.json`, and optional `agent.json`. A changed bundle must
+be reviewed and approved again. The Control Plane shows the digest and
+requested capabilities before enabling a plugin.
 
 Torana Edge currently has no product release version. A development or
 commit-SHA build therefore skips the optional minimum/maximum product-version
@@ -169,19 +173,18 @@ order comes only from the operator's `plugins.order`; manifests do not have a
 hook `priority` field.
 
 Wazero's linear-memory isolation, execution timeout, and memory limit sandbox
-untrusted guest code. Capability approvals separately limit which Torana host
-operations the guest may invoke; they do not make an approved plugin trustworthy
-or review its request/response transformation logic. Only install artifacts you
-intend to run, grant the minimum requested subset, and prefer `failure_mode:
-"block"` when silent pass-through would be unsafe.
+untrusted guest code. Capability approvals limit which Torana host operations
+the guest may invoke; they do not make an approved plugin trustworthy or review
+its transformation logic. Only install artifacts you intend to run, approve the
+full declared permission set (there is no per-capability subset under v2), and
+prefer `failure_mode: "block"` when silent pass-through would be unsafe.
 
 ### Available Capability Strings
 
-Every capability must be requested in `plugin.json` **and** granted by the
-operator against your exact bundle digest. A denied capability does not trap —
-host calls return `{"status":"error","message":"permission denied"}` and SDK
-helpers surface it as an error, so a plugin should degrade rather than assume.
-
+Every capability must be requested in `plugin.json` **and** approved with the
+rest of the declared set against your exact bundle digest. A denied capability
+does not trap — typed host calls return `*HostError`, transitional JSON helpers
+surface permission denied — so a plugin should degrade rather than assume.
 **Verdicts — change what happens to the request**
 
 | Capability | SDK | Description |
@@ -446,7 +449,7 @@ package main
 import (
 	"testing"
 
-	"github.com/torana-edge/torana-plugin-sdk/pb"
+	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 	"github.com/torana-edge/torana-plugin-sdk/sdktest"
 )
 
@@ -457,16 +460,16 @@ func TestBlocksOnDetectedPII(t *testing.T) {
 		return `{"completion":"EMAIL"}`, nil
 	})
 
-	res := h.BeforeRequest(&pb.ChatRequest{Messages: []*pb.Message{
+	res := h.BeforeRequest(&pbv2.ChatRequest{Messages: []*pbv2.Message{
 		{Role: "tool", Content: "contact: someone@example.com"},
 	}})
 
-	if res.Block == nil {
+	if len(h.BlockCalls()) == 0 {
 		t.Fatal("expected the request to be blocked")
 	}
+	_ = res
 }
 ```
-
 Your plugin's `init()` has already registered its handlers by the time a test
 runs, so there is nothing to wire up.
 
@@ -474,9 +477,10 @@ runs, so there is nothing to wire up.
 
 | | |
 |---|---|
-| `BeforeRequest` / `AfterResponse` | dispatch a request hook; the result reports `PassedThrough` and any `Block`/`Respond`/`Route` verdict |
-| `StreamChunk` / `StreamChunks` | dispatch one event, or a whole sequence, returning what the host would forward |
+| `BeforeRequest` / `AfterResponse` | dispatch a request/response hook; results report `PassedThrough` only on success with a zero-byte result. `AfterResponse` exposes `Replacement` (guest proposal) and `Applied` (only when `mutable`) |
+| `StreamChunk` | dispatch one stream event; prefer `StreamHandler` in the plugin under test for tool assembly |
 | `HTTPRequest` / `Tick` | dispatch the remaining hooks |
+| `BlockCalls` / `Calls` | assert attributed verdicts and other host calls |
 | `SetConfig` | what `sdk.PluginConfig()` returns |
 | `StubHostCall` / `DenyPermission` | override one command, or make it answer with the host's permission-denied envelope |
 | `SeedCache` / `SeedState` / `Cache` / `State` | start from a warm store, and assert what the plugin wrote |

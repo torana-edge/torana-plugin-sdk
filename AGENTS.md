@@ -15,7 +15,9 @@ Order to read in:
 1. [`docs/WASM_PLUGIN_GUIDE.md`](docs/WASM_PLUGIN_GUIDE.md) — the boundary, and why it fails quietly
 2. [`docs/WRITING_A_PLUGIN.md`](docs/WRITING_A_PLUGIN.md) — scaffold, manifest, build, install
 3. [`docs/PLUGIN_SEMANTICS.md`](docs/PLUGIN_SEMANTICS.md) — hook behaviour, protobuf decoding, prompt-cache and tool-output safety
-4. [`ABI.md`](ABI.md) — the normative contract
+4. [`ABI.md`](ABI.md) — frozen **v1** trampoline contract (Rust until Migration C).
+   Go authors: use `pb/v2` + this PR's guides; do not follow ABI.md as the
+   active Go ABI.
 
 If you are writing in **Go or Rust**, use the SDK in this repository rather than
 reimplementing the boundary. It already handles allocation, the packed return,
@@ -25,11 +27,12 @@ and protobuf round-tripping.
 
 Both produce a plugin that loads, reports healthy, and is wrong.
 
-**Returning zero means pass-through.** Any result you build must set its
-`handled` flag — `StreamEventResult`, `HttpResponse`, and `TickResult` all have
-one. An all-defaults protobuf message encodes to *zero bytes*, which the host
-cannot distinguish from "this plugin did nothing". If your plugin acts but the
-host ignores it, this is why.
+**Returning zero means pass-through.** On the **v2** Go path, use typed
+result constructors (`PassRequest`, `ReplaceRequest`, `PassEvent`,
+`SuppressEvent`, `EmitEvents`, `ServeHTTP`, `TickIdle`, …). A zero/empty
+`HookResult` encodes to zero bytes and means pass-through. Do **not** look for
+v1 `handled` flags — those exist only on the v1 trampoline still used by Rust
+guests. A non-nil handler error traps so the host applies `failure_mode`.
 
 **Anything you write into a request must be deterministic.** The same input must
 produce byte-identical output every time. Writing a timestamp, a random value, or

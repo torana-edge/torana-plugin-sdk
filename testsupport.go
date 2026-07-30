@@ -7,32 +7,16 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/torana-edge/torana-plugin-sdk/pb"
+	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
 
-// TestHost is the seam the sdktest package drives. It is deliberately not part
-// of the plugin-authoring API: this file is excluded from wasip1 builds, so
-// none of it exists in a compiled plugin.
-//
-// Plugin authors should use the sdktest package rather than these directly.
+// TestHost is the seam the sdktest package drives. Excluded from wasip1 builds.
 type TestHost struct {
-	HostCall func(cmd, args string) (string, error)
+	HostCall func(cmd string, args []byte) ([]byte, error)
 	Log      func(msg string, level int32)
 	Metric   func(name string, metricType int32, value float64, labels map[string]string)
 }
 
-// The installed host has to be ambient: a plugin calls sdk.HostCall() with no
-// host parameter, because on wasip1 the host is the runtime itself. That makes
-// it process-global here, which is only safe if exactly one host is installed
-// at a time.
-//
-// So installation is scoped to a single dispatch and serialized. Two t.Parallel()
-// tests would otherwise overwrite each other's host and race on cleanup —
-// assertions would run against the wrong fake, intermittently.
-//
-// The pointer is atomic rather than mutex-guarded because the handler reads it
-// from inside the dispatch that holds dispatchMu; taking the same lock to read
-// would deadlock.
 var (
 	testHostPtr atomic.Pointer[TestHost]
 	dispatchMu  sync.Mutex
@@ -40,18 +24,8 @@ var (
 
 func testHostOf() *TestHost { return testHostPtr.Load() }
 
-// ResetRegistrations clears every registered hook.
-//
-// Registering a hook twice panics, which is right for a plugin — it registers
-// once at startup — but makes a test suite unusable without this: one test
-// registering a handler would poison every later one.
 func ResetRegistrations() { resetRegistrations() }
 
-// WithTestHost installs h for the duration of fn and restores the previous
-// host afterwards, serializing against any other dispatch.
-//
-// Dispatches from parallel tests serialize rather than interleave. That is the
-// point: the SDK surface a plugin calls has no way to name which host it means.
 func WithTestHost(h *TestHost, fn func()) {
 	dispatchMu.Lock()
 	defer dispatchMu.Unlock()
@@ -63,50 +37,45 @@ func WithTestHost(h *TestHost, fn func()) {
 	fn()
 }
 
-// The registered-handler accessors below let sdktest dispatch a plugin's hooks
-// in-process. They return nil when the plugin did not register that hook,
-// which is what makes "declared a hook but never registered a handler"
-// detectable from a test — in production that combination silently does
-// nothing forever.
-
-func RegisteredBeforeRequest() func(context.Context, *pb.ChatRequest) (*pb.ChatRequest, error) {
-	return chatRequestHandler
+func RegisteredBeforeRequest() func(context.Context, *pbv2.ChatRequest) (RequestResult, error) {
+	return beforeRequestHandler
 }
 
-func RegisteredAfterResponse() func(context.Context, *pb.ChatRequest) (*pb.ChatRequest, error) {
-	return chatResponseHandler
+func RegisteredAfterResponse() func(context.Context, *pbv2.ChatResponse, bool) (ResponseResult, error) {
+	return afterResponseHandler
 }
 
-func RegisteredStreamChunk() func(context.Context, *pb.StreamEvent) (*pb.StreamEventResult, error) {
+func RegisteredStreamChunk() func(context.Context, *pbv2.StreamEvent) (StreamResult, error) {
 	return streamChunkHandler
 }
 
-func RegisteredHTTPRequest() func(context.Context, *pb.HttpRequest) (*pb.HttpResponse, error) {
+func RegisteredHTTPRequest() func(context.Context, *pbv2.HttpRequest) (HTTPResult, error) {
 	return httpRequestHandler
 }
 
-func RegisteredTick() func(context.Context, *pb.TickRequest) (*pb.TickResult, error) {
+func RegisteredTick() func(context.Context, *pbv2.TickRequest) (TickResult, error) {
 	return tickHandler
 }
 
-// RegisteredHooks names the hooks the plugin registered a handler for, in ABI
-// order. sdktest uses it to cross-check against plugin.json.
 func RegisteredHooks() []string {
 	var out []string
-	if chatRequestHandler != nil {
-		out = append(out, "run_before_request")
+	if beforeRequestHandler != nil {
+		out = append(out, HookBeforeRequest)
 	}
-	if chatResponseHandler != nil {
-		out = append(out, "run_after_response")
+	if afterResponseHandler != nil {
+		out = append(out, HookAfterResponse)
 	}
 	if streamChunkHandler != nil {
-		out = append(out, "run_on_stream_chunk")
+		out = append(out, HookStreamChunk)
 	}
 	if httpRequestHandler != nil {
-		out = append(out, "run_on_http_request")
+		out = append(out, HookHTTPRequest)
 	}
 	if tickHandler != nil {
-		out = append(out, "run_on_tick")
+		out = append(out, HookTick)
 	}
 	return out
 }
+
+// RegisteredHookBitmap is the supported_hooks value derived from registrations.
+func RegisteredHookBitmap() pbv2.HookBitmap { return registeredHookBitmap() }

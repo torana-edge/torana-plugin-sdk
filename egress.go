@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/torana-edge/torana-plugin-sdk/pb"
+	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -90,7 +90,7 @@ type SendRequestOptions struct {
 }
 
 // SendRequest sends req to a configured provider and returns the raw response.
-func SendRequest(req *pb.ChatRequest, opts SendRequestOptions) (EgressResult, error) {
+func SendRequest(req *pbv2.ChatRequest, opts SendRequestOptions) (EgressResult, error) {
 	if req == nil {
 		return EgressResult{}, fmt.Errorf("torana: request is required")
 	}
@@ -115,7 +115,7 @@ func SendRequest(req *pb.ChatRequest, opts SendRequestOptions) (EgressResult, er
 		return EgressResult{}, err
 	}
 
-	res, err := HostCall("torana_send_request", string(payload))
+	res, err := hostCallString("torana_send_request", string(payload))
 	if err != nil {
 		return EgressResult{}, err
 	}
@@ -166,7 +166,7 @@ func credentialHint(status int) string {
 // plugin state. Protobuf rather than JSON so a stored prefix round-trips
 // byte-exactly — a re-encoding that reorders or drops a field would change the
 // prefix and defeat whatever the plugin was preserving it for.
-func EncodeRequest(req *pb.ChatRequest) (string, error) {
+func EncodeRequest(req *pbv2.ChatRequest) (string, error) {
 	if req == nil {
 		return "", fmt.Errorf("torana: request is required")
 	}
@@ -178,12 +178,12 @@ func EncodeRequest(req *pb.ChatRequest) (string, error) {
 }
 
 // DecodeRequest is the inverse of EncodeRequest.
-func DecodeRequest(encoded string) (*pb.ChatRequest, error) {
+func DecodeRequest(encoded string) (*pbv2.ChatRequest, error) {
 	raw, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return nil, fmt.Errorf("torana: decode request: %w", err)
 	}
-	var req pb.ChatRequest
+	var req pbv2.ChatRequest
 	if err := proto.Unmarshal(raw, &req); err != nil {
 		return nil, fmt.Errorf("torana: decode request: %w", err)
 	}

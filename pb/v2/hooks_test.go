@@ -178,7 +178,7 @@ func TestTickRequestIdIsNotRequestScoped(t *testing.T) {
 	// env.meta_*). That must not flip RequestScoped — the hook kind decides.
 	in := &v2.HookInput{
 		RequestId: 99,
-		Payload: &v2.HookInput_TickRequest{TickRequest: &v2.TickRequest{TickId: 1}},
+		Payload:   &v2.HookInput_TickRequest{TickRequest: &v2.TickRequest{TickId: 1}},
 	}
 	if in.HookOf().RequestScoped() {
 		t.Fatal("a tick envelope with a synthetic scope id is still not request-scoped")

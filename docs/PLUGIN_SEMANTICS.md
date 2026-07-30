@@ -31,7 +31,8 @@ plugins" from one place — they live in their own repositories.
 ## 2. Protobuf Structure and Torana's Payload
 
 Torana uses a strict Protobuf contract for all WASM boundaries to prevent schema corruption.
-When Torana invokes `run_before_request`, it passes serialized bytes of `pb.ChatRequest`. 
+When Torana invokes `run_before_request`, it passes serialized bytes of
+`pb/v2.ChatRequest` inside a `HookInput` frame.
 
 The Go plugin SDK handles all the underlying memory allocation, pointer packing, and Protobuf marshaling for you.
 
@@ -39,7 +40,7 @@ The Go plugin SDK handles all the underlying memory allocation, pointer packing,
 
 ### The Correct Unmarshaling Pattern
 
-Use the generated `pb` types and the `sdk` handlers. The SDK automatically unmarshals the request and marshals the response, fully preserving unknown fields under the hood.
+Use the generated `pb/v2` types and the `sdk` handlers. The SDK automatically unmarshals the request and marshals the response, fully preserving unknown fields under the hood.
 
 ```go
 package main
@@ -47,11 +48,13 @@ package main
 import (
 	"context"
 	sdk "github.com/torana-edge/torana-plugin-sdk"
-	"github.com/torana-edge/torana-plugin-sdk/pb"
+	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
 
-func main() {
-	sdk.OnBeforeRequest(func(ctx context.Context, req *pb.ChatRequest) (*pb.ChatRequest, error) {
+func main() {}
+
+func init() {
+	sdk.OnBeforeRequest(func(ctx context.Context, req *pbv2.ChatRequest) (sdk.RequestResult, error) {
 		modified := false
 
 		// Extract and modify the fields you care about
@@ -60,52 +63,50 @@ func main() {
 			modified = true
 		}
 
-		// Short-circuit if no modifications are needed
 		if !modified {
-			return nil, nil
+			return sdk.PassRequest(), nil
 		}
-
-		// Return the modified request
-		return req, nil
+		return sdk.ReplaceRequest(req), nil
 	})
 }
 ```
 
 ## 3. Stream Hooks: Suppress, Replace, Fan-Out
 
-`run_on_stream_chunk` handlers return a `*pb.StreamEventResult` describing
-what replaces the input event. Use the SDK helpers:
+`run_on_stream_chunk` handlers return a typed `sdk.StreamResult`. Use the helpers:
 
 | Helper | Meaning |
 |---|---|
-| `sdk.Pass()` (or `nil`) | forward the event unchanged |
-| `sdk.Suppress()` | drop the event from the stream |
-| `sdk.Replace(ev)` | substitute the event |
-| `sdk.Emit(ev1, ev2, …)` | fan out multiple events in its place |
+| `sdk.PassEvent()` | forward the event unchanged |
+| `sdk.SuppressEvent()` | drop the event from the stream |
+| `sdk.EmitEvents(ev…)` | substitute one or more events |
 
-The canonical buffering pattern — reassemble fragmented tool-call arguments,
-process them once, and emit a single complete delta:
+Prefer `sdk.NewStreamHandler()` for tool-call assembly and text rewrites: it
+buffers via host metadata (`meta_append` / `meta_set`), never Go-object state,
+and re-emits the exact assembled original on callback errors (fail-open).
 
 ```go
-sdk.OnStreamChunk(func(ctx context.Context, chunk *pb.StreamEvent) (*pb.StreamEventResult, error) {
-	if td := chunk.GetToolCallDelta(); td != nil {
-		bufferFragment(td) // via env.meta_set — state is request-scoped
-		return sdk.Suppress(), nil
-	}
-	if te := chunk.GetToolCallEnd(); te != nil {
-		full := processArgs(assembleFragments(te.Index))
-		// Fragments were suppressed, so the complete args MUST be emitted
-		// here, followed by the ToolCallEnd itself.
-		return sdk.Emit(deltaEvent(te.Index, full), chunk), nil
-	}
-	return sdk.Pass(), nil
-})
+sdk.NewStreamHandler().
+	OnToolCall(func(ctx context.Context, call sdk.ToolCall) (sdk.ToolCallAction, error) {
+		// call.Arguments is fully assembled JSON
+		return sdk.ReplaceToolArguments(`{"rewritten":true}`), nil
+	}).
+	OnTextDelta(func(ctx context.Context, text string) (sdk.TextAction, error) {
+		return sdk.PassText(), nil
+	}).
+	Register()
 ```
+
+Raw `OnStreamChunk` handlers that return a non-nil error trap so `failure_mode`
+applies. Once buffering begins, never forward only the current fragment — fail
+closed or re-emit the assembled original.
 
 **State scoping rules:**
 - `env.meta_set` / `env.meta_get` — plugin-private AND request-scoped. Other
   plugins and other requests can never see these keys. Setting an empty
   value deletes the key.
+- `env.meta_append` (permission `env.meta_set`) — append/read tool-call argument
+  fragments by block index.
 - `env.cache_set` / `env.cache_get` — shared across plugins and requests
   (with a TTL). Use for cross-request handoff, e.g. the compactor caches
   intents by `tool_call_id` that the keyword_compactor reads next turn.
@@ -155,13 +156,21 @@ obtainable from a host call that resolves its own configuration.
 
 Two more things:
 
-- **Set `handled = true`** on any `TickResult` you mean. An all-defaults message
-  encodes to zero bytes, which the host reads as "did nothing". Return `nil` when
-  there genuinely is nothing to do.
-- **`failure_mode` does not apply.** It selects whether a failing plugin blocks
-  or passes *the request*, and there is no request. A trapping tick is logged and
-  the other plugins' ticks continue.
+- **Return `TickIdle()`** (or a zero `TickResult`) when there is nothing to do.
+  Intentional work uses `TickDid(...)`. A zero-byte `HookResult` means
+  pass-through — there is no v1 `handled` flag on the Go v2 path.
+- **`failure_mode` and ticks — current host behaviour, changing in Migration B.**
+  Today the host ignores `failure_mode` for ticks: a trapping tick is logged and
+  the other plugins' ticks continue. The reasoning was that `failure_mode`
+  selects whether a failing plugin blocks or passes *the request*, and a tick
+  has no request.
 
+  This is **pre-Migration-B behaviour, not the v2 contract.** v1's tick handling
+  was one of the inconsistencies v2 set out to remove — `ABI.md` claimed
+  `failure_mode` was universal while `run_on_tick` ignored it and
+  `run_on_http_request` mapped every error to 503. Migration B makes failure
+  handling uniform across hooks. Do not write a plugin that relies on a trapping
+  tick being silently tolerated.
 Ticks require the `env.background_tick` permission and are off unless the
 operator also sets `plugins.runtime.tick_interval_seconds`. Both are deliberate:
 code running outside any request is work an operator cannot see in a trace, and

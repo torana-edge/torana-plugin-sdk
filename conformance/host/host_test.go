@@ -2,49 +2,162 @@ package host
 
 import (
 	"context"
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
-	"github.com/torana-edge/torana-plugin-sdk/pb"
+	plugin_sdk "github.com/torana-edge/torana-plugin-sdk"
+	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 	"google.golang.org/protobuf/proto"
 )
 
-func TestCompiledGuestsImplementBeforeRequestABI(t *testing.T) {
-	artifacts := []struct {
-		name string
-		env  string
-	}{
-		{name: "go", env: "TORANA_GO_GUEST"},
-		{name: "rust", env: "TORANA_RUST_GUEST"},
+func TestCompiledGoGuestImplementsRunHook(t *testing.T) {
+	path := os.Getenv("TORANA_GO_GUEST")
+	if path == "" {
+		t.Log("TORANA_GO_GUEST unset; exercised in CI")
+		return
 	}
-	for _, artifact := range artifacts {
-		path := os.Getenv(artifact.env)
-		if path == "" {
-			t.Logf("%s is unset; that compiled guest is exercised in CI", artifact.env)
-			continue
+	exerciseRunHook(t, path)
+}
+
+// manifestHooks reads the hook set a guest's manifest declares.
+//
+// This is the ONLY source of truth the bitmap is checked against. Deriving the
+// expectation from the guest's own registrations, or from a helper that also
+// produced the bitmap, tests that two pieces of code agree with each other and
+// says nothing about whether the shipped manifest matches the shipped wasm.
+func manifestHooks(t *testing.T, path string) []pbv2.Hook {
+	t.Helper()
+	raw, err := os.ReadFile(resolveFromModuleRoot(t, path))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var m struct {
+		Hooks []struct {
+			Name string `json:"name"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("parse manifest: %v", err)
+	}
+	if len(m.Hooks) == 0 {
+		t.Fatalf("%s declares no hooks", path)
+	}
+	var hooks []pbv2.Hook
+	for _, h := range m.Hooks {
+		hk, ok := plugin_sdk.ManifestHookName(h.Name)
+		if !ok {
+			t.Fatalf("unknown hook %q in %s", h.Name, path)
 		}
-		t.Run(artifact.name, func(t *testing.T) {
-			exerciseBeforeRequest(t, path)
-		})
+		hooks = append(hooks, hk)
+	}
+	return hooks
+}
+
+// resolveFromModuleRoot makes a relative manifest path mean the same thing
+// however the test is invoked.
+//
+// `go test` runs with the working directory set to the package, so a path like
+// examples/go-logger/plugin.json resolves under conformance/host and fails.
+// Anchoring to the module root keeps the CI env vars readable and lets the
+// same command work locally.
+func resolveFromModuleRoot(t *testing.T, path string) string {
+	t.Helper()
+	if filepath.IsAbs(path) {
+		return path
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return filepath.Join(dir, path)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("no go.mod above %s, cannot resolve %q", dir, path)
+		}
+		dir = parent
 	}
 }
 
-func exerciseBeforeRequest(t *testing.T, path string) {
+// TestGuestBitmapMatchesManifest is the real ABI-surface check: it reads
+// supported_hooks out of the BUILT guest and compares it with the hook set the
+// shipped manifest declares.
+//
+// The previous regression test derived its expectation from the manifest and
+// then validated it against the same manifest, so changing the Go logger's
+// registration from before-request to tick while leaving the manifest alone
+// passed — the exact drift it claimed to prevent. The conformance host only
+// checked the bitmap was non-zero.
+func TestGuestBitmapMatchesManifest(t *testing.T) {
+	guest := os.Getenv("TORANA_GO_GUEST")
+	manifest := os.Getenv("TORANA_GO_GUEST_MANIFEST")
+	if guest == "" || manifest == "" {
+		t.Log("TORANA_GO_GUEST/TORANA_GO_GUEST_MANIFEST unset; exercised in CI")
+		return
+	}
+	declared := manifestHooks(t, manifest)
+
+	ctx := context.Background()
+	runtime := wazero.NewRuntime(ctx)
+	t.Cleanup(func() { _ = runtime.Close(ctx) })
+	wasi_snapshot_preview1.MustInstantiate(ctx, runtime)
+	if err := instantiateEnvImports(ctx, runtime); err != nil {
+		t.Fatal(err)
+	}
+	wasmBytes, err := os.ReadFile(guest)
+	if err != nil {
+		t.Fatalf("read guest: %v", err)
+	}
+	module, err := runtime.InstantiateWithConfig(ctx, wasmBytes, wazero.NewModuleConfig())
+	if err != nil {
+		t.Fatalf("instantiate guest: %v", err)
+	}
+	if initialize := module.ExportedFunction("_initialize"); initialize != nil {
+		if _, err := initialize.Call(ctx); err != nil {
+			t.Fatalf("initialize guest: %v", err)
+		}
+	}
+	supported := module.ExportedFunction("supported_hooks")
+	if supported == nil {
+		t.Fatal("v2 guest is missing supported_hooks")
+	}
+	bits, err := supported.Call(ctx)
+	if err != nil || len(bits) != 1 {
+		t.Fatalf("supported_hooks: %v %v", bits, err)
+	}
+	got := pbv2.HookBitmap(bits[0])
+
+	want, err := pbv2.ExpectedBitmap(declared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("%s exports bitmap %#b, manifest %s declares %#b (hooks %v).\n"+
+			"The built guest and its shipped manifest disagree about which hooks it "+
+			"implements — one of the two is wrong.", guest, got, manifest, want, declared)
+	}
+	// ValidateManifestHooks rejects reserved and unassigned bits; run it on the
+	// value that came out of the wasm, not on one derived from the manifest.
+	if err := pbv2.ValidateManifestHooks(got, declared); err != nil {
+		t.Fatalf("exported bitmap is not a valid hook set: %v", err)
+	}
+}
+
+func exerciseRunHook(t *testing.T, path string) {
 	t.Helper()
 	ctx := context.Background()
 	runtime := wazero.NewRuntime(ctx)
 	t.Cleanup(func() { _ = runtime.Close(ctx) })
 	wasi_snapshot_preview1.MustInstantiate(ctx, runtime)
-	_, err := runtime.NewHostModuleBuilder("env").
-		NewFunctionBuilder().
-		WithFunc(func(context.Context, api.Module, int32, uint32, uint32) {}).
-		Export("log").
-		Instantiate(ctx)
-	if err != nil {
-		t.Fatalf("instantiate host imports: %v", err)
+	if err := instantiateEnvImports(ctx, runtime); err != nil {
+		t.Fatal(err)
 	}
 	wasmBytes, err := os.ReadFile(path)
 	if err != nil {
@@ -59,15 +172,32 @@ func exerciseBeforeRequest(t *testing.T, path string) {
 			t.Fatalf("initialize guest: %v", err)
 		}
 	}
-	payload, err := proto.Marshal(&pb.ChatRequest{Model: "conformance"})
+	payload, err := proto.Marshal(&pbv2.HookInput{
+		RequestId: 1,
+		Payload:   &pbv2.HookInput_ChatRequest{ChatRequest: &pbv2.ChatRequest{Model: "conformance"}},
+	})
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
 	alloc := module.ExportedFunction("alloc")
-	hook := module.ExportedFunction("run_before_request")
+	hook := module.ExportedFunction("run_hook")
 	dealloc := module.ExportedFunction("dealloc")
+	supported := module.ExportedFunction("supported_hooks")
 	if alloc == nil || hook == nil || dealloc == nil {
-		t.Fatal("guest is missing alloc, dealloc, or run_before_request")
+		t.Fatal("guest is missing alloc, dealloc, or run_hook")
+	}
+	if supported == nil {
+		t.Fatal("v2 guest is missing supported_hooks")
+	}
+	if module.ExportedFunction("run_before_request") != nil {
+		t.Fatal("v1 run_before_request must not remain after Migration A")
+	}
+	bits, err := supported.Call(ctx)
+	if err != nil || len(bits) != 1 {
+		t.Fatalf("supported_hooks: %v %v", bits, err)
+	}
+	if bits[0] == 0 {
+		t.Fatal("supported_hooks must not be zero for a live guest")
 	}
 	pointers, err := alloc.Call(ctx, uint64(len(payload)))
 	if err != nil || len(pointers) != 1 {
@@ -77,14 +207,29 @@ func exerciseBeforeRequest(t *testing.T, path string) {
 	if !module.Memory().Write(ptr, payload) {
 		t.Fatal("write guest input")
 	}
-	result, err := hook.Call(ctx, 1, uint64(ptr), uint64(len(payload)))
+	result, err := hook.Call(ctx, uint64(ptr), uint64(len(payload)))
 	if err != nil {
 		t.Fatalf("call hook: %v", err)
 	}
 	if len(result) != 1 || result[0] != 0 {
-		t.Fatalf("logger should pass through, got %v", result)
+		t.Fatalf("pass-through guest should return 0, got %v", result)
 	}
 	if _, err := dealloc.Call(ctx, uint64(ptr), uint64(len(payload))); err != nil {
 		t.Fatalf("dealloc: %v", err)
 	}
+}
+
+func instantiateEnvImports(ctx context.Context, runtime wazero.Runtime) error {
+	_, err := runtime.NewHostModuleBuilder("env").
+		NewFunctionBuilder().
+		WithFunc(func(context.Context, api.Module, int32, uint32, uint32) {}).
+		Export("log").
+		NewFunctionBuilder().
+		WithFunc(func(context.Context, api.Module, int32, uint32, uint32, float64, uint32, uint32) {}).
+		Export("emit_metric").
+		NewFunctionBuilder().
+		WithFunc(func(context.Context, api.Module, uint32, uint32, uint32, uint32) uint64 { return 0 }).
+		Export("host_call").
+		Instantiate(ctx)
+	return err
 }

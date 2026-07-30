@@ -101,7 +101,7 @@ func GetCachePricing(provider, model string) (CachePricing, error) {
 	if err != nil {
 		return CachePricing{}, err
 	}
-	res, err := HostCall("torana_cache_pricing", string(payload))
+	res, err := hostCallString("torana_cache_pricing", string(payload))
 	if err != nil {
 		return CachePricing{}, err
 	}

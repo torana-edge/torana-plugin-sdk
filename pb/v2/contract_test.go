@@ -443,7 +443,7 @@ func TestObservationalDispatchIsMarked(t *testing.T) {
 func TestHookInputEnvelopeShape(t *testing.T) {
 	in := &v2.HookInput{
 		RequestId: 42,
-		Payload: &v2.HookInput_ChatRequest{ChatRequest: &v2.ChatRequest{Model: "m"}},
+		Payload:   &v2.HookInput_ChatRequest{ChatRequest: &v2.ChatRequest{Model: "m"}},
 	}
 	raw, err := proto.Marshal(in)
 	if err != nil {

@@ -19,7 +19,7 @@
 //			return `{"completion":"EMAIL"}`, nil
 //		})
 //
-//		res := h.BeforeRequest(&pb.ChatRequest{Messages: []*pb.Message{
+//		res := h.BeforeRequest(&pbv2.ChatRequest{Messages: []*pbv2.Message{
 //			{Role: "tool", Content: "contact: someone@example.com"},
 //		}})
 //
@@ -43,7 +43,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	sdk "github.com/torana-edge/torana-plugin-sdk"
-	"github.com/torana-edge/torana-plugin-sdk/pb"
+	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
 
 // LogEntry is one captured sdk.Log call.
@@ -131,7 +131,7 @@ func New(t testing.TB) *Harness {
 	// Tests that register per-case call Reset() themselves.
 
 	h.host = &sdk.TestHost{
-		HostCall: h.hostCall,
+		HostCall: h.hostCallBytes,
 		Log: func(msg string, level int32) {
 			h.mu.Lock()
 			defer h.mu.Unlock()
@@ -172,9 +172,15 @@ func (h *Harness) StubHostCall(cmd string, fn func(args string) (string, error))
 }
 
 // DenyPermission makes cmd answer with the host's permission-denied envelope,
-// byte for byte, so a plugin's handling of a refused capability is testable.
+// so a plugin's handling of a refused capability is testable. Typed v2 commands
+// get a HostCallResult error arm; transitional JSON commands keep the legacy
+// denial string.
 func (h *Harness) DenyPermission(cmd string) *Harness {
 	return h.StubHostCall(cmd, func(string) (string, error) {
+		if typedHostReply(cmd) {
+			return string(hostCallResultError(
+				pbv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "permission denied")), nil
+		}
 		return `{"status":"error","message":"permission denied"}`, nil
 	})
 }
@@ -189,7 +195,7 @@ func (h *Harness) SetNow(ms int64) *Harness {
 }
 
 // SetOriginalRequest sets what env.original_request returns.
-func (h *Harness) SetOriginalRequest(req *pb.ChatRequest) *Harness {
+func (h *Harness) SetOriginalRequest(req *pbv2.ChatRequest) *Harness {
 	raw, err := proto.Marshal(req)
 	if err != nil {
 		h.t.Fatalf("sdktest: marshal original request: %v", err)
@@ -263,26 +269,131 @@ func (h *Harness) State(key string) (string, bool) {
 	return v, ok
 }
 
-func (h *Harness) hostCall(cmd, args string) (string, error) {
+func (h *Harness) hostCallBytes(cmd string, args []byte) ([]byte, error) {
 	h.mu.Lock()
 	stub := h.stubs[cmd]
 	h.mu.Unlock()
 
+	argsStr := string(args)
 	var res string
 	if stub != nil {
 		var err error
-		res, err = stub(args)
+		res, err = stub(argsStr)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
+	} else if typedHostReply(cmd) {
+		raw, err := h.builtinTyped(cmd, args)
+		if err != nil {
+			return nil, err
+		}
+		h.mu.Lock()
+		h.calls = append(h.calls, HostCallEntry{Command: cmd, Args: argsStr, Result: string(raw)})
+		h.mu.Unlock()
+		return raw, nil
 	} else {
-		res = h.builtin(cmd, args)
+		res = h.builtin(cmd, argsStr)
 	}
 
 	h.mu.Lock()
-	h.calls = append(h.calls, HostCallEntry{Command: cmd, Args: args, Result: res})
+	h.calls = append(h.calls, HostCallEntry{Command: cmd, Args: argsStr, Result: res})
 	h.mu.Unlock()
-	return res, nil
+	return []byte(res), nil
+}
+
+func typedHostReply(cmd string) bool {
+	switch cmd {
+	case "env.block_request", "env.respond_request", "env.route_request",
+		"env.set_identity", pbv2.MetaAppendCommand:
+		return true
+	default:
+		return false
+	}
+}
+
+func hostCallResultValue(value []byte) []byte {
+	raw, _ := proto.Marshal(&pbv2.HostCallResult{
+		Result: &pbv2.HostCallResult_Value{Value: value},
+	})
+	return raw
+}
+
+func hostCallResultError(code pbv2.ErrorCode, msg string) []byte {
+	raw, _ := proto.Marshal(&pbv2.HostCallResult{
+		Result: &pbv2.HostCallResult_Error{Error: &pbv2.HostError{Code: code, Message: msg}},
+	})
+	return raw
+}
+
+func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	switch cmd {
+	case "env.block_request":
+		var a pbv2.BlockRequestArgs
+		if err := proto.Unmarshal(args, &a); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid BlockRequestArgs"), nil
+		}
+		if err := a.Validate(); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+		}
+		return hostCallResultValue(nil), nil
+
+	case "env.respond_request":
+		var a pbv2.RespondRequestArgs
+		if err := proto.Unmarshal(args, &a); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid RespondRequestArgs"), nil
+		}
+		if err := a.Validate(); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+		}
+		return hostCallResultValue(nil), nil
+
+	case "env.route_request":
+		var a pbv2.RouteRequestArgs
+		if err := proto.Unmarshal(args, &a); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid RouteRequestArgs"), nil
+		}
+		if err := a.Validate(); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+		}
+		return hostCallResultValue(nil), nil
+
+	case "env.set_identity":
+		var a pbv2.SetIdentityArgs
+		if err := proto.Unmarshal(args, &a); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid SetIdentityArgs"), nil
+		}
+		if err := a.Validate(); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+		}
+		return hostCallResultValue(nil), nil
+
+	case pbv2.MetaAppendCommand:
+		var a pbv2.MetaAppendArgs
+		if err := proto.Unmarshal(args, &a); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid MetaAppendArgs"), nil
+		}
+		if err := a.Validate(); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+		}
+		key := "block:" + strconv.FormatInt(int64(a.BlockIndex), 10)
+		existing, present := h.meta[key]
+		// Mutate storage with amortized growth (string concat here is fine for tests).
+		if len(a.Fragment) != 0 {
+			if present {
+				h.meta[key] = existing + string(a.Fragment)
+			} else {
+				h.meta[key] = string(a.Fragment)
+			}
+			present = true
+			existing = h.meta[key]
+		}
+		val := pbv2.MetaAppendSuccessValue(a.Fragment, []byte(existing), present)
+		return hostCallResultValue(val), nil
+	}
+	return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_FOUND, "unknown typed command"), nil
 }
 
 // builtin answers the commands the harness can emulate faithfully. Replies
