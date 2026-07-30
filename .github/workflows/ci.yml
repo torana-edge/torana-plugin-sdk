@@ -27,9 +27,28 @@ jobs:
       - uses: bufbuild/buf-setup-action@v1
       - run: buf lint
       - if: github.event_name == 'pull_request'
+        name: ABI compatibility (v1 only, until v2 ships)
         run: |
+          # v1 is released — v0.2.0 is on the module proxy and plugins pin it —
+          # so a breaking change there is a broken plugin in someone's install.
+          #
+          # v2 is not released. It has no consumers, nothing pins it, and it is
+          # still being designed: the shape has already changed several times
+          # under review, correctly. Protecting it now would freeze mistakes
+          # rather than prevent them.
+          #
+          # The guard below removes this exemption automatically. Once a v0.3.x
+          # tag exists, v2 IS released and this fails until the --path
+          # restriction is dropped, so the exemption cannot outlive its reason.
+          if git tag -l 'v0.3.*' | grep -q .; then
+            echo "::error::A v0.3.x tag exists, so ABI v2 is released and must be" >&2
+            echo "::error::protected too. Remove the --path restriction in this step." >&2
+            exit 1
+          fi
           if git cat-file -e origin/main:proto/torana/v1/torana.proto 2>/dev/null; then
-            buf breaking --against 'https://github.com/torana-edge/torana-plugin-sdk.git#branch=main'
+            buf breaking \
+              --against 'https://github.com/torana-edge/torana-plugin-sdk.git#branch=main' \
+              --path proto/torana/v1
           else
             echo "No ABI baseline exists on main yet; this PR establishes v1."
           fi
