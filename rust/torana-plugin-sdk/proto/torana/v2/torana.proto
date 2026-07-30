@@ -132,17 +132,24 @@ message ChatRequest {
 // plugin could not observe. Four independent auditors reported that as a bug.
 message ChatResponse {
   // Model that actually answered, which may differ from the one requested.
+  // Governed by ir.model.write.
   string model = 1;
   // Provider's response id, empty when it reported none.
+  // Host-owned: forging it breaks correlation.
   string id = 2;
-  // The assistant's turn.
+  // The assistant's turn. Governed by ir.messages.write.assistant.
   Message message = 3;
+  // Governed by ir.messages.write.assistant (assistant-turn metadata).
   string finish_reason = 4;
+  // Host-owned: forging usage forges the bill / observability.
   Usage usage = 5;
   // Upstream HTTP status. Non-2xx responses reach observational hooks too.
+  // Host-owned: host-measured fact.
   int32 upstream_status = 6;
+  // Host-owned: host-measured latency.
   int64 duration_ms = 7;
   // Provider fields Torana did not model, verbatim.
+  // Governed by ir.params.write (same as request provider_extensions_json).
   bytes provider_extensions_json = 8;
 }
 
@@ -250,6 +257,10 @@ message ContentBlockStop {
 // StreamError may replace the remainder at any point. Everything else is
 // ordered as shown, and every block is opened and closed exactly once.
 message StreamEvent {
+  // Outbound mutations of these variants are governed by the cross-hook write
+  // grants (see capabilities_outbound.go): assistant content by
+  // ir.messages.write.assistant, structural ops / Suppress / StreamError by
+  // ir.stream.write, MessageStart.model by ir.model.write. usage is host-owned.
   oneof event {
     string text_delta = 1;
     string thinking_delta = 2;

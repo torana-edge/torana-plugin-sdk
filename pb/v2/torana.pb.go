@@ -680,17 +680,24 @@ func (x *ChatRequest) GetToranaMetaJson() []byte {
 type ChatResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Model that actually answered, which may differ from the one requested.
+	// Governed by ir.model.write.
 	Model string `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
 	// Provider's response id, empty when it reported none.
+	// Host-owned: forging it breaks correlation.
 	Id string `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
-	// The assistant's turn.
-	Message      *Message `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
-	FinishReason string   `protobuf:"bytes,4,opt,name=finish_reason,json=finishReason,proto3" json:"finish_reason,omitempty"`
-	Usage        *Usage   `protobuf:"bytes,5,opt,name=usage,proto3" json:"usage,omitempty"`
+	// The assistant's turn. Governed by ir.messages.write.assistant.
+	Message *Message `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	// Governed by ir.messages.write.assistant (assistant-turn metadata).
+	FinishReason string `protobuf:"bytes,4,opt,name=finish_reason,json=finishReason,proto3" json:"finish_reason,omitempty"`
+	// Host-owned: forging usage forges the bill / observability.
+	Usage *Usage `protobuf:"bytes,5,opt,name=usage,proto3" json:"usage,omitempty"`
 	// Upstream HTTP status. Non-2xx responses reach observational hooks too.
+	// Host-owned: host-measured fact.
 	UpstreamStatus int32 `protobuf:"varint,6,opt,name=upstream_status,json=upstreamStatus,proto3" json:"upstream_status,omitempty"`
-	DurationMs     int64 `protobuf:"varint,7,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+	// Host-owned: host-measured latency.
+	DurationMs int64 `protobuf:"varint,7,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
 	// Provider fields Torana did not model, verbatim.
+	// Governed by ir.params.write (same as request provider_extensions_json).
 	ProviderExtensionsJson []byte `protobuf:"bytes,8,opt,name=provider_extensions_json,json=providerExtensionsJson,proto3" json:"provider_extensions_json,omitempty"`
 	unknownFields          protoimpl.UnknownFields
 	sizeCache              protoimpl.SizeCache
@@ -1385,6 +1392,11 @@ func (x *ContentBlockStop) GetIndex() int32 {
 // ordered as shown, and every block is opened and closed exactly once.
 type StreamEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// Outbound mutations of these variants are governed by the cross-hook write
+	// grants (see capabilities_outbound.go): assistant content by
+	// ir.messages.write.assistant, structural ops / Suppress / StreamError by
+	// ir.stream.write, MessageStart.model by ir.model.write. usage is host-owned.
+	//
 	// Types that are valid to be assigned to Event:
 	//
 	//	*StreamEvent_TextDelta

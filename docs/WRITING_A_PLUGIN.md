@@ -189,6 +189,25 @@ helpers surface it as an error, so a plugin should degrade rather than assume.
 | `env.block_request` | `sdk.BlockRequest` | Reject the request with a provider-shaped error. |
 | `env.respond_request` | `sdk.RespondRequest` | Answer directly without going upstream. |
 | `env.route_request` | `sdk.RouteRequest` | Send the request to a different provider. |
+| `env.set_identity` | (v2 host call) | Override the rate-limit / identity key for this request. |
+
+**IR write grants — what a plugin may CHANGE**
+
+These apply across hooks for the same semantic area: rewriting assistant
+content on the response or stream path needs the same
+`ir.messages.write.assistant` grant as on the request path.
+
+| Capability | Covers |
+| --- | --- |
+| `ir.messages.write.{user,assistant,system,tool,developer,other}` | Message bodies of that role (request and response). |
+| `ir.tools.write` | Tool definitions on the request. |
+| `ir.model.write` | Model name (request, response, `MessageStart.model`). |
+| `ir.params.write` | Sampling params and provider extension blobs. |
+| `ir.stream.write` | Structural stream ops: Suppress, fan-out, block boundaries, emitting `StreamError`. |
+
+Some fields are host-owned (usage, upstream status, duration, response id) —
+changing them is a protocol violation, not a grantable edit. When
+`AfterResponse.mutable` is false, a `ReplaceResponse` is discarded by the host.
 
 **Reading the request**
 
