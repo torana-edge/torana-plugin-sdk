@@ -142,6 +142,12 @@ func (x *HookInput) Validate() error {
 		return fmt.Errorf("hook input is nil")
 	}
 	if x.HookOf() == Hook_HOOK_UNSPECIFIED {
+		// Same distinction as HookResult: a payload this build cannot name
+		// unmarshals with Payload nil and its bytes in unknown fields.
+		if len(x.ProtoReflect().GetUnknown()) != 0 {
+			return fmt.Errorf("hook input carries a payload this build does not " +
+				"recognise; it was produced by a newer ABI and cannot be dispatched")
+		}
 		return fmt.Errorf("hook input carries no payload, so there is no hook to dispatch")
 	}
 	if !x.payloadPresent() {
@@ -228,8 +234,21 @@ func (x *HookResult) ValidateFor(hook Hook) error {
 		return fmt.Errorf("hook result is nil")
 	}
 	if x.Action == nil {
-		// Indistinguishable on the wire from returning nothing, and means the
-		// same: leave the input alone.
+		// An action this build cannot name also unmarshals with Action nil —
+		// protobuf keeps it in unknown fields rather than failing. Accepting
+		// that as pass-through would silently DISCARD what a newer guest asked
+		// for, which is the failure mode ABI-minor evolution will produce as
+		// soon as an action is added: an older host must trap, not quietly do
+		// nothing.
+		//
+		// An empty frame has no unknown fields, so the two are distinguishable
+		// even though both leave Action nil.
+		if len(x.ProtoReflect().GetUnknown()) != 0 {
+			return fmt.Errorf("hook result carries an action this build does not " +
+				"recognise; it was produced by a newer ABI and cannot be honoured")
+		}
+		// Genuinely empty: indistinguishable on the wire from returning
+		// nothing, and means the same — leave the input alone.
 		return nil
 	}
 	if !x.actionPresent() {

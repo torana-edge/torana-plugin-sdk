@@ -1,8 +1,10 @@
 package v2_test
 
 import (
+	"strings"
 	"testing"
 
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	v2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
@@ -691,5 +693,87 @@ func TestTypedNilWrappersAreRejectedNotPanics(t *testing.T) {
 				t.Error("a typed-nil wrapper was accepted")
 			}
 		})
+	}
+}
+
+// An action this build cannot name must trap, not be discarded.
+//
+// Protobuf keeps an unrecognised field in the message's unknown fields rather
+// than failing, so a future action unmarshals with Action nil — exactly like a
+// genuinely empty frame. Treating both as pass-through would mean an older host
+// silently DOES NOTHING when a newer guest asked for something, which is the
+// failure ABI-minor evolution produces the first time an action is added.
+//
+// The two are distinguishable: an empty frame has no unknown fields.
+func TestUnknownActionIsRejectedNotIgnored(t *testing.T) {
+	// Field 99, length-delimited: a future action.
+	raw := protowire.AppendTag(nil, 99, protowire.BytesType)
+	raw = protowire.AppendBytes(raw, nil)
+
+	var r v2.HookResult
+	if err := proto.Unmarshal(raw, &r); err != nil {
+		t.Fatalf("a future action must still decode: %v", err)
+	}
+	if r.Action != nil {
+		t.Fatal("precondition: an unknown action leaves Action nil")
+	}
+	if len(r.ProtoReflect().GetUnknown()) == 0 {
+		t.Fatal("precondition: the unknown action should be retained in unknown fields")
+	}
+
+	for _, hook := range allHooks {
+		if err := r.ValidateFor(hook); err == nil {
+			t.Errorf("%v: an unrecognised action validated as pass-through, so a newer "+
+				"guest's request would be silently discarded", hook)
+		}
+	}
+
+	// A genuinely empty frame still passes — the distinction has to hold in
+	// both directions, or every pass-through becomes an error.
+	if err := (&v2.HookResult{}).ValidateFor(v2.Hook_HOOK_BEFORE_REQUEST); err != nil {
+		t.Errorf("an empty frame must remain pass-through: %v", err)
+	}
+}
+
+// The same distinction on the way in: a payload this build cannot name must be
+// refused rather than read as "no payload".
+func TestUnknownInputPayloadIsRejected(t *testing.T) {
+	raw := protowire.AppendTag(nil, 99, protowire.BytesType)
+	raw = protowire.AppendBytes(raw, nil)
+
+	var in v2.HookInput
+	if err := proto.Unmarshal(raw, &in); err != nil {
+		t.Fatal(err)
+	}
+	err := in.Validate()
+	if err == nil {
+		t.Fatal("an unrecognised payload was accepted")
+	}
+	// The message must say WHY, because "carries no payload" would send the
+	// reader looking for a host bug rather than a version mismatch.
+	if !strings.Contains(err.Error(), "does not recognise") {
+		t.Errorf("error does not identify this as a version mismatch: %v", err)
+	}
+}
+
+// A frame carrying a known action AND unknown fields is still honoured: the
+// action is understood, and the extra bytes are additive fields a newer ABI
+// attached to it.
+func TestKnownActionWithUnknownFieldsIsAccepted(t *testing.T) {
+	known, err := proto.Marshal(&v2.HookResult{
+		Action: &v2.HookResult_TickOutcome{TickOutcome: &v2.TickOutcome{Actions: 1}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra := protowire.AppendTag(nil, 99, protowire.VarintType)
+	extra = protowire.AppendVarint(extra, 7)
+
+	var r v2.HookResult
+	if err := proto.Unmarshal(append(known, extra...), &r); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ValidateFor(v2.Hook_HOOK_ON_TICK); err != nil {
+		t.Fatalf("a known action with additive unknown fields must be honoured: %v", err)
 	}
 }
