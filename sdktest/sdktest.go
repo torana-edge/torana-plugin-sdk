@@ -92,6 +92,16 @@ type Harness struct {
 	StateConfigured bool
 }
 
+// Reset clears every registered hook handler.
+//
+// Most plugin tests never need this, and calling it in one would unregister the
+// plugin: a plugin registers in init(), once per process, and those handlers
+// must survive the whole run.
+//
+// It is for tests that register handlers THEMSELVES — typically the SDK's own,
+// which install a different handler per case.
+func Reset() { sdk.ResetRegistrations() }
+
 // New builds a fake host for this test. Registrations made by the plugin's
 // init() are already in place by the time a test runs, so no wiring is needed.
 //
@@ -111,6 +121,15 @@ func New(t testing.TB) *Harness {
 		now:             func() int64 { return time.Now().UnixMilli() },
 		StateConfigured: true,
 	}
+	// New deliberately does NOT clear registrations.
+	//
+	// A real plugin registers in init(), which runs once per process. Clearing
+	// them on cleanup would mean the first test passes and every later one
+	// fails with "no handler registered" — breaking sdktest for exactly the case
+	// it exists to serve, while helping only tests that register dynamically.
+	//
+	// Tests that register per-case call Reset() themselves.
+
 	h.host = &sdk.TestHost{
 		HostCall: h.hostCall,
 		Log: func(msg string, level int32) {
