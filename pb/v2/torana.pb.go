@@ -680,12 +680,14 @@ func (x *ChatRequest) GetToranaMetaJson() []byte {
 type ChatResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Model that actually answered, which may differ from the one requested.
-	// Governed by ir.model.write.
+	// Host-owned: observed fact — request ir.model.write does not authorise
+	// forging it.
 	Model string `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
 	// Provider's response id, empty when it reported none.
 	// Host-owned: forging it breaks correlation.
 	Id string `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
-	// The assistant's turn. Governed by ir.messages.write.assistant.
+	// The assistant's turn. Content governed by ir.messages.write.assistant;
+	// role and opaque signatures inside Message are host-owned.
 	Message *Message `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
 	// Governed by ir.messages.write.assistant (assistant-turn metadata).
 	FinishReason string `protobuf:"bytes,4,opt,name=finish_reason,json=finishReason,proto3" json:"finish_reason,omitempty"`
@@ -697,7 +699,7 @@ type ChatResponse struct {
 	// Host-owned: host-measured latency.
 	DurationMs int64 `protobuf:"varint,7,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
 	// Provider fields Torana did not model, verbatim.
-	// Governed by ir.params.write (same as request provider_extensions_json).
+	// Host-owned: opaque provider output — not request ir.params.write.
 	ProviderExtensionsJson []byte `protobuf:"bytes,8,opt,name=provider_extensions_json,json=providerExtensionsJson,proto3" json:"provider_extensions_json,omitempty"`
 	unknownFields          protoimpl.UnknownFields
 	sizeCache              protoimpl.SizeCache
@@ -1392,10 +1394,11 @@ func (x *ContentBlockStop) GetIndex() int32 {
 // ordered as shown, and every block is opened and closed exactly once.
 type StreamEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Outbound mutations of these variants are governed by the cross-hook write
-	// grants (see capabilities_outbound.go): assistant content by
-	// ir.messages.write.assistant, structural ops / Suppress / StreamError by
-	// ir.stream.write, MessageStart.model by ir.model.write. usage is host-owned.
+	// Outbound mutations compose topology + semantics (see capabilities_outbound.go):
+	// Suppress/fan-out/kind-change need ir.stream.write IN ADDITION to every
+	// content section changed/removed/added; host-owned variants (usage,
+	// message_start, signature_delta) cannot be suppressed or forged. A
+	// one-for-one TextDelta rewrite needs only ir.messages.write.assistant.
 	//
 	// Types that are valid to be assigned to Event:
 	//

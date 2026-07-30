@@ -173,11 +173,32 @@ fn my_tick_handler(tick: &pb::TickRequest) -> Result<Option<pb::TickResult>, Box
 }
 ```
 
-## 6. Summary Checklist for AI Agents
+## 6. IR write grants (request, response, stream)
+
+Declare every `ir.*.write` capability you need in `plugin.json`. Content grants
+reuse the same names across hooks where the authority matches (assistant text
+on request and response). Topology is separate:
+
+* `ir.stream.write` is **additive**. Suppress, fan-out, event-kind change, and
+  block-boundary edits need it **plus** every content section you change,
+  remove, or add. It cannot alone authorise removing or forging host-owned
+  facts (usage, message_start, signature_delta, response model/id/role, opaque
+  signatures, provider extension blobs).
+* A one-for-one `TextDelta` rewrite needs only `ir.messages.write.assistant`.
+* `ir.model.write` / `ir.params.write` cover **request** selection/params, not
+  observed response facts.
+
+## 7. Summary Checklist for AI Agents
 1. Did I use a real allocator (not a bump allocator)?
 2. Did I implement both `alloc` and `dealloc`?
 3. Did I pack the return pointer and size into a `u64`?
 4. Did I return `0` for passthrough?
 5. Did I parse and serialize Protobuf properly within the memory bounds?
-6. If I implemented `run_on_tick`, did I set `handled = true` on any result I
+6. Did I declare every `env.*` and `ir.*.write` capability I call or need?
+7. If I Suppress or fan-out stream events, did I request `ir.stream.write`
+   **and** the content grants for what I remove/add (and avoid host-owned
+   events)?
+8. Did I avoid forging host-owned response facts (usage, model-that-answered,
+   signatures, provider extension blobs)?
+9. If I implemented `run_on_tick`, did I set `handled = true` on any result I
    actually meant, and avoid relying on request-scoped host calls?

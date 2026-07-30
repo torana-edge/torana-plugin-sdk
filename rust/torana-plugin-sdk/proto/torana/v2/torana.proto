@@ -132,12 +132,14 @@ message ChatRequest {
 // plugin could not observe. Four independent auditors reported that as a bug.
 message ChatResponse {
   // Model that actually answered, which may differ from the one requested.
-  // Governed by ir.model.write.
+  // Host-owned: observed fact — request ir.model.write does not authorise
+  // forging it.
   string model = 1;
   // Provider's response id, empty when it reported none.
   // Host-owned: forging it breaks correlation.
   string id = 2;
-  // The assistant's turn. Governed by ir.messages.write.assistant.
+  // The assistant's turn. Content governed by ir.messages.write.assistant;
+  // role and opaque signatures inside Message are host-owned.
   Message message = 3;
   // Governed by ir.messages.write.assistant (assistant-turn metadata).
   string finish_reason = 4;
@@ -149,7 +151,7 @@ message ChatResponse {
   // Host-owned: host-measured latency.
   int64 duration_ms = 7;
   // Provider fields Torana did not model, verbatim.
-  // Governed by ir.params.write (same as request provider_extensions_json).
+  // Host-owned: opaque provider output — not request ir.params.write.
   bytes provider_extensions_json = 8;
 }
 
@@ -257,10 +259,11 @@ message ContentBlockStop {
 // StreamError may replace the remainder at any point. Everything else is
 // ordered as shown, and every block is opened and closed exactly once.
 message StreamEvent {
-  // Outbound mutations of these variants are governed by the cross-hook write
-  // grants (see capabilities_outbound.go): assistant content by
-  // ir.messages.write.assistant, structural ops / Suppress / StreamError by
-  // ir.stream.write, MessageStart.model by ir.model.write. usage is host-owned.
+  // Outbound mutations compose topology + semantics (see capabilities_outbound.go):
+  // Suppress/fan-out/kind-change need ir.stream.write IN ADDITION to every
+  // content section changed/removed/added; host-owned variants (usage,
+  // message_start, signature_delta) cannot be suppressed or forged. A
+  // one-for-one TextDelta rewrite needs only ir.messages.write.assistant.
   oneof event {
     string text_delta = 1;
     string thinking_delta = 2;

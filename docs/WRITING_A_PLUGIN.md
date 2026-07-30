@@ -193,21 +193,21 @@ helpers surface it as an error, so a plugin should degrade rather than assume.
 
 **IR write grants — what a plugin may CHANGE**
 
-These apply across hooks for the same semantic area: rewriting assistant
-content on the response or stream path needs the same
-`ir.messages.write.assistant` grant as on the request path.
+These apply across hooks for the same semantic area where the authority is
+actually the same (assistant text/thinking/tool arguments). Observed response
+facts (answering model, response id, usage, role, provider extension blobs,
+opaque signatures) are **host-owned** — request `ir.model.write` /
+`ir.params.write` do not authorise forging them.
 
 | Capability | Covers |
 | --- | --- |
-| `ir.messages.write.{user,assistant,system,tool,developer,other}` | Message bodies of that role (request and response). |
+| `ir.messages.write.{user,assistant,system,tool,developer,other}` | Message **content** of that role (request and response). Not response role or signatures. |
 | `ir.tools.write` | Tool definitions on the request. |
-| `ir.model.write` | Model name (request, response, `MessageStart.model`). |
-| `ir.params.write` | Sampling params and provider extension blobs. |
-| `ir.stream.write` | Structural stream ops: Suppress, fan-out, block boundaries, emitting `StreamError`. |
+| `ir.model.write` | **Request** model selection only. |
+| `ir.params.write` | Request sampling params and request provider extension blobs. |
+| `ir.stream.write` | **Additive** topology grant: Suppress, fan-out, kind change, block boundaries. Required **in addition to** content grants for what was changed/removed/added. Cannot alone alter or remove host-owned facts (e.g. Suppress of `Usage` is forbidden). |
 
-Some fields are host-owned (usage, upstream status, duration, response id) —
-changing them is a protocol violation, not a grantable edit. When
-`AfterResponse.mutable` is false, a `ReplaceResponse` is discarded by the host.
+Stream composition: `required = topology (when cardinality/order/boundaries change) ∪ every semantic section changed/removed/added`. A one-for-one `TextDelta` rewrite needs only `ir.messages.write.assistant`. When `AfterResponse.mutable` is false, a `ReplaceResponse` is discarded by the host.
 
 **Reading the request**
 
