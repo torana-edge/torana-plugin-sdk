@@ -161,12 +161,13 @@ and the caller's credential do not exist on a tick — those calls return empty
 rather than failing. Everything a tick needs from durable storage must come from
 the plugin's own state or from a host call that resolves its own config.
 
-**Tick metadata (v1 vs v2).** Under the **v1 trampoline**, treat `env.meta_*` as
-unavailable on ticks (no request scope). Under the **v2 contract**, the host
-supplies a synthetic `request_id` scope: there is still no caller request or
-original request/response, but plugin-private `env.meta_*` is available for that
-tick scope and is cleared when the tick ends (`EndRequest`). See
-`HookInput.request_id` comments in `proto/torana/v2/torana.proto`.
+**Tick metadata (v1 and v2).** Both ABIs give the tick a synthetic execution
+scope id (`request_id` / `reqID`). Plugin-private `env.meta_*` is available
+inside that scope and is cleared when the tick ends (`EndRequest`). There is
+still no caller request and no original request/response. The v1↔v2 difference
+is envelope/export shape (`TickResult.handled` vs `HookResult.tick_outcome`),
+not metadata availability. See `HookInput.request_id` in
+`proto/torana/v2/torana.proto` and the host tick path in torana-edge.
 
 **You must set `handled = true` (v1).** An all-defaults protobuf message encodes
 to zero bytes, and the host reads zero bytes as "did nothing". A plugin that
@@ -212,8 +213,12 @@ authority matches (assistant text on request and response). Topology is separate
 * Opaque signatures (`thinking_signature`, `ToolCall.signature`,
   `ToolCallRef.signature`, `signature_delta`) bind provider tokens to content.
   Mutating signed content while leaving the signature in place is invalid; the
-  host must reject that mutation or clear the signature. `signature_delta` is
-  cross-event — the stream assembler/host verifier owns that pairing.
+  host must reject that mutation or clear the signature. Streamed tool-call
+  signatures also cover the matching block's assembled `arguments_delta`.
+  `signature_delta` is cross-event — the stream assembler/host verifier owns
+  that pairing.
+* `StreamError` is host-owned. Do not forge provider-looking upstream failures;
+  suppress under topology, trap under `failure_mode`, or use attributed verdicts.
 
 ## 7. Summary Checklist for AI Agents
 1. Did I use a real allocator (not a bump allocator)?
@@ -230,5 +235,5 @@ authority matches (assistant text on request and response). Topology is separate
    signatures, provider extension blobs), and avoid leaving stale signatures on
    mutated signed content?
 9. If I implemented a tick: v1 must set `handled = true` on any intentional
-   result; under v2, `env.meta_*` is available on the synthetic tick scope, but
-   original request/response and caller credentials still are not.
+   result; `env.meta_*` works on the synthetic tick scope in both ABIs, but
+   original request/response and caller credentials still do not.

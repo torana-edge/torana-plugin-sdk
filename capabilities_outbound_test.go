@@ -35,9 +35,11 @@ func TestRecursiveOutboundInventory(t *testing.T) {
 	for _, root := range roots {
 		walkOutboundInventory(t, root.ProtoReflect().Descriptor(), seen)
 	}
-	for name := range outboundDelegateTargets {
-		if _, ok := OutboundDelegateTargets(name); !ok {
-			t.Errorf("delegate %q missing from OutboundDelegateTargets", name)
+	for _, d := range []DelegateKind{
+		DelegateRequest, DelegateResponse, DelegateStream, DelegateHTTP, DelegateTick,
+	} {
+		if _, ok := OutboundDelegateTargets(d); !ok {
+			t.Errorf("delegate %v missing from OutboundDelegateTargets", d)
 		}
 	}
 }
@@ -50,40 +52,49 @@ func walkOutboundInventory(t *testing.T, desc protoreflect.MessageDescriptor, se
 	}
 	seen[name] = true
 
-	policy, ok := OutboundPolicyFor(name)
-	if !ok {
-		t.Errorf("%s is reachable from an outbound root but has no field policy — "+
-			"register it in outboundMessageFieldPolicies (empty map if fieldless)", name)
+	if !OutboundMessageRegistered(name) {
+		t.Errorf("%s is reachable from an outbound root but has no field policy", name)
 		return
+	}
+	fieldNames, _ := OutboundFieldNames(name)
+	seenFields := map[string]bool{}
+	for _, fname := range fieldNames {
+		seenFields[fname] = true
 	}
 
 	fields := desc.Fields()
-	seenFields := map[string]bool{}
+	protoFields := map[string]protoreflect.FieldDescriptor{}
 	for i := 0; i < fields.Len(); i++ {
 		fd := fields.Get(i)
+		protoFields[string(fd.Name())] = fd
 		fname := string(fd.Name())
-		seenFields[fname] = true
-		p, ok := policy[fname]
+		p, ok := OutboundFieldPolicy(name, fname)
 		if !ok {
-			t.Errorf("%s.%s belongs to no policy — assign Section, HostOwned, Delegate, or Topology",
-				name, fname)
+			t.Errorf("%s.%s belongs to no policy", name, fname)
 			continue
 		}
-		validateFieldPolicy(t, name, fname, p)
+		if err := p.validate(); err != nil {
+			t.Errorf("%s.%s: %v", name, fname, err)
+			continue
+		}
 
-		if p.Kind == PolicyDelegate {
-			targets, ok := OutboundDelegateTargets(p.Delegate)
+		if p.Kind() == PolicyDelegate {
+			d, ok := p.Delegate()
 			if !ok {
-				t.Errorf("%s.%s delegates to unknown verifier %q", name, fname, p.Delegate)
+				t.Errorf("%s.%s Delegate without kind", name, fname)
+				continue
+			}
+			targets, ok := OutboundDelegateTargets(d)
+			if !ok {
+				t.Errorf("%s.%s delegates to unknown verifier %v", name, fname, d)
 				continue
 			}
 			for _, target := range targets {
-				if _, ok := OutboundPolicyFor(target); !ok {
-					t.Errorf("%s.%s delegates to %s but that message has no policy registry",
+				if !OutboundMessageRegistered(target) {
+					t.Errorf("%s.%s delegates to %s but that message has no policy",
 						name, fname, target)
 					continue
 				}
-				// Resolve via a throwaway message of that type when possible.
 				walkDelegateTarget(t, target, seen)
 			}
 			continue
@@ -93,48 +104,26 @@ func walkOutboundInventory(t *testing.T, desc protoreflect.MessageDescriptor, se
 			continue
 		}
 		child := fd.Message()
-		if _, ok := OutboundPolicyFor(child.FullName()); ok {
+		if OutboundMessageRegistered(child.FullName()) {
 			walkOutboundInventory(t, child, seen)
 			continue
 		}
-		t.Errorf("%s.%s points at unregistered nested message %s — "+
-			"add it to outboundMessageFieldPolicies", name, fname, child.FullName())
+		t.Errorf("%s.%s points at unregistered nested message %s", name, fname, child.FullName())
 	}
-	for fname := range policy {
-		if !seenFields[fname] {
+	for fname := range seenFields {
+		if _, ok := protoFields[fname]; !ok {
 			t.Errorf("%s.%s is mapped but no longer exists in the proto", name, fname)
 		}
 	}
-}
-
-func validateFieldPolicy(t *testing.T, msg protoreflect.FullName, field string, p FieldPolicy) {
-	t.Helper()
-	switch p.Kind {
-	case PolicySection:
-		if p.Section == "" || !IsWritePermission(string(p.Section)) {
-			t.Errorf("%s.%s Section policy maps to %q, which is not a write grant", msg, field, p.Section)
+	for fname := range protoFields {
+		if !seenFields[fname] {
+			t.Errorf("%s.%s belongs to no policy", name, fname)
 		}
-		if p.Section == SectionStreamWrite {
-			t.Errorf("%s.%s uses PolicySection for ir.stream.write — use PolicyTopology", msg, field)
-		}
-	case PolicyTopology:
-		if p.Section != SectionStreamWrite {
-			t.Errorf("%s.%s Topology policy must use ir.stream.write, got %q", msg, field, p.Section)
-		}
-	case PolicyHostOwned:
-		// ok
-	case PolicyDelegate:
-		if p.Delegate == "" {
-			t.Errorf("%s.%s Delegate policy has empty verifier name", msg, field)
-		}
-	default:
-		t.Errorf("%s.%s has unknown PolicyKind %d", msg, field, p.Kind)
 	}
 }
 
 func walkDelegateTarget(t *testing.T, name protoreflect.FullName, seen map[protoreflect.FullName]bool) {
 	t.Helper()
-	// Build descriptors from known generated types.
 	var msg proto.Message
 	switch name {
 	case "torana.v2.ChatResponse":
@@ -153,7 +142,7 @@ func walkDelegateTarget(t *testing.T, name protoreflect.FullName, seen map[proto
 }
 
 func TestHookResultActionsAreHonestDelegates(t *testing.T) {
-	want := map[string]string{
+	want := map[string]DelegateKind{
 		"replace_request":  DelegateRequest,
 		"replace_response": DelegateResponse,
 		"emit_events":      DelegateStream,
@@ -162,131 +151,270 @@ func TestHookResultActionsAreHonestDelegates(t *testing.T) {
 		"suppress":         DelegateStream,
 	}
 	for field, delegate := range want {
-		p := HookResultActionPolicies[field]
-		if p.Kind != PolicyDelegate || p.Delegate != delegate {
-			t.Errorf("HookResult.%s: want Delegate(%s), got kind=%d delegate=%q",
-				field, delegate, p.Kind, p.Delegate)
+		p, ok := OutboundFieldPolicy("torana.v2.HookResult", field)
+		if !ok {
+			t.Fatalf("missing HookResult.%s", field)
+		}
+		got, ok := p.Delegate()
+		if p.Kind() != PolicyDelegate || !ok || got != delegate {
+			t.Errorf("HookResult.%s: want Delegate(%v), got kind=%v delegate=%v",
+				field, delegate, p.Kind(), got)
 		}
 		if p.IsHostOwned() {
 			t.Errorf("HookResult.%s must not be host-owned", field)
 		}
 	}
-	events := StreamEventsFieldPolicies["events"]
-	if events.Kind != PolicyDelegate || events.Delegate != DelegateStream {
-		t.Fatalf("StreamEvents.events must Delegate(stream), got kind=%d %q", events.Kind, events.Delegate)
+	events, ok := OutboundFieldPolicy("torana.v2.StreamEvents", "events")
+	if !ok {
+		t.Fatal("missing StreamEvents.events")
+	}
+	d, ok := events.Delegate()
+	if events.Kind() != PolicyDelegate || !ok || d != DelegateStream {
+		t.Fatalf("StreamEvents.events must Delegate(stream), got kind=%v %v", events.Kind(), d)
 	}
 }
 
 func TestObservedResponseFactsAreHostOwned(t *testing.T) {
 	for _, field := range []string{"model", "id", "usage", "upstream_status", "duration_ms", "provider_extensions_json"} {
-		if !ChatResponseFieldPolicies[field].IsHostOwned() {
+		p, _ := OutboundFieldPolicy("torana.v2.ChatResponse", field)
+		if !p.IsHostOwned() {
 			t.Errorf("ChatResponse.%s must be host-owned", field)
 		}
 	}
-	if !ResponseMessageFieldPolicies["role"].IsHostOwned() {
-		t.Fatal("response message.role must be host-owned")
+	mustHost := []struct{ msg, field string }{
+		{"torana.v2.Message", "role"},
+		{"torana.v2.Message", "thinking_signature"},
+		{"torana.v2.ToolCall", "signature"},
+		{"torana.v2.MessageStart", "model"},
+		{"torana.v2.ToolCallRef", "signature"},
+		{"torana.v2.StreamEvent", "signature_delta"},
+		{"torana.v2.StreamEvent", "usage"},
+		{"torana.v2.StreamEvent", "error"},
+		{"torana.v2.StreamError", "code"},
+		{"torana.v2.StreamError", "message"},
 	}
-	if !ResponseMessageFieldPolicies["thinking_signature"].IsHostOwned() {
-		t.Fatal("thinking_signature must be host-owned")
+	for _, tc := range mustHost {
+		p, ok := OutboundFieldPolicy(protoreflect.FullName(tc.msg), tc.field)
+		if !ok || !p.IsHostOwned() {
+			t.Errorf("%s.%s must be host-owned", tc.msg, tc.field)
+		}
 	}
-	if !ResponseToolCallFieldPolicies["signature"].IsHostOwned() {
-		t.Fatal("ToolCall.signature must be host-owned")
-	}
-	if !MessageStartFieldPolicies["model"].IsHostOwned() {
-		t.Fatal("MessageStart.model must be host-owned")
-	}
-	if !ToolCallRefFieldPolicies["signature"].IsHostOwned() {
-		t.Fatal("ToolCallRef.signature must be host-owned")
-	}
-	if !StreamEventVariantPolicies["signature_delta"].IsHostOwned() {
-		t.Fatal("signature_delta must be host-owned")
-	}
-	if !StreamEventVariantPolicies["usage"].IsHostOwned() {
-		t.Fatal("usage variant must be host-owned")
-	}
-	if ToolCallDeltaFieldPolicies["index"].Kind != PolicyTopology {
+	idx, _ := OutboundFieldPolicy("torana.v2.ToolCallDelta", "index")
+	if idx.Kind() != PolicyTopology {
 		t.Fatal("ToolCallDelta.index must be topology")
+	}
+}
+
+func TestFieldPolicyRejectsInvalidStates(t *testing.T) {
+	cases := []struct {
+		name string
+		p    FieldPolicy
+	}{
+		{"zero", FieldPolicy{}},
+		{"unknown kind", FieldPolicy{kind: PolicyKind(99)}},
+		{"section empty", FieldPolicy{kind: PolicySection}},
+		{"section topology name", FieldPolicy{kind: PolicySection, section: SectionStreamWrite}},
+		{"section with delegate", FieldPolicy{kind: PolicySection, section: SectionMessagesAssistant, delegate: DelegateRequest}},
+		{"host-owned with section", FieldPolicy{kind: PolicyHostOwned, section: SectionMessagesAssistant}},
+		{"host-owned with delegate", FieldPolicy{kind: PolicyHostOwned, delegate: DelegateStream}},
+		{"delegate unspecified", FieldPolicy{kind: PolicyDelegate}},
+		{"delegate unknown", FieldPolicy{kind: PolicyDelegate, delegate: DelegateKind(99)}},
+		{"delegate with section", FieldPolicy{kind: PolicyDelegate, delegate: DelegateStream, section: SectionStreamWrite}},
+		{"topology wrong section", FieldPolicy{kind: PolicyTopology, section: SectionMessagesAssistant}},
+		{"topology with delegate", FieldPolicy{kind: PolicyTopology, section: SectionStreamWrite, delegate: DelegateResponse}},
+	}
+	for _, tc := range cases {
+		if err := tc.p.validate(); err == nil {
+			t.Errorf("%s: expected validation error", tc.name)
+		}
+	}
+	if err := SectionPolicy(SectionMessagesAssistant).validate(); err != nil {
+		t.Fatalf("valid SectionPolicy: %v", err)
+	}
+	if err := HostOwnedPolicy().validate(); err != nil {
+		t.Fatalf("valid HostOwnedPolicy: %v", err)
+	}
+	if err := TopologyPolicy().validate(); err != nil {
+		t.Fatalf("valid TopologyPolicy: %v", err)
+	}
+	if err := DelegatePolicy(DelegateStream).validate(); err != nil {
+		t.Fatalf("valid DelegatePolicy: %v", err)
+	}
+}
+
+func TestOutboundPolicyAccessorsAreCopies(t *testing.T) {
+	p, ok := OutboundFieldPolicy("torana.v2.ChatResponse", "usage")
+	if !ok || !p.IsHostOwned() {
+		t.Fatal("usage should be host-owned")
+	}
+	p.kind = PolicySection
+	p.section = SectionMessagesAssistant
+	again, _ := OutboundFieldPolicy("torana.v2.ChatResponse", "usage")
+	if !again.IsHostOwned() {
+		t.Fatal("mutating returned FieldPolicy must not affect registry")
+	}
+
+	names, ok := OutboundFieldNames("torana.v2.ChatResponse")
+	if !ok || len(names) == 0 {
+		t.Fatal("expected field names")
+	}
+	names[0] = "mutated"
+	names2, _ := OutboundFieldNames("torana.v2.ChatResponse")
+	if names2[0] == "mutated" {
+		t.Fatal("OutboundFieldNames must return a copy")
+	}
+
+	targets, ok := OutboundDelegateTargets(DelegateStream)
+	if !ok || len(targets) == 0 {
+		t.Fatal("expected stream targets")
+	}
+	targets[0] = "mutated"
+	targets2, _ := OutboundDelegateTargets(DelegateStream)
+	if targets2[0] == "mutated" {
+		t.Fatal("OutboundDelegateTargets must return a copy")
+	}
+
+	bindings := AllSignatureBindings()
+	bindings[0].SignatureField = "mutated"
+	bindings[0].Content[0].Field = "mutated"
+	againB := AllSignatureBindings()
+	if againB[0].SignatureField == "mutated" || againB[0].Content[0].Field == "mutated" {
+		t.Fatal("AllSignatureBindings must return a deep copy")
+	}
+
+	cases := StreamMutationContractCases()
+	cases[0].ID = "mutated"
+	againC := StreamMutationContractCases()
+	if againC[0].ID == "mutated" {
+		t.Fatal("StreamMutationContractCases must return a copy")
 	}
 }
 
 func TestSignatureBindingsPinned(t *testing.T) {
 	byMsg := map[protoreflect.FullName]SignatureBinding{}
-	for _, b := range SignatureBindings {
+	for _, b := range AllSignatureBindings() {
 		byMsg[b.Message] = b
-		policy, ok := OutboundPolicyFor(b.Message)
-		if !ok && b.Message != "torana.v2.StreamEvent" {
-			t.Errorf("SignatureBinding for unknown message %s", b.Message)
-			continue
-		}
-		if b.Message == "torana.v2.StreamEvent" {
-			if b.CrossEventNote == "" {
-				t.Fatal("signature_delta binding must document cross-event handling")
-			}
-			if !StreamEventVariantPolicies["signature_delta"].IsHostOwned() {
-				t.Fatal("signature_delta must stay host-owned")
-			}
-			continue
-		}
-		sig, ok := policy[b.SignatureField]
-		if !ok || !sig.IsHostOwned() {
-			t.Errorf("%s.%s must be host-owned", b.Message, b.SignatureField)
-		}
-		for _, c := range b.ContentFields {
-			cp, ok := policy[c]
-			if !ok {
-				t.Errorf("%s content field %s missing from policy", b.Message, c)
-				continue
-			}
-			if cp.Kind != PolicySection {
-				t.Errorf("%s.%s should be a content Section (signed content), got kind %d",
-					b.Message, c, cp.Kind)
-			}
+		if err := b.validate(); err != nil {
+			t.Errorf("%v", err)
 		}
 	}
-	for _, want := range []protoreflect.FullName{
-		"torana.v2.Message", "torana.v2.ToolCall", "torana.v2.ToolCallRef", "torana.v2.StreamEvent",
-	} {
-		if _, ok := byMsg[want]; !ok {
-			t.Errorf("missing SignatureBinding for %s", want)
+
+	msg := byMsg["torana.v2.Message"]
+	if msg.SignatureField != "thinking_signature" {
+		t.Fatal("Message binding missing")
+	}
+	assertSameContent(t, msg, "thinking", "redacted_thinking")
+
+	tc := byMsg["torana.v2.ToolCall"]
+	assertSameContent(t, tc, "id", "name", "arguments_json")
+
+	ref := byMsg["torana.v2.ToolCallRef"]
+	if ref.SignatureField != "signature" {
+		t.Fatal("ToolCallRef binding missing")
+	}
+	assertSameContent(t, ref, "id", "name")
+	foundArgs := false
+	for _, c := range ref.Content {
+		if c.Message == "torana.v2.ToolCallDelta" && c.Field == "arguments_delta" {
+			foundArgs = true
+		}
+	}
+	if !foundArgs {
+		t.Fatal("ToolCallRef.signature must bind cross-event ToolCallDelta.arguments_delta")
+	}
+
+	sig := byMsg["torana.v2.StreamEvent"]
+	if sig.SignatureField != "signature_delta" {
+		t.Fatal("signature_delta binding missing")
+	}
+	cross := 0
+	for _, c := range sig.Content {
+		if c.Message != "" && c.Message != sig.Message {
+			cross++
+		}
+	}
+	if cross == 0 {
+		t.Fatal("signature_delta must list cross-event content refs")
+	}
+
+	p, _ := OutboundFieldPolicy("torana.v2.ToolCallRef", "signature")
+	if !p.IsHostOwned() {
+		t.Fatal("ToolCallRef.signature must be host-owned")
+	}
+	args, _ := OutboundFieldPolicy("torana.v2.ToolCallDelta", "arguments_delta")
+	if args.Kind() != PolicySection {
+		t.Fatal("arguments_delta must remain a content section (binding is separate)")
+	}
+}
+
+func assertSameContent(t *testing.T, b SignatureBinding, fields ...string) {
+	t.Helper()
+	got := map[string]bool{}
+	for _, c := range b.Content {
+		if c.Message == "" || c.Message == b.Message {
+			got[c.Field] = true
+		}
+	}
+	for _, f := range fields {
+		if !got[f] {
+			t.Errorf("%s.%s missing same-message content %s", b.Message, b.SignatureField, f)
 		}
 	}
 }
 
-func TestStreamCompositionContractIsDocumented(t *testing.T) {
-	// Migration B will implement the field-aware diff. These pins record the
-	// cases an approximate whole-variant helper got wrong, so the real
-	// verifier must cover them.
-	cases := []struct {
-		name string
-		// Expected Migration B outcomes (documented, not computed here).
-		needTopology bool
-		needAssistant bool
-		reject        bool // host-owned change/remove/add
-		identicalOK   bool // unchanged host-owned or content re-emit
-	}{
-		{"change only ToolCallDelta.index", true, false, false, false},
-		{"change ContentBlockStart.tool_call.signature", false, false, true, false},
-		{"identical Usage re-emit", false, false, false, true},
-		{"identical MessageStart re-emit", false, false, false, true},
-		{"identical signature_delta re-emit", false, false, false, true},
-		{"identical TextDelta re-emit", false, false, false, true},
-		{"unchanged MessageStop one-for-one", false, false, false, true},
-		{"unchanged ContentBlockStart one-for-one", false, false, false, true},
-		{"suppress Usage", false, false, true, false},
-		{"one-for-one TextDelta rewrite", false, true, false, false},
-		{"suppress TextDelta", true, true, false, false},
+func TestStreamMutationContractCases(t *testing.T) {
+	want := map[string]StreamMutationCase{
+		"change-only-tool-call-delta-index":                {ID: "change-only-tool-call-delta-index", NeedTopology: true},
+		"change-content-block-start-tool-call-signature":   {ID: "change-content-block-start-tool-call-signature", Reject: true},
+		"identical-usage-re-emit":                          {ID: "identical-usage-re-emit", IdenticalPassOK: true},
+		"identical-message-start-re-emit":                  {ID: "identical-message-start-re-emit", IdenticalPassOK: true},
+		"identical-signature-delta-re-emit":                {ID: "identical-signature-delta-re-emit", IdenticalPassOK: true},
+		"identical-text-delta-re-emit":                     {ID: "identical-text-delta-re-emit", IdenticalPassOK: true},
+		"unchanged-message-stop-one-for-one":               {ID: "unchanged-message-stop-one-for-one", IdenticalPassOK: true},
+		"unchanged-content-block-start-one-for-one":        {ID: "unchanged-content-block-start-one-for-one", IdenticalPassOK: true},
+		"suppress-usage":                                   {ID: "suppress-usage", Reject: true},
+		"one-for-one-text-delta-rewrite":                   {ID: "one-for-one-text-delta-rewrite", NeedAssistant: true},
+		"suppress-text-delta":                              {ID: "suppress-text-delta", NeedTopology: true, NeedAssistant: true},
+		"change-tool-call-delta-args-with-start-signature": {ID: "change-tool-call-delta-args-with-start-signature", Reject: true},
+		"forge-stream-error":                               {ID: "forge-stream-error", Reject: true},
 	}
-	if len(cases) < 10 {
-		t.Fatal("composition contract cases missing")
+	got := StreamMutationContractCases()
+	if len(got) != len(want) {
+		t.Fatalf("got %d cases, want %d", len(got), len(want))
 	}
-	// Structural pins the verifier will consult:
-	if ToolCallDeltaFieldPolicies["index"].Kind != PolicyTopology {
-		t.Fatal("index change must be topology in the registry")
+	for _, c := range got {
+		w, ok := want[c.ID]
+		if !ok {
+			t.Errorf("unexpected case %q", c.ID)
+			continue
+		}
+		if c != w {
+			t.Errorf("case %q: got %+v, want %+v", c.ID, c, w)
+		}
 	}
-	if !ToolCallRefFieldPolicies["signature"].IsHostOwned() {
-		t.Fatal("nested ToolCallRef.signature must be host-owned in the registry")
+	for id := range want {
+		found := false
+		for _, c := range got {
+			if c.ID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing case %q", id)
+		}
 	}
-	if !StreamEventVariantPolicies["usage"].IsHostOwned() {
-		t.Fatal("Usage payload is host-owned; identical re-emit is still a no-op at diff time")
+
+	idx, _ := OutboundFieldPolicy("torana.v2.ToolCallDelta", "index")
+	if idx.Kind() != PolicyTopology {
+		t.Fatal("index change case requires topology policy on ToolCallDelta.index")
+	}
+	sig, _ := OutboundFieldPolicy("torana.v2.ToolCallRef", "signature")
+	if !sig.IsHostOwned() {
+		t.Fatal("signature change case requires host-owned ToolCallRef.signature")
+	}
+	errEv, _ := OutboundFieldPolicy("torana.v2.StreamEvent", "error")
+	if !errEv.IsHostOwned() {
+		t.Fatal("forge-stream-error case requires host-owned StreamEvent.error")
 	}
 }

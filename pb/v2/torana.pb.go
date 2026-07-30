@@ -1395,10 +1395,12 @@ func (x *ContentBlockStop) GetIndex() int32 {
 type StreamEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Outbound mutations compose topology + semantics (see capabilities_outbound.go):
-	// Suppress/fan-out/kind-change need ir.stream.write IN ADDITION to every
-	// content section changed/removed/added; host-owned variants (usage,
-	// message_start, signature_delta) cannot be suppressed or forged. A
-	// one-for-one TextDelta rewrite needs only ir.messages.write.assistant.
+	// required = topology (cardinality/order/boundaries/kind) ∪ every semantic
+	// section changed/removed/added; any changed/removed/added host-owned fact
+	// rejects. Host-owned means immutable, not unreturnable — identical re-emit
+	// is a no-op. A one-for-one TextDelta rewrite needs only
+	// ir.messages.write.assistant. The recursive field-diff verifier is
+	// Migration B (needs a stream-path benchmark first).
 	//
 	// Types that are valid to be assigned to Event:
 	//
