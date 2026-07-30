@@ -2818,23 +2818,29 @@ func (x *SetIdentityArgs) GetIdentity() string {
 //	            permission from the command string; "env.meta_append" is not
 //	            an operator-facing capability)
 //	args:       MetaAppendArgs
-//	success:    HostCallResult.value = the complete buffer for block_index
-//	            after the atomic update (the bytes the StreamAssembler /
-//	            StreamHandler must re-emit on fail-open, including at
-//	            ContentBlockStop which carries no final fragment)
 //
-// Buffer semantics for key (request-scoped, private to the calling plugin,
-// keyed by block_index):
+// Success HostCallResult.value (constant-size ack vs read-back — do NOT return
+// the cumulative buffer after every delta; that would be O(total×fragments)
+// on the stream path):
 //
-//   - absent key + empty fragment  → no-op; value is empty bytes; key stays absent
+//   - non-empty fragment → empty success value after atomic append
+//   - empty fragment     → complete current buffer (absent → empty bytes)
+//
+// Host storage: under the request lock, append with amortized/in-place growth.
+// Do not copy the full prefix on every fragment solely to populate the reply.
+//
+// Buffer / key effects (request-scoped, private to the calling plugin, keyed
+// by block_index):
+//
+//   - absent key + empty fragment  → no-op/read; value empty; key stays absent
 //   - present key + empty fragment → no-op/read; value is the existing buffer
-//   - absent key + non-empty frag  → create; value is the fragment
-//   - present key + non-empty frag → append; value is prior∥fragment
+//   - absent key + non-empty frag  → create; value empty (ack)
+//   - present key + non-empty frag → append; value empty (ack)
 //
-// Empty fragment is the supported read path so ContentBlockStop (and any
-// fail-open re-emission) can retrieve the assembled original without a racy
-// meta_get / meta_set pair. Host execution of this command lands in Migration B;
-// the SDK contract here is what B and StreamHandler must implement identically.
+// Empty fragment is the ContentBlockStop / fail-open read path so the guest
+// can retrieve the assembled original without a racy meta_get / meta_set pair
+// and without paying for a full buffer copy on every delta. Host execution
+// lands in Migration B; see MetaAppendSuccessValue.
 type MetaAppendArgs struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Content-block index within the streamed message (ABI: unique, never

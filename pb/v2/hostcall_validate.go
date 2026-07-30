@@ -125,8 +125,8 @@ func (x *SetIdentityArgs) Validate() error {
 	return nil
 }
 
-// Validate reports whether MetaAppendArgs can be appended to request metadata.
-// Empty fragment is valid — it is the no-op/read path (see ApplyMetaAppend).
+// Validate reports whether MetaAppendArgs can be accepted.
+// Empty fragment is valid — it is the no-op/read path (see MetaAppendSuccessValue).
 func (x *MetaAppendArgs) Validate() error {
 	if x == nil {
 		return fmt.Errorf("meta append args are nil")

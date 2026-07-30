@@ -968,3 +968,22 @@ func TestDecodeHookResultRefusesMultipleKnownArms(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Repeated occurrences of the same known arm also last-wins under plain
+// unmarshal; DecodeHookResult must refuse them the same way as two different arms.
+func TestDecodeHookResultRefusesRepeatedSameArm(t *testing.T) {
+	tick, err := proto.Marshal(&v2.TickOutcome{Actions: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := protowire.AppendTag(nil, 5, protowire.BytesType)
+	raw = protowire.AppendBytes(raw, tick)
+	raw = protowire.AppendTag(raw, 5, protowire.BytesType)
+	raw = protowire.AppendBytes(raw, tick)
+
+	if _, err := v2.DecodeHookResult(raw); err == nil {
+		t.Fatal("DecodeHookResult must refuse a repeated known action arm")
+	} else if !strings.Contains(err.Error(), "more than one known oneof arm") {
+		t.Fatalf("want multi-arm error, got %v", err)
+	}
+}

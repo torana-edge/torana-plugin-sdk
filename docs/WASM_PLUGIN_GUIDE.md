@@ -243,8 +243,9 @@ are refused; multiple known arms follow last-wins (host-produced). Guest
 two known action arms cannot last-wins past the host. Verdict / `meta_append`
 arguments are `BlockRequestArgs`, `RespondRequestArgs`, `RouteRequestArgs`,
 `SetIdentityArgs`, and `MetaAppendArgs` in `proto/torana/v2/torana.proto`.
-Command `env.meta_append` is authorised by permission `env.meta_set`; success
-value is the complete buffer (`ApplyMetaAppend`).
+Command `env.meta_append` is authorised by permission `env.meta_set`; non-empty
+fragments ack with an empty success value, empty fragment reads back the
+complete buffer (`MetaAppendSuccessValue`).
 
 ## 7. Summary Checklist for AI Agents
 1. Did I use a real allocator (not a bump allocator)?

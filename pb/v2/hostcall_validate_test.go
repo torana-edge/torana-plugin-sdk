@@ -144,34 +144,40 @@ func TestMetaAppendContract(t *testing.T) {
 
 	cases := []struct {
 		name     string
-		existing []byte
+		current  []byte
 		present  bool
 		fragment []byte
-		want     []byte
-		wantKey  bool
+		wantVal  []byte
 	}{
-		{"absent empty", nil, false, nil, []byte{}, false},
-		{"absent empty slice", nil, false, []byte{}, []byte{}, false},
-		{"present empty", []byte("ab"), true, nil, []byte("ab"), true},
-		{"absent create", nil, false, []byte("xy"), []byte("xy"), true},
-		{"present append", []byte("ab"), true, []byte("cd"), []byte("abcd"), true},
+		{"absent empty read", nil, false, nil, []byte{}},
+		{"absent empty-slice read", nil, false, []byte{}, []byte{}},
+		{"present empty read", []byte("ab"), true, nil, []byte("ab")},
+		{"absent create ack", nil, false, []byte("xy"), []byte{}},
+		{"present append ack", []byte("ab"), true, []byte("cd"), []byte{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, key := v2.ApplyMetaAppend(tc.existing, tc.present, tc.fragment)
-			if key != tc.wantKey {
-				t.Fatalf("presentOut=%v, want %v", key, tc.wantKey)
+			got := v2.MetaAppendSuccessValue(tc.fragment, tc.current, tc.present)
+			if !bytes.Equal(got, tc.wantVal) {
+				t.Fatalf("value=%q, want %q", got, tc.wantVal)
 			}
-			if !bytes.Equal(got, tc.want) {
-				t.Fatalf("complete=%q, want %q", got, tc.want)
-			}
-			// Success value is always the complete buffer (empty when absent+empty).
 			ok := &v2.HostCallResult{Result: &v2.HostCallResult_Value{Value: got}}
 			if err := ok.Validate(); err != nil {
 				t.Fatal(err)
 			}
 		})
 	}
+
+	// Ordinary appends must not imply returning the cumulative buffer — that
+	// would force O(total×fragments) copies across the WASM boundary.
+	t.Run("append ack is constant-size", func(t *testing.T) {
+		big := bytes.Repeat([]byte("x"), 1<<20)
+		frag := []byte("more")
+		got := v2.MetaAppendSuccessValue(frag, big, true)
+		if len(got) != 0 {
+			t.Fatalf("non-empty fragment must ack with empty value, got %d bytes", len(got))
+		}
+	})
 }
 
 func TestVerdictAndMetaAppendArgs(t *testing.T) {
