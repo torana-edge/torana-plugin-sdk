@@ -85,8 +85,8 @@ func (x *BlockRequestArgs) Validate() error {
 	if x == nil {
 		return fmt.Errorf("block request args are nil")
 	}
-	if x.Status == 0 {
-		return fmt.Errorf("block request args need a non-zero status")
+	if !httpStatusOK(x.Status) {
+		return fmt.Errorf("block request args status %d is outside 100–599", x.Status)
 	}
 	if x.Code == "" {
 		return fmt.Errorf("block request args need a code")
