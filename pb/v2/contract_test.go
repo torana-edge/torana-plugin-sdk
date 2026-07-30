@@ -30,23 +30,23 @@ func inputFor(h v2.Hook) *v2.HookInput {
 	return &v2.HookInput{}
 }
 
-// replaceFor builds a REPLACE result carrying h's payload type.
-func replaceFor(h v2.Hook) *v2.HookResult {
-	r := &v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE}
+// actionFor builds a result carrying h's own action.
+func actionFor(h v2.Hook) *v2.HookResult {
+	r := &v2.HookResult{}
 	switch h {
 	case v2.Hook_HOOK_BEFORE_REQUEST:
-		r.Payload = &v2.HookResult_ChatRequest{ChatRequest: &v2.ChatRequest{Model: "m"}}
+		r.Action = &v2.HookResult_ReplaceRequest{ReplaceRequest: &v2.ChatRequest{Model: "m"}}
 	case v2.Hook_HOOK_AFTER_RESPONSE:
-		r.Payload = &v2.HookResult_ChatResponse{ChatResponse: &v2.ChatResponse{Model: "m"}}
+		r.Action = &v2.HookResult_ReplaceResponse{ReplaceResponse: &v2.ChatResponse{Model: "m"}}
 	case v2.Hook_HOOK_ON_STREAM_CHUNK:
-		// One event: a REPLACE emitting nothing is SUPPRESS, and is refused.
-		r.Payload = &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{
+		// One event: emitting nothing is suppression, and is refused.
+		r.Action = &v2.HookResult_EmitEvents{EmitEvents: &v2.StreamEvents{
 			Events: []*v2.StreamEvent{{Event: &v2.StreamEvent_TextDelta{TextDelta: "x"}}},
 		}}
 	case v2.Hook_HOOK_ON_HTTP_REQUEST:
-		r.Payload = &v2.HookResult_HttpResponse{HttpResponse: &v2.HttpResponse{Status: 200}}
+		r.Action = &v2.HookResult_ServeHttp{ServeHttp: &v2.HttpResponse{Status: 200}}
 	case v2.Hook_HOOK_ON_TICK:
-		r.Payload = &v2.HookResult_TickOutcome{TickOutcome: &v2.TickOutcome{}}
+		r.Action = &v2.HookResult_TickOutcome{TickOutcome: &v2.TickOutcome{}}
 	}
 	return r
 }
@@ -154,7 +154,7 @@ func TestInputWithoutPayloadIsRejected(t *testing.T) {
 func TestResultPayloadMustMatchTheDispatchedHook(t *testing.T) {
 	for _, dispatched := range allHooks {
 		for _, carried := range allHooks {
-			err := replaceFor(carried).ValidateFor(dispatched)
+			err := actionFor(carried).ValidateFor(dispatched)
 			if dispatched == carried {
 				if err != nil {
 					t.Errorf("%v with its own payload rejected: %v", dispatched, err)
@@ -168,14 +168,15 @@ func TestResultPayloadMustMatchTheDispatchedHook(t *testing.T) {
 	}
 }
 
-// v1 needed a `handled` bool on three of five result types purely because an
-// all-defaults protobuf message marshals to zero bytes, making "suppress"
-// indistinguishable from "pass through". v2 uses an explicit disposition whose
-// zero value is invalid, so a frame that says nothing is a protocol error
-// rather than a guess.
+// Suppression must be expressible without being confusable with pass-through.
+//
+// v1 needed a `handled` bool on three of five result types because an
+// all-defaults message marshals to zero bytes. v2 makes suppression an action,
+// and an empty message inside a oneof still marshals to a tag and a zero
+// length — so it is distinguishable, and no flag is needed.
 func TestSuppressIsDistinguishableFromPassThrough(t *testing.T) {
 	suppress, err := proto.Marshal(&v2.HookResult{
-		Disposition: v2.Disposition_DISPOSITION_SUPPRESS,
+		Action: &v2.HookResult_Suppress{Suppress: &v2.Suppress{}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -188,11 +189,11 @@ func TestSuppressIsDistinguishableFromPassThrough(t *testing.T) {
 	if err := proto.Unmarshal(suppress, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Disposition != v2.Disposition_DISPOSITION_SUPPRESS {
-		t.Fatalf("disposition = %v, want SUPPRESS", got.Disposition)
+	if got.GetSuppress() == nil {
+		t.Fatalf("suppress did not survive the wire: %+v", &got)
 	}
-	if got.Payload != nil {
-		t.Fatal("suppress carries no payload")
+	if err := got.ValidateFor(v2.Hook_HOOK_ON_STREAM_CHUNK); err != nil {
+		t.Fatalf("the host would reject this: %v", err)
 	}
 }
 
@@ -200,6 +201,10 @@ func TestSuppressIsDistinguishableFromPassThrough(t *testing.T) {
 // used to be two tests that read enum zero values and demonstrated no rejection
 // at all.
 func TestMalformedResultsAreRejected(t *testing.T) {
+	ev := func() *v2.StreamEvent {
+		return &v2.StreamEvent{Event: &v2.StreamEvent_TextDelta{TextDelta: "x"}}
+	}
+
 	for _, tc := range []struct {
 		name   string
 		hook   v2.Hook
@@ -207,85 +212,37 @@ func TestMalformedResultsAreRejected(t *testing.T) {
 		want   string
 	}{
 		{
-			"no disposition", v2.Hook_HOOK_BEFORE_REQUEST,
-			&v2.HookResult{Payload: &v2.HookResult_ChatRequest{ChatRequest: &v2.ChatRequest{Model: "m"}}},
-			"a frame that states no disposition is a protocol error, not a pass-through",
-		},
-		{
-			"unknown disposition", v2.Hook_HOOK_BEFORE_REQUEST,
-			&v2.HookResult{Disposition: v2.Disposition(99),
-				Payload: &v2.HookResult_ChatRequest{ChatRequest: &v2.ChatRequest{Model: "m"}}},
-			"a disposition this build does not know must be refused, not guessed at",
-		},
-		{
-			"REPLACE without payload", v2.Hook_HOOK_BEFORE_REQUEST,
-			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE},
-			"REPLACE with nothing to replace it with is meaningless",
-		},
-		{
-			"PASS with payload", v2.Hook_HOOK_BEFORE_REQUEST,
-			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_PASS,
-				Payload: &v2.HookResult_ChatRequest{ChatRequest: &v2.ChatRequest{Model: "m"}}},
-			"PASS means the host keeps its input, so a payload would be silently dropped",
-		},
-		{
-			"SUPPRESS outside stream", v2.Hook_HOOK_BEFORE_REQUEST,
-			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_SUPPRESS},
+			"suppress outside stream", v2.Hook_HOOK_BEFORE_REQUEST,
+			&v2.HookResult{Action: &v2.HookResult_Suppress{Suppress: &v2.Suppress{}}},
 			"only a stream chunk can be suppressed",
 		},
 		{
-			"SUPPRESS with payload", v2.Hook_HOOK_ON_STREAM_CHUNK,
-			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_SUPPRESS,
-				Payload: &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{}}},
-			"suppress emits nothing; carrying events means REPLACE was meant",
+			"another hook's action", v2.Hook_HOOK_BEFORE_REQUEST,
+			&v2.HookResult{Action: &v2.HookResult_TickOutcome{TickOutcome: &v2.TickOutcome{}}},
+			"a result must answer the hook that was dispatched",
 		},
 		{
-			"REPLACE with no events", v2.Hook_HOOK_ON_STREAM_CHUNK,
-			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
-				Payload: &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{}}},
-			"a REPLACE emitting nothing is a second encoding of SUPPRESS",
+			"emit no events", v2.Hook_HOOK_ON_STREAM_CHUNK,
+			&v2.HookResult{Action: &v2.HookResult_EmitEvents{EmitEvents: &v2.StreamEvents{}}},
+			"emitting nothing is suppression, and should say so",
 		},
 		{
-			"REPLACE with nil events", v2.Hook_HOOK_ON_STREAM_CHUNK,
-			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
-				Payload: &v2.HookResult_StreamEvents{}},
-			"same, with the wrapper present but empty",
+			"emit a nil event", v2.Hook_HOOK_ON_STREAM_CHUNK,
+			&v2.HookResult{Action: &v2.HookResult_EmitEvents{EmitEvents: &v2.StreamEvents{
+				Events: []*v2.StreamEvent{nil}}}},
+			"a list of nothing emits nothing",
 		},
 		{
-			"REPLACE with a nil event", v2.Hook_HOOK_ON_STREAM_CHUNK,
-			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
-				Payload: &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{
-					Events: []*v2.StreamEvent{nil},
-				}}},
-			"a list of nothing emits nothing — a third spelling of SUPPRESS",
-		},
-		{
-			"REPLACE with an empty event", v2.Hook_HOOK_ON_STREAM_CHUNK,
-			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
-				Payload: &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{
-					Events: []*v2.StreamEvent{{}},
-				}}},
-			"an event with no variant set says nothing and emits nothing",
-		},
-		{
-			"REPLACE with one good and one empty event", v2.Hook_HOOK_ON_STREAM_CHUNK,
-			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
-				Payload: &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{
-					Events: []*v2.StreamEvent{
-						{Event: &v2.StreamEvent_TextDelta{TextDelta: "x"}},
-						{},
-					},
-				}}},
+			"emit one good and one empty event", v2.Hook_HOOK_ON_STREAM_CHUNK,
+			&v2.HookResult{Action: &v2.HookResult_EmitEvents{EmitEvents: &v2.StreamEvents{
+				Events: []*v2.StreamEvent{ev(), {}}}}},
 			"every event is validated, not just the first",
 		},
 		{
-			"REPLACE with a kindless content block", v2.Hook_HOOK_ON_STREAM_CHUNK,
-			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
-				Payload: &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{
-					Events: []*v2.StreamEvent{{Event: &v2.StreamEvent_ContentBlockStart{
-						ContentBlockStart: &v2.ContentBlockStart{Index: 0},
-					}}},
-				}}},
+			"emit a kindless content block", v2.Hook_HOOK_ON_STREAM_CHUNK,
+			&v2.HookResult{Action: &v2.HookResult_EmitEvents{EmitEvents: &v2.StreamEvents{
+				Events: []*v2.StreamEvent{{Event: &v2.StreamEvent_ContentBlockStart{
+					ContentBlockStart: &v2.ContentBlockStart{Index: 0}}}}}}},
 			"a block that names no kind cannot be assembled",
 		},
 		{
@@ -301,6 +258,29 @@ func TestMalformedResultsAreRejected(t *testing.T) {
 	}
 }
 
+// A result with no action means the same as returning nothing: leave the input
+// alone. There is one encoding of that, so it is accepted rather than treated
+// as a malformed frame the host could never actually receive.
+func TestResultWithNoActionIsPassThrough(t *testing.T) {
+	empty := &v2.HookResult{}
+
+	raw, err := proto.Marshal(empty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) != 0 {
+		t.Fatalf("an actionless result should marshal to zero bytes, got %d — "+
+			"if it did not, the host could tell it apart from pass-through and "+
+			"would need a rule for it", len(raw))
+	}
+	for _, hook := range allHooks {
+		if err := empty.ValidateFor(hook); err != nil {
+			t.Errorf("%v: an actionless result was rejected, but the host cannot "+
+				"distinguish it from pass-through: %v", hook, err)
+		}
+	}
+}
+
 // The well-formed shapes must all be accepted, or the validation above is just
 // a way to reject everything.
 func TestWellFormedResultsAreAccepted(t *testing.T) {
@@ -309,46 +289,26 @@ func TestWellFormedResultsAreAccepted(t *testing.T) {
 		hook   v2.Hook
 		result *v2.HookResult
 	}{
-		{"explicit pass", v2.Hook_HOOK_BEFORE_REQUEST,
-			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_PASS}},
-		{"replace request", v2.Hook_HOOK_BEFORE_REQUEST,
-			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
-				Payload: &v2.HookResult_ChatRequest{ChatRequest: &v2.ChatRequest{Model: "m"}}}},
+		{"replace request", v2.Hook_HOOK_BEFORE_REQUEST, actionFor(v2.Hook_HOOK_BEFORE_REQUEST)},
+		{"replace response", v2.Hook_HOOK_AFTER_RESPONSE, actionFor(v2.Hook_HOOK_AFTER_RESPONSE)},
+		{"serve http", v2.Hook_HOOK_ON_HTTP_REQUEST, actionFor(v2.Hook_HOOK_ON_HTTP_REQUEST)},
+		{"tick outcome", v2.Hook_HOOK_ON_TICK, actionFor(v2.Hook_HOOK_ON_TICK)},
 		{"suppress a stream event", v2.Hook_HOOK_ON_STREAM_CHUNK,
-			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_SUPPRESS}},
-		// The fan-out a stream plugin actually performs: emit the assembled
-		// tool-call arguments, then close the block.
+			&v2.HookResult{Action: &v2.HookResult_Suppress{Suppress: &v2.Suppress{}}}},
 		{"fan out stream events", v2.Hook_HOOK_ON_STREAM_CHUNK,
-			&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
-				Payload: &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{
-					Events: []*v2.StreamEvent{
-						{Event: &v2.StreamEvent_ToolCallDelta{ToolCallDelta: &v2.ToolCallDelta{
-							Index: 0, ArgumentsDelta: `{"path":"a.go"}`,
-						}}},
-						{Event: &v2.StreamEvent_ContentBlockStop{
-							ContentBlockStop: &v2.ContentBlockStop{Index: 0},
-						}},
-					},
-				}}}},
+			&v2.HookResult{Action: &v2.HookResult_EmitEvents{EmitEvents: &v2.StreamEvents{
+				Events: []*v2.StreamEvent{
+					{Event: &v2.StreamEvent_ToolCallDelta{ToolCallDelta: &v2.ToolCallDelta{
+						Index: 0, ArgumentsDelta: `{"path":"a.go"}`}}},
+					{Event: &v2.StreamEvent_ContentBlockStop{
+						ContentBlockStop: &v2.ContentBlockStop{Index: 0}}},
+				}}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := tc.result.ValidateFor(tc.hook); err != nil {
 				t.Fatalf("well-formed result rejected: %v", err)
 			}
 		})
-	}
-}
-
-// A hook that changed nothing returns zero bytes, which the ABI reads as
-// pass-through. That is unambiguous because it is a length rather than a
-// message, and it is why the `handled` bool is gone.
-func TestAllDefaultsResultMarshalsToNothing(t *testing.T) {
-	raw, err := proto.Marshal(&v2.HookResult{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(raw) != 0 {
-		t.Fatalf("an all-defaults result should marshal to zero bytes, got %d", len(raw))
 	}
 }
 
@@ -552,13 +512,12 @@ func TestBlockKindsRequireTheirMetadata(t *testing.T) {
 				t.Errorf("accepted inside a stream event: %s", tc.why)
 			}
 			res := &v2.HookResult{
-				Disposition: v2.Disposition_DISPOSITION_REPLACE,
-				Payload: &v2.HookResult_StreamEvents{StreamEvents: &v2.StreamEvents{
+				Action: &v2.HookResult_EmitEvents{EmitEvents: &v2.StreamEvents{
 					Events: []*v2.StreamEvent{ev},
 				}},
 			}
 			if err := res.ValidateFor(v2.Hook_HOOK_ON_STREAM_CHUNK); err == nil {
-				t.Errorf("accepted inside a REPLACE result: %s", tc.why)
+				t.Errorf("accepted inside an emit-events result: %s", tc.why)
 			}
 		})
 	}
@@ -620,24 +579,21 @@ func TestNilNestedPayloadsAreRejected(t *testing.T) {
 			hook v2.Hook
 			r    *v2.HookResult
 		}{
-			{"chat request", v2.Hook_HOOK_BEFORE_REQUEST, &v2.HookResult{
-				Disposition: v2.Disposition_DISPOSITION_REPLACE,
-				Payload:     &v2.HookResult_ChatRequest{}}},
-			{"chat response", v2.Hook_HOOK_AFTER_RESPONSE, &v2.HookResult{
-				Disposition: v2.Disposition_DISPOSITION_REPLACE,
-				Payload:     &v2.HookResult_ChatResponse{}}},
-			{"stream events", v2.Hook_HOOK_ON_STREAM_CHUNK, &v2.HookResult{
-				Disposition: v2.Disposition_DISPOSITION_REPLACE,
-				Payload:     &v2.HookResult_StreamEvents{}}},
-			{"http response", v2.Hook_HOOK_ON_HTTP_REQUEST, &v2.HookResult{
-				Disposition: v2.Disposition_DISPOSITION_REPLACE,
-				Payload:     &v2.HookResult_HttpResponse{}}},
+			{"replace request", v2.Hook_HOOK_BEFORE_REQUEST, &v2.HookResult{
+				Action: &v2.HookResult_ReplaceRequest{}}},
+			{"replace response", v2.Hook_HOOK_AFTER_RESPONSE, &v2.HookResult{
+				Action: &v2.HookResult_ReplaceResponse{}}},
+			{"emit events", v2.Hook_HOOK_ON_STREAM_CHUNK, &v2.HookResult{
+				Action: &v2.HookResult_EmitEvents{}}},
+			{"serve http", v2.Hook_HOOK_ON_HTTP_REQUEST, &v2.HookResult{
+				Action: &v2.HookResult_ServeHttp{}}},
 			{"tick outcome", v2.Hook_HOOK_ON_TICK, &v2.HookResult{
-				Disposition: v2.Disposition_DISPOSITION_REPLACE,
-				Payload:     &v2.HookResult_TickOutcome{}}},
+				Action: &v2.HookResult_TickOutcome{}}},
+			{"suppress", v2.Hook_HOOK_ON_STREAM_CHUNK, &v2.HookResult{
+				Action: &v2.HookResult_Suppress{}}},
 		} {
 			if err := tc.r.ValidateFor(tc.hook); err == nil {
-				t.Errorf("%s: a REPLACE with a nil payload was accepted", tc.name)
+				t.Errorf("%s: an action with a nil payload was accepted", tc.name)
 			}
 		}
 	})
@@ -699,17 +655,21 @@ func TestTypedNilWrappersAreRejectedNotPanics(t *testing.T) {
 		{"HookInput tick request", func() error {
 			return (&v2.HookInput{Payload: (*v2.HookInput_TickRequest)(nil)}).Validate()
 		}},
-		{"HookResult chat request", func() error {
-			return (&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
-				Payload: (*v2.HookResult_ChatRequest)(nil)}).ValidateFor(v2.Hook_HOOK_BEFORE_REQUEST)
+		{"HookResult replace request", func() error {
+			return (&v2.HookResult{Action: (*v2.HookResult_ReplaceRequest)(nil)}).
+				ValidateFor(v2.Hook_HOOK_BEFORE_REQUEST)
 		}},
-		{"HookResult stream events", func() error {
-			return (&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
-				Payload: (*v2.HookResult_StreamEvents)(nil)}).ValidateFor(v2.Hook_HOOK_ON_STREAM_CHUNK)
+		{"HookResult emit events", func() error {
+			return (&v2.HookResult{Action: (*v2.HookResult_EmitEvents)(nil)}).
+				ValidateFor(v2.Hook_HOOK_ON_STREAM_CHUNK)
 		}},
 		{"HookResult tick outcome", func() error {
-			return (&v2.HookResult{Disposition: v2.Disposition_DISPOSITION_REPLACE,
-				Payload: (*v2.HookResult_TickOutcome)(nil)}).ValidateFor(v2.Hook_HOOK_ON_TICK)
+			return (&v2.HookResult{Action: (*v2.HookResult_TickOutcome)(nil)}).
+				ValidateFor(v2.Hook_HOOK_ON_TICK)
+		}},
+		{"HookResult suppress", func() error {
+			return (&v2.HookResult{Action: (*v2.HookResult_Suppress)(nil)}).
+				ValidateFor(v2.Hook_HOOK_ON_STREAM_CHUNK)
 		}},
 		{"StreamEvent content block start", func() error {
 			return (&v2.StreamEvent{Event: (*v2.StreamEvent_ContentBlockStart)(nil)}).Validate()

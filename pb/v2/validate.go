@@ -171,39 +171,43 @@ func (x *HookInput) ValidateFor(hook Hook) error {
 	return nil
 }
 
-// payloadPresent reports whether the oneof wrapper carries an actual message.
-// See HookInput.payloadPresent — the same hole existed here.
-func (x *HookResult) payloadPresent() bool {
-	switch p := x.Payload.(type) {
-	case *HookResult_ChatRequest:
-		return p != nil && p.ChatRequest != nil
-	case *HookResult_ChatResponse:
-		return p != nil && p.ChatResponse != nil
-	case *HookResult_StreamEvents:
-		return p != nil && p.StreamEvents != nil
-	case *HookResult_HttpResponse:
-		return p != nil && p.HttpResponse != nil
+// actionPresent reports whether the oneof wrapper carries an actual message.
+// See HookInput.payloadPresent — the same typed-nil hole existed here.
+func (x *HookResult) actionPresent() bool {
+	switch a := x.Action.(type) {
+	case *HookResult_ReplaceRequest:
+		return a != nil && a.ReplaceRequest != nil
+	case *HookResult_ReplaceResponse:
+		return a != nil && a.ReplaceResponse != nil
+	case *HookResult_EmitEvents:
+		return a != nil && a.EmitEvents != nil
+	case *HookResult_ServeHttp:
+		return a != nil && a.ServeHttp != nil
 	case *HookResult_TickOutcome:
-		return p != nil && p.TickOutcome != nil
+		return a != nil && a.TickOutcome != nil
+	case *HookResult_Suppress:
+		return a != nil && a.Suppress != nil
 	}
 	return false
 }
 
-// HookOf reports which hook a result belongs to, derived from its payload.
-// A PASS or SUPPRESS result carries none, so this returns HOOK_UNSPECIFIED for
-// them; use ValidateFor to check a result against the hook that was dispatched.
+// HookOf reports which hook an action belongs to.
+//
+// Suppress belongs to the stream hook and nothing else, so it reports that.
+// A result with no action reports HOOK_UNSPECIFIED, which is also what an
+// empty frame means — and an empty frame is pass-through, not an error.
 func (x *HookResult) HookOf() Hook {
 	if x == nil {
 		return Hook_HOOK_UNSPECIFIED
 	}
-	switch x.Payload.(type) {
-	case *HookResult_ChatRequest:
+	switch x.Action.(type) {
+	case *HookResult_ReplaceRequest:
 		return Hook_HOOK_BEFORE_REQUEST
-	case *HookResult_ChatResponse:
+	case *HookResult_ReplaceResponse:
 		return Hook_HOOK_AFTER_RESPONSE
-	case *HookResult_StreamEvents:
+	case *HookResult_EmitEvents, *HookResult_Suppress:
 		return Hook_HOOK_ON_STREAM_CHUNK
-	case *HookResult_HttpResponse:
+	case *HookResult_ServeHttp:
 		return Hook_HOOK_ON_HTTP_REQUEST
 	case *HookResult_TickOutcome:
 		return Hook_HOOK_ON_TICK
@@ -213,67 +217,40 @@ func (x *HookResult) HookOf() Hook {
 
 // ValidateFor reports whether a result is a well-formed answer to hook.
 //
-// A hook that changed nothing returns zero bytes at the ABI level and never
-// reaches here. Anything that does reach here is a frame the plugin chose to
-// build, so it has to mean something specific.
+// A hook that wants nothing done returns zero bytes, which never reaches here.
+// A result with no action set marshals to zero bytes too, so it means the same
+// thing — there is one encoding of pass-through, not two.
+//
+// Everything else is a deliberate action, so it has to be one this hook can
+// take, and it has to carry something.
 func (x *HookResult) ValidateFor(hook Hook) error {
 	if x == nil {
 		return fmt.Errorf("hook result is nil")
 	}
-
-	switch x.Disposition {
-	case Disposition_DISPOSITION_UNSPECIFIED:
-		return fmt.Errorf("hook result states no disposition; " +
-			"return zero bytes to pass through, or say REPLACE or SUPPRESS")
-
-	case Disposition_DISPOSITION_PASS:
-		if x.Payload != nil {
-			return fmt.Errorf("hook result says PASS but carries a %v payload; "+
-				"PASS means the host uses its own input, so the payload would be silently dropped",
-				x.HookOf())
-		}
-		return nil
-
-	case Disposition_DISPOSITION_SUPPRESS:
-		if hook != Hook_HOOK_ON_STREAM_CHUNK {
-			return fmt.Errorf("hook result says SUPPRESS, which only %v may do; "+
-				"%v has nothing to suppress", Hook_HOOK_ON_STREAM_CHUNK, hook)
-		}
-		if x.Payload != nil {
-			return fmt.Errorf("hook result says SUPPRESS but carries a payload; " +
-				"use REPLACE with the events to emit instead")
-		}
-		return nil
-
-	case Disposition_DISPOSITION_REPLACE:
-		if x.Payload == nil {
-			return fmt.Errorf("hook result says REPLACE but carries no payload; " +
-				"return zero bytes to pass through instead")
-		}
-		if got := x.HookOf(); got != hook {
-			return fmt.Errorf("hook result for %v carries a %v payload", hook, got)
-		}
-		if !x.payloadPresent() {
-			return fmt.Errorf("hook result says REPLACE for %v but its payload is nil", hook)
-		}
-		// REPLACE with no events emits nothing, which is what SUPPRESS means.
-		// Two encodings of one action is the ambiguity this contract exists to
-		// remove, so only one of them is legal.
-		if ev, ok := x.Payload.(*HookResult_StreamEvents); ok {
-			if ev.StreamEvents == nil || len(ev.StreamEvents.Events) == 0 {
-				return fmt.Errorf("hook result says REPLACE with no events, which emits " +
-					"nothing; say SUPPRESS instead")
-			}
-			// A list of empty or nil events emits nothing either. Checking the
-			// length alone left two more spellings of SUPPRESS.
-			for i, e := range ev.StreamEvents.Events {
-				if err := e.Validate(); err != nil {
-					return fmt.Errorf("hook result REPLACE event %d: %w", i, err)
-				}
-			}
-		}
+	if x.Action == nil {
+		// Indistinguishable on the wire from returning nothing, and means the
+		// same: leave the input alone.
 		return nil
 	}
+	if !x.actionPresent() {
+		return fmt.Errorf("hook result names an action for %v but carries nothing", x.HookOf())
+	}
+	if got := x.HookOf(); got != hook {
+		return fmt.Errorf("hook result for %v carries a %v action", hook, got)
+	}
 
-	return fmt.Errorf("hook result states an unknown disposition %d", int32(x.Disposition))
+	if ev, ok := x.Action.(*HookResult_EmitEvents); ok {
+		if len(ev.EmitEvents.Events) == 0 {
+			return fmt.Errorf("hook result emits no events, which emits nothing; " +
+				"use suppress instead")
+		}
+		// A list of empty or nil events emits nothing either. Checking the
+		// length alone left two more spellings of suppression.
+		for i, e := range ev.EmitEvents.Events {
+			if err := e.Validate(); err != nil {
+				return fmt.Errorf("hook result event %d: %w", i, err)
+			}
+		}
+	}
+	return nil
 }

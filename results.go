@@ -38,11 +38,12 @@ type RequestResult struct {
 }
 
 // PassRequest leaves the request as the host built it.
-func PassRequest() RequestResult {
-	return RequestResult{inner: &pbv2.HookResult{
-		Disposition: pbv2.Disposition_DISPOSITION_PASS,
-	}}
-}
+//
+// Produces no frame at all: the hook returns zero bytes, which is the ABI's
+// pass-through and its only encoding. An earlier draft emitted an explicit
+// PASS frame, which marshalled to zero bytes anyway — two spellings of one
+// thing, one of which could not be told from the other.
+func PassRequest() RequestResult { return RequestResult{} }
 
 // ReplaceRequest sends req upstream instead of what the host had.
 //
@@ -57,8 +58,7 @@ func ReplaceRequest(req *pbv2.ChatRequest) RequestResult {
 				"host's own request upstream")}
 	}
 	return RequestResult{inner: &pbv2.HookResult{
-		Disposition: pbv2.Disposition_DISPOSITION_REPLACE,
-		Payload:     &pbv2.HookResult_ChatRequest{ChatRequest: req},
+		Action: &pbv2.HookResult_ReplaceRequest{ReplaceRequest: req},
 	}}
 }
 
@@ -70,12 +70,8 @@ type ResponseResult struct {
 	err   error
 }
 
-// PassResponse leaves the response as the provider sent it.
-func PassResponse() ResponseResult {
-	return ResponseResult{inner: &pbv2.HookResult{
-		Disposition: pbv2.Disposition_DISPOSITION_PASS,
-	}}
-}
+// PassResponse leaves the response as the provider sent it. Produces no frame.
+func PassResponse() ResponseResult { return ResponseResult{} }
 
 // ReplaceResponse returns resp to the caller instead.
 //
@@ -90,8 +86,7 @@ func ReplaceResponse(resp *pbv2.ChatResponse) ResponseResult {
 				"PassResponse() if that is what you mean")}
 	}
 	return ResponseResult{inner: &pbv2.HookResult{
-		Disposition: pbv2.Disposition_DISPOSITION_REPLACE,
-		Payload:     &pbv2.HookResult_ChatResponse{ChatResponse: resp},
+		Action: &pbv2.HookResult_ReplaceResponse{ReplaceResponse: resp},
 	}}
 }
 
@@ -103,12 +98,8 @@ type StreamResult struct {
 	err   error
 }
 
-// PassEvent forwards the event unchanged.
-func PassEvent() StreamResult {
-	return StreamResult{inner: &pbv2.HookResult{
-		Disposition: pbv2.Disposition_DISPOSITION_PASS,
-	}}
-}
+// PassEvent forwards the event unchanged. Produces no frame.
+func PassEvent() StreamResult { return StreamResult{} }
 
 // SuppressEvent drops the event, emitting nothing.
 //
@@ -117,7 +108,7 @@ func PassEvent() StreamResult {
 // to remove. The host rejects the empty form.
 func SuppressEvent() StreamResult {
 	return StreamResult{inner: &pbv2.HookResult{
-		Disposition: pbv2.Disposition_DISPOSITION_SUPPRESS,
+		Action: &pbv2.HookResult_Suppress{Suppress: &pbv2.Suppress{}},
 	}}
 }
 
@@ -142,11 +133,9 @@ func EmitEvents(events ...*pbv2.StreamEvent) StreamResult {
 					"wrote, which on a stream means a truncated tool call", i)}
 		}
 	}
-	kept := events
 	return StreamResult{inner: &pbv2.HookResult{
-		Disposition: pbv2.Disposition_DISPOSITION_REPLACE,
-		Payload: &pbv2.HookResult_StreamEvents{
-			StreamEvents: &pbv2.StreamEvents{Events: kept},
+		Action: &pbv2.HookResult_EmitEvents{
+			EmitEvents: &pbv2.StreamEvents{Events: events},
 		},
 	}}
 }
@@ -159,12 +148,9 @@ type HTTPResult struct {
 	err   error
 }
 
-// PassHTTP declines to serve the request, and the host answers 404.
-func PassHTTP() HTTPResult {
-	return HTTPResult{inner: &pbv2.HookResult{
-		Disposition: pbv2.Disposition_DISPOSITION_PASS,
-	}}
-}
+// PassHTTP declines to serve the request, and the host answers 404. Produces
+// no frame.
+func PassHTTP() HTTPResult { return HTTPResult{} }
 
 // ServeHTTP answers the request with resp.
 func ServeHTTP(resp *pbv2.HttpResponse) HTTPResult {
@@ -174,8 +160,7 @@ func ServeHTTP(resp *pbv2.HttpResponse) HTTPResult {
 				"decline the request")}
 	}
 	return HTTPResult{inner: &pbv2.HookResult{
-		Disposition: pbv2.Disposition_DISPOSITION_REPLACE,
-		Payload:     &pbv2.HookResult_HttpResponse{HttpResponse: resp},
+		Action: &pbv2.HookResult_ServeHttp{ServeHttp: resp},
 	}}
 }
 
@@ -187,20 +172,15 @@ type TickResult struct {
 	err   error
 }
 
-// TickIdle reports that the tick did nothing.
-func TickIdle() TickResult {
-	return TickResult{inner: &pbv2.HookResult{
-		Disposition: pbv2.Disposition_DISPOSITION_PASS,
-	}}
-}
+// TickIdle reports that the tick did nothing. Produces no frame.
+func TickIdle() TickResult { return TickResult{} }
 
 // TickDid reports what the tick did. The host attaches no meaning to either
 // field; they exist so an operator can see that a background plugin is alive
 // and doing something.
 func TickDid(actions int32, note string) TickResult {
 	return TickResult{inner: &pbv2.HookResult{
-		Disposition: pbv2.Disposition_DISPOSITION_REPLACE,
-		Payload: &pbv2.HookResult_TickOutcome{
+		Action: &pbv2.HookResult_TickOutcome{
 			TickOutcome: &pbv2.TickOutcome{Actions: actions, Note: note},
 		},
 	}}
@@ -208,20 +188,19 @@ func TickDid(actions int32, note string) TickResult {
 
 func (r TickResult) hookResult() (*pbv2.HookResult, error) { return orPass(r.inner, r.err) }
 
-// orPass turns a zero-value result into an explicit pass, and surfaces any
-// error the constructor recorded.
+// orPass surfaces any error the constructor recorded, and otherwise returns the
+// frame — which is nil for a pass.
 //
-// The zero value arises from `return Result{}, err` and from a handler that
-// returns before deciding. Both mean "change nothing", so they get the frame
-// that says so rather than a nil the trampoline would have to interpret. A
-// recorded error is different: the author asked for something impossible, and
+// A nil frame means the trampoline emits zero bytes. That is the ABI's
+// pass-through and its only encoding, so the zero value of every result type
+// already means it: `return Result{}, err` on an error path, and a handler that
+// returns before deciding anything, both change nothing.
+//
+// A recorded error is different. The author asked for something impossible, so
 // the trampoline must trap rather than substitute a guess.
 func orPass(r *pbv2.HookResult, err error) (*pbv2.HookResult, error) {
 	if err != nil {
 		return nil, err
-	}
-	if r == nil {
-		return &pbv2.HookResult{Disposition: pbv2.Disposition_DISPOSITION_PASS}, nil
 	}
 	return r, nil
 }

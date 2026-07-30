@@ -345,25 +345,6 @@ enum Hook {
   HOOK_ON_TICK = 5;
 }
 
-// Disposition states what a plugin wants done with the input it was given.
-//
-// This replaces v1's `handled` bool, which existed only because an all-defaults
-// protobuf message marshals to zero bytes, making "suppress" indistinguishable
-// from "pass through". A hook that changes nothing still returns zero bytes at
-// the ABI level; a hook that returns a frame must say what it means.
-enum Disposition {
-  // Never valid in a returned frame. A frame that says nothing is a protocol
-  // error, and the host traps rather than guessing.
-  DISPOSITION_UNSPECIFIED = 0;
-  // Use the host's input unchanged. Equivalent to returning zero bytes, and
-  // accepted so a plugin can be explicit.
-  DISPOSITION_PASS = 1;
-  // Use the frame's payload instead of the input.
-  DISPOSITION_REPLACE = 2;
-  // Drop the input and emit nothing. Stream events only.
-  DISPOSITION_SUPPRESS = 3;
-}
-
 // HookInput is what every hook receives. The payload determines which hook this
 // is; there is no separate hook field to contradict it.
 message HookInput {
@@ -394,21 +375,43 @@ message HookInput {
   }
 }
 
-// HookResult is what every hook returns, when it returns anything at all.
+// Suppress drops the input event and emits nothing. Stream hooks only.
 //
-// Returning zero bytes still means "pass through" — that is unambiguous at the
-// ABI level, because it is a length rather than a message.
-message HookResult {
-  Disposition disposition = 1;
+// An empty message inside a oneof still marshals to a tag and a zero length, so
+// this is distinguishable on the wire from a plugin that returned nothing —
+// which is what makes it safe to express suppression as an action rather than
+// as a flag.
+message Suppress {}
 
-  // The payload's type must match the hook that was dispatched. A result
-  // carrying another hook's payload is a protocol error.
-  oneof payload {
-    ChatRequest chat_request = 2;
-    ChatResponse chat_response = 3;
-    StreamEvents stream_events = 4;
-    HttpResponse http_response = 5;
-    TickOutcome tick_outcome = 6;
+// HookResult is what a hook returns when it wants something done.
+//
+// There is exactly ONE axis: the action. An earlier draft had two — a
+// disposition enum beside a payload oneof — which made five illegal
+// combinations representable: PASS carrying a payload, REPLACE carrying none,
+// SUPPRESS carrying events, SUPPRESS on a non-stream hook, and an unspecified
+// disposition. The validator caught them, but a shape that cannot express them
+// needs no validator.
+//
+// Worse, the two-axis form claimed something it could not enforce. A frame with
+// an unspecified disposition marshals to zero bytes, and zero bytes IS
+// pass-through at the ABI level — a length, not a message — so the host never
+// saw a frame to reject. The rule was unreachable.
+//
+// Pass-through therefore has exactly one encoding: return zero bytes. A
+// HookResult with no action set marshals to zero bytes too, so the two are the
+// same thing rather than two spellings of it.
+//
+// The action's type must match the hook that was dispatched. A result carrying
+// another hook's action is a protocol error, and that one IS enforceable
+// because such a frame is not empty.
+message HookResult {
+  oneof action {
+    ChatRequest replace_request = 1;
+    ChatResponse replace_response = 2;
+    StreamEvents emit_events = 3;
+    HttpResponse serve_http = 4;
+    TickOutcome tick_outcome = 5;
+    Suppress suppress = 6;
   }
 }
 
