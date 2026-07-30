@@ -17,7 +17,11 @@ func inputFor(h v2.Hook) *v2.HookInput {
 	case v2.Hook_HOOK_AFTER_RESPONSE:
 		return &v2.HookInput{Payload: &v2.HookInput_ChatResponse{ChatResponse: &v2.ChatResponse{Model: "m"}}}
 	case v2.Hook_HOOK_ON_STREAM_CHUNK:
-		return &v2.HookInput{Payload: &v2.HookInput_StreamEvent{StreamEvent: &v2.StreamEvent{}}}
+		// A real event: an empty StreamEvent carries no variant and is refused,
+		// which is the point of validating inputs at all.
+		return &v2.HookInput{Payload: &v2.HookInput_StreamEvent{
+			StreamEvent: &v2.StreamEvent{Event: &v2.StreamEvent_TextDelta{TextDelta: "x"}},
+		}}
 	case v2.Hook_HOOK_ON_HTTP_REQUEST:
 		return &v2.HookInput{Payload: &v2.HookInput_HttpRequest{HttpRequest: &v2.HttpRequest{Method: "GET"}}}
 	case v2.Hook_HOOK_ON_TICK:
