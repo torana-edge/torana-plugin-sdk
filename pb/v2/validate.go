@@ -14,11 +14,25 @@ import "fmt"
 // interpreting it, because every alternative is a guess about what a
 // misbehaving plugin meant.
 
-// httpStatusOK reports whether status is a usable HTTP status code.
-// 100–599 covers informational through server-error; 0 and out-of-range values
-// are not statuses a host can honestly forward.
-func httpStatusOK(status int32) bool {
-	return status >= 100 && status <= 599
+// httpResponseStatusOK reports whether status is a final HTTP status a plugin
+// may return from serve_http. Informational 1xx codes are interim under Go's
+// net/http writer and would be overwritten by a later final response; 101 is a
+// protocol switch this buffered API cannot implement.
+func httpResponseStatusOK(status int32) bool {
+	return status >= 200 && status <= 599
+}
+
+// blockRequestStatusOK reports whether status is a rejection status for
+// env.block_request. A block verdict is a provider-shaped error, so only
+// 4xx/5xx are meaningful.
+func blockRequestStatusOK(status int32) bool {
+	return status >= 400 && status <= 599
+}
+
+// httpBodyForbidden reports whether status must not carry a response body
+// (RFC 9110 / Go net/http transfer writer: 204, 304).
+func httpBodyForbidden(status int32) bool {
+	return status == 204 || status == 304
 }
 
 // Validate reports whether a stream event carries an actual event.
@@ -167,13 +181,17 @@ func (x *ToolCallDelta) Validate() error {
 	return nil
 }
 
-// Validate reports whether an HTTP response carries a status the host can serve.
+// Validate reports whether an HTTP response carries a final status the host
+// can serve, and does not attach a body to a bodyless status.
 func (x *HttpResponse) Validate() error {
 	if x == nil {
 		return fmt.Errorf("http response is nil")
 	}
-	if !httpStatusOK(x.Status) {
-		return fmt.Errorf("http response status %d is outside 100–599", x.Status)
+	if !httpResponseStatusOK(x.Status) {
+		return fmt.Errorf("http response status %d is outside 200–599", x.Status)
+	}
+	if httpBodyForbidden(x.Status) && len(x.Body) != 0 {
+		return fmt.Errorf("http response status %d must not carry a body", x.Status)
 	}
 	return nil
 }

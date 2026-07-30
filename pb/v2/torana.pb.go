@@ -1810,7 +1810,9 @@ func (x *HttpRequest) GetBody() []byte {
 // Response produced by a plugin's run_on_http_request hook.
 type HttpResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// HTTP status the host will write. Must be in 100–599; see HttpResponse.Validate.
+	// HTTP status the host will write. Must be a final status in 200–599
+	// (informational 1xx is not terminal under net/http). 204 and 304 must have
+	// an empty body; see HttpResponse.Validate.
 	Status int32 `protobuf:"varint,1,opt,name=status,proto3" json:"status,omitempty"`
 	// JSON-encoded map of response headers (map[string][]string). The host
 	// applies its own allowlist; anything outside it fails the response.
@@ -2599,7 +2601,7 @@ func (*HostCallResult_Error) isHostCallResult_Result() {}
 // Short-circuits the pipeline with a provider-shaped error.
 type BlockRequestArgs struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// HTTP-like status the caller sees (e.g. 422). Must be in 100–599.
+	// HTTP-like rejection status the caller sees (e.g. 422). Must be in 400–599.
 	Status int32 `protobuf:"varint,1,opt,name=status,proto3" json:"status,omitempty"`
 	// Stable machine code (e.g. "pii_detected"). Required.
 	Code string `protobuf:"bytes,2,opt,name=code,proto3" json:"code,omitempty"`

@@ -361,7 +361,9 @@ message HttpRequest {
 
 // Response produced by a plugin's run_on_http_request hook.
 message HttpResponse {
-  // HTTP status the host will write. Must be in 100–599; see HttpResponse.Validate.
+  // HTTP status the host will write. Must be a final status in 200–599
+  // (informational 1xx is not terminal under net/http). 204 and 304 must have
+  // an empty body; see HttpResponse.Validate.
   int32 status = 1;
   // JSON-encoded map of response headers (map[string][]string). The host
   // applies its own allowlist; anything outside it fails the response.
@@ -618,7 +620,7 @@ message HostCallResult {
 // BlockRequestArgs is the argument body for env.block_request.
 // Short-circuits the pipeline with a provider-shaped error.
 message BlockRequestArgs {
-  // HTTP-like status the caller sees (e.g. 422). Must be in 100–599.
+  // HTTP-like rejection status the caller sees (e.g. 422). Must be in 400–599.
   int32 status = 1;
   // Stable machine code (e.g. "pii_detected"). Required.
   string code = 2;

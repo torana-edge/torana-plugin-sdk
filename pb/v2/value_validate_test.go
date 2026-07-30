@@ -59,22 +59,63 @@ func TestNegativeStreamIndexesAreRejected(t *testing.T) {
 }
 
 func TestHTTPStatusRange(t *testing.T) {
+	// Shared out-of-band values.
 	for _, status := range []int32{0, 99, 600, -1} {
-		err := (&v2.HttpResponse{Status: status}).Validate()
-		if err == nil || !strings.Contains(err.Error(), "100") {
-			t.Fatalf("status %d: got %v", status, err)
+		if err := (&v2.HttpResponse{Status: status}).Validate(); err == nil {
+			t.Fatalf("HttpResponse status %d must fail", status)
 		}
-		err = (&v2.BlockRequestArgs{Status: status, Code: "x"}).Validate()
-		if err == nil || !strings.Contains(err.Error(), "100") {
-			t.Fatalf("block status %d: got %v", status, err)
+		if err := (&v2.BlockRequestArgs{Status: status, Code: "x"}).Validate(); err == nil {
+			t.Fatalf("BlockRequestArgs status %d must fail", status)
 		}
 	}
-	for _, status := range []int32{100, 200, 404, 422, 599} {
-		if err := (&v2.HttpResponse{Status: status}).Validate(); err != nil {
-			t.Fatalf("status %d: %v", status, err)
+	// Informational and other non-final codes are invalid for both APIs.
+	for _, status := range []int32{100, 199} {
+		if err := (&v2.HttpResponse{Status: status}).Validate(); err == nil {
+			t.Fatalf("HttpResponse status %d must fail", status)
 		}
+		if err := (&v2.BlockRequestArgs{Status: status, Code: "x"}).Validate(); err == nil {
+			t.Fatalf("BlockRequestArgs status %d must fail", status)
+		}
+	}
+	// HttpResponse: final 200–599.
+	for _, status := range []int32{200, 404, 422, 599} {
+		if err := (&v2.HttpResponse{Status: status}).Validate(); err != nil {
+			t.Fatalf("HttpResponse status %d: %v", status, err)
+		}
+	}
+	// BlockRequestArgs: rejection 400–599 only.
+	for _, status := range []int32{200, 399} {
+		if err := (&v2.BlockRequestArgs{Status: status, Code: "x"}).Validate(); err == nil {
+			t.Fatalf("BlockRequestArgs status %d must fail", status)
+		}
+	}
+	for _, status := range []int32{400, 422, 599} {
 		if err := (&v2.BlockRequestArgs{Status: status, Code: "x"}).Validate(); err != nil {
-			t.Fatalf("block status %d: %v", status, err)
+			t.Fatalf("BlockRequestArgs status %d: %v", status, err)
+		}
+	}
+}
+
+func TestHttpResponseBodylessStatuses(t *testing.T) {
+	for _, status := range []int32{204, 304} {
+		if err := (&v2.HttpResponse{Status: status}).Validate(); err != nil {
+			t.Fatalf("status %d with empty body must pass: %v", status, err)
+		}
+		err := (&v2.HttpResponse{Status: status, Body: []byte("x")}).Validate()
+		if err == nil || !strings.Contains(err.Error(), "must not carry a body") {
+			t.Fatalf("status %d with body: got %v", status, err)
+		}
+		bad := &v2.HookResult{Action: &v2.HookResult_ServeHttp{
+			ServeHttp: &v2.HttpResponse{Status: status, Body: []byte("leak")},
+		}}
+		if err := bad.ValidateFor(v2.Hook_HOOK_ON_HTTP_REQUEST); err == nil {
+			t.Fatalf("serve_http status %d with body must fail via ValidateFor", status)
+		}
+		ok := &v2.HookResult{Action: &v2.HookResult_ServeHttp{
+			ServeHttp: &v2.HttpResponse{Status: status},
+		}}
+		if err := ok.ValidateFor(v2.Hook_HOOK_ON_HTTP_REQUEST); err != nil {
+			t.Fatalf("serve_http status %d empty body: %v", status, err)
 		}
 	}
 }
@@ -96,13 +137,13 @@ func TestNegativeTickActionsAreRejected(t *testing.T) {
 
 func TestServeHTTPValidatesStatus(t *testing.T) {
 	bad := &v2.HookResult{Action: &v2.HookResult_ServeHttp{
-		ServeHttp: &v2.HttpResponse{Status: 0},
+		ServeHttp: &v2.HttpResponse{Status: 100},
 	}}
 	if err := bad.ValidateFor(v2.Hook_HOOK_ON_HTTP_REQUEST); err == nil {
-		t.Fatal("serve_http with status 0 must fail")
+		t.Fatal("serve_http with informational status must fail")
 	}
 	ok := &v2.HookResult{Action: &v2.HookResult_ServeHttp{
-		ServeHttp: &v2.HttpResponse{Status: 204},
+		ServeHttp: &v2.HttpResponse{Status: 200, Body: []byte("ok")},
 	}}
 	if err := ok.ValidateFor(v2.Hook_HOOK_ON_HTTP_REQUEST); err != nil {
 		t.Fatal(err)
