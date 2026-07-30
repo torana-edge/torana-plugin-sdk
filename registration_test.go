@@ -127,3 +127,64 @@ func TestRegistrationSucceedsAfterReset(t *testing.T) {
 	}()
 	OnTick(func(context.Context, *pb.TickRequest) (*pb.TickResult, error) { return nil, nil })
 }
+
+// A nil handler must be rejected where the mistake is made.
+//
+// It would otherwise claim the hook, install nothing, and block correction: the
+// next registration panics as a duplicate. So the plugin runs with a hook that
+// does nothing and no way to fix it without a restart.
+func TestNilHandlerIsRejected(t *testing.T) {
+	for _, tc := range []struct {
+		hook string
+		reg  func()
+	}{
+		{HookBeforeRequest, func() { OnBeforeRequest(nil) }},
+		{HookAfterResponse, func() { OnAfterResponse(nil) }},
+		{HookStreamChunk, func() { OnStreamChunk(nil) }},
+		{HookHTTPRequest, func() { OnHTTPRequest(nil) }},
+		{HookTick, func() { OnTick(nil) }},
+	} {
+		t.Run(tc.hook, func(t *testing.T) {
+			resetRegistrations()
+			t.Cleanup(resetRegistrations)
+
+			func() {
+				defer func() {
+					r := recover()
+					if r == nil {
+						t.Fatal("a nil handler was accepted; it would claim the hook, " +
+							"run nothing, and block any later registration")
+					}
+					if msg, ok := r.(string); ok && !strings.Contains(msg, tc.hook) {
+						t.Errorf("panic does not name the hook:\n%s", msg)
+					}
+				}()
+				tc.reg()
+			}()
+
+			// And the hook must remain unclaimed, so the author can still
+			// register a real handler.
+			if registered[tc.hook] {
+				t.Error("the rejected nil registration still claimed the hook")
+			}
+		})
+	}
+}
+
+// After a nil handler is rejected, a real one must still register.
+func TestRealHandlerRegistersAfterNilWasRejected(t *testing.T) {
+	resetRegistrations()
+	t.Cleanup(resetRegistrations)
+
+	func() {
+		defer func() { _ = recover() }()
+		OnTick(nil)
+	}()
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("a real handler could not register after a nil one was rejected: %v", r)
+		}
+	}()
+	OnTick(func(context.Context, *pb.TickRequest) (*pb.TickResult, error) { return nil, nil })
+}

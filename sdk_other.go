@@ -39,27 +39,27 @@ var (
 )
 
 func OnBeforeRequest(handler func(ctx context.Context, req *pb.ChatRequest) (*pb.ChatRequest, error)) {
-	claimHook(HookBeforeRequest)
+	claimHook(HookBeforeRequest, handler)
 	chatRequestHandler = handler
 }
 
 func OnAfterResponse(handler func(ctx context.Context, resp *pb.ChatRequest) (*pb.ChatRequest, error)) {
-	claimHook(HookAfterResponse)
+	claimHook(HookAfterResponse, handler)
 	chatResponseHandler = handler
 }
 
 func OnStreamChunk(handler func(ctx context.Context, chunk *pb.StreamEvent) (*pb.StreamEventResult, error)) {
-	claimHook(HookStreamChunk)
+	claimHook(HookStreamChunk, handler)
 	streamChunkHandler = handler
 }
 
 func OnHTTPRequest(handler func(ctx context.Context, req *pb.HttpRequest) (*pb.HttpResponse, error)) {
-	claimHook(HookHTTPRequest)
+	claimHook(HookHTTPRequest, handler)
 	httpRequestHandler = handler
 }
 
 func OnTick(handler func(ctx context.Context, req *pb.TickRequest) (*pb.TickResult, error)) {
-	claimHook(HookTick)
+	claimHook(HookTick, handler)
 	tickHandler = handler
 }
 

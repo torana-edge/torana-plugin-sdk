@@ -1,5 +1,7 @@
 package plugin_sdk
 
+import "reflect"
+
 // Hook registration is static configuration, so registering one twice is a
 // programming error and fails during initialization.
 //
@@ -26,7 +28,15 @@ var registered = map[string]bool{}
 // claimHook records that hook is being registered, and panics if it already
 // was. The message names the hook, because "registered more than once" with no
 // name sends the reader looking through every file.
-func claimHook(hook string) {
+func claimHook(hook string, handler any) {
+	// A nil handler installs nothing and still claims the hook, so the author
+	// cannot correct it — the next registration panics as a duplicate. Reject
+	// it where the mistake was made rather than at the first dispatch, which is
+	// a request that has already reached a user.
+	if handler == nil || reflect.ValueOf(handler).IsNil() {
+		panic("torana sdk: " + hook + " registered with a nil handler — " +
+			"it would claim the hook, run nothing, and block any later registration")
+	}
 	if registered[hook] {
 		panic("torana sdk: " + hook + " registered more than once — " +
 			"a hook may have exactly one handler, and the second would have " +
