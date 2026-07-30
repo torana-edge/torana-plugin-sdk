@@ -759,21 +759,80 @@ func TestUnknownInputPayloadIsRejected(t *testing.T) {
 // A frame carrying a known action AND unknown fields is still honoured: the
 // action is understood, and the extra bytes are additive fields a newer ABI
 // attached to it.
-func TestKnownActionWithUnknownFieldsIsAccepted(t *testing.T) {
+// A known action does not excuse an unknown top-level field.
+//
+// Every top-level field of HookResult is a member of the action oneof, so an
+// unknown one is a second action — either added by a later ABI, or encoded by a
+// handwritten guest that ignored the oneof. Executing the half this build
+// understands is the worst available outcome: the guest asked for two things,
+// one silently did not happen, and nothing anywhere reports it.
+//
+// This test previously asserted the opposite, describing field 99 as additive
+// metadata. That distinction does not exist on the wire.
+func TestKnownActionWithAnUnknownTopLevelFieldIsRejected(t *testing.T) {
 	known, err := proto.Marshal(&v2.HookResult{
 		Action: &v2.HookResult_TickOutcome{TickOutcome: &v2.TickOutcome{Actions: 1}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	extra := protowire.AppendTag(nil, 99, protowire.VarintType)
-	extra = protowire.AppendVarint(extra, 7)
+	// Field 99 as an empty length-delimited message: exactly the shape a future
+	// action would take.
+	raw := protowire.AppendTag(append([]byte{}, known...), 99, protowire.BytesType)
+	raw = protowire.AppendBytes(raw, nil)
 
 	var r v2.HookResult
-	if err := proto.Unmarshal(append(known, extra...), &r); err != nil {
+	if err := proto.Unmarshal(raw, &r); err != nil {
 		t.Fatal(err)
 	}
+	if r.Action == nil {
+		t.Fatal("fixture built no known action, so it would prove nothing")
+	}
+	if len(r.ProtoReflect().GetUnknown()) == 0 {
+		t.Fatal("fixture retained no unknown fields, so it would prove nothing")
+	}
+	if err := r.ValidateFor(v2.Hook_HOOK_ON_TICK); err == nil {
+		t.Fatal("a known action alongside an unrecognised one was accepted; " +
+			"the host would execute one and silently discard the other")
+	}
+}
+
+// Additive evolution of an EXISTING action still works, which is the whole
+// point of drawing the line at the top level rather than banning unknown fields
+// outright. Protobuf stores a nested message's unknown fields on that message,
+// so a later minor adding a field to TickOutcome leaves HookResult itself clean
+// and an older host honours the action it does understand.
+func TestUnknownFieldInsideAKnownActionIsAccepted(t *testing.T) {
+	inner, err := proto.Marshal(&v2.TickOutcome{Actions: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inner = protowire.AppendTag(inner, 99, protowire.VarintType)
+	inner = protowire.AppendVarint(inner, 7)
+
+	// Wrap as HookResult.tick_outcome (field 5).
+	raw := protowire.AppendTag(nil, 5, protowire.BytesType)
+	raw = protowire.AppendBytes(raw, inner)
+
+	var r v2.HookResult
+	if err := proto.Unmarshal(raw, &r); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.ProtoReflect().GetUnknown()) != 0 {
+		t.Fatal("the unknown field landed on HookResult, not the nested action; " +
+			"this fixture is not testing what it claims to")
+	}
+	out := r.GetTickOutcome()
+	if out == nil {
+		t.Fatal("fixture produced no tick outcome")
+	}
+	if len(out.ProtoReflect().GetUnknown()) == 0 {
+		t.Fatal("the nested action retained no unknown field, so nothing additive is under test")
+	}
 	if err := r.ValidateFor(v2.Hook_HOOK_ON_TICK); err != nil {
-		t.Fatalf("a known action with additive unknown fields must be honoured: %v", err)
+		t.Fatalf("an additive field inside a known action must be honoured: %v", err)
+	}
+	if out.Actions != 1 {
+		t.Fatalf("the known part of the action did not survive: %+v", out)
 	}
 }

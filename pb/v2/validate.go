@@ -142,8 +142,22 @@ func (x *HookInput) Validate() error {
 		return fmt.Errorf("hook input is nil")
 	}
 	if x.HookOf() == Hook_HOOK_UNSPECIFIED {
-		// Same distinction as HookResult: a payload this build cannot name
-		// unmarshals with Payload nil and its bytes in unknown fields.
+		// A payload this build cannot name unmarshals with Payload nil and its
+		// bytes in unknown fields, the same way an unknown action does on
+		// HookResult.
+		//
+		// The check is narrower here, and deliberately so. HookResult is
+		// nothing BUT its oneof, so any unknown top-level field is an action
+		// and is refused unconditionally. HookInput also carries top-level
+		// scalars — abi_minor, request_id, mutable — so an unknown top-level
+		// field may instead be a scalar a later minor added. Those are additive
+		// and advisory by construction: a guest that ignores one behaves as it
+		// did before, which is what abi_minor exists to let it negotiate.
+		// Refusing them would make every additive host change a breaking one.
+		//
+		// So the two cases are distinguished by what is MISSING, not by what is
+		// unknown: no payload plus unknown bytes means the payload is the part
+		// this build cannot name, and there is no hook to dispatch to.
 		if len(x.ProtoReflect().GetUnknown()) != 0 {
 			return fmt.Errorf("hook input carries a payload this build does not " +
 				"recognise; it was produced by a newer ABI and cannot be dispatched")
@@ -233,20 +247,30 @@ func (x *HookResult) ValidateFor(hook Hook) error {
 	if x == nil {
 		return fmt.Errorf("hook result is nil")
 	}
+	// Every top-level field of HookResult is a member of the action oneof, so
+	// an unknown top-level field is an action — there is no other kind of field
+	// it could be. Two cases produce one, and both must be refused:
+	//
+	//   - a newer guest emitting an action added after this build. Honouring
+	//     the rest of the frame would silently DISCARD what it asked for, which
+	//     surfaces as "the plugin has no effect" rather than as an error — the
+	//     hardest kind to diagnose, and exactly what ABI-minor evolution will
+	//     produce as soon as an action is added.
+	//   - a handwritten guest encoding two actions at once. The oneof makes
+	//     that unrepresentable through generated code, not on the wire.
+	//
+	// Checking this only when Action == nil caught the first case just when the
+	// future action arrived ALONE. A known action alongside a future one still
+	// validated, and the host executed the half it understood.
+	//
+	// Additive evolution of an EXISTING action is unaffected: protobuf stores
+	// unknown fields of a nested message on that message, not here. See
+	// HookInput.Validate for why the same rule would be wrong there.
+	if len(x.ProtoReflect().GetUnknown()) != 0 {
+		return fmt.Errorf("hook result carries an action this build does not recognise; " +
+			"either it was produced by a newer ABI, or it encodes more than one action")
+	}
 	if x.Action == nil {
-		// An action this build cannot name also unmarshals with Action nil —
-		// protobuf keeps it in unknown fields rather than failing. Accepting
-		// that as pass-through would silently DISCARD what a newer guest asked
-		// for, which is the failure mode ABI-minor evolution will produce as
-		// soon as an action is added: an older host must trap, not quietly do
-		// nothing.
-		//
-		// An empty frame has no unknown fields, so the two are distinguishable
-		// even though both leave Action nil.
-		if len(x.ProtoReflect().GetUnknown()) != 0 {
-			return fmt.Errorf("hook result carries an action this build does not " +
-				"recognise; it was produced by a newer ABI and cannot be honoured")
-		}
 		// Genuinely empty: indistinguishable on the wire from returning
 		// nothing, and means the same — leave the input alone.
 		return nil
