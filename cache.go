@@ -3,26 +3,12 @@ package plugin_sdk
 import (
 	"encoding/json"
 
-	"github.com/torana-edge/torana-plugin-sdk/pb"
+	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
 
-// Prompt-cache compliance
-//
-// Cache breakpoints (Message.CacheControlJson / ToolDef.CacheControlJson)
-// survive the plugin boundary automatically — a plugin that returns a request
-// preserves them without doing anything. What a plugin MUST guarantee is
-// determinism: any mutation of the cacheable prefix (tools, system, history)
-// must be a pure function of its input. Injecting wall-clock time, random
-// values, or per-request-varying content before a breakpoint busts the
-// provider's prompt cache every turn, silently multiplying token spend.
-//
-// A plugin that restructures messages (splits, merges, reorders) should use
-// the helpers below to carry breakpoints to the equivalent position in its
-// output rather than dropping them.
+// Prompt-cache compliance helpers for v2 messages.
 
-// CacheControl returns the message's cache breakpoint as a decoded map, or
-// nil if the message carries none.
-func CacheControl(msg *pb.Message) map[string]any {
+func CacheControl(msg *pbv2.Message) map[string]any {
 	if msg == nil || len(msg.CacheControlJson) == 0 {
 		return nil
 	}
@@ -33,11 +19,7 @@ func CacheControl(msg *pb.Message) map[string]any {
 	return cc
 }
 
-// SetCacheBreakpoint attaches a cache breakpoint to the message. A nil or
-// empty map clears it. Use the provider-default shape
-// {"type":"ephemeral"} unless the original marker (from CacheControl) is
-// being moved.
-func SetCacheBreakpoint(msg *pb.Message, cc map[string]any) {
+func SetCacheBreakpoint(msg *pbv2.Message, cc map[string]any) {
 	if msg == nil {
 		return
 	}
@@ -50,10 +32,7 @@ func SetCacheBreakpoint(msg *pb.Message, cc map[string]any) {
 	}
 }
 
-// MoveCacheBreakpoint transfers a breakpoint from one message to another
-// (e.g. when a plugin merges the marked message into a neighbor). No-op if
-// the source has no marker.
-func MoveCacheBreakpoint(from, to *pb.Message) {
+func MoveCacheBreakpoint(from, to *pbv2.Message) {
 	if from == nil || to == nil || len(from.CacheControlJson) == 0 {
 		return
 	}

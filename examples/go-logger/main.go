@@ -4,14 +4,14 @@ import (
 	"context"
 
 	sdk "github.com/torana-edge/torana-plugin-sdk"
-	"github.com/torana-edge/torana-plugin-sdk/pb"
+	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
 
 func main() {}
 
 func init() {
-	sdk.OnBeforeRequest(func(_ context.Context, request *pb.ChatRequest) (*pb.ChatRequest, error) {
+	sdk.OnBeforeRequest(func(_ context.Context, request *pbv2.ChatRequest) sdk.RequestResult {
 		sdk.Log("received request for model "+request.Model, sdk.LogLevelInfo)
-		return nil, nil // nil means pass-through.
+		return sdk.PassRequest()
 	})
 }

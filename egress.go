@@ -115,7 +115,7 @@ func SendRequest(req *pb.ChatRequest, opts SendRequestOptions) (EgressResult, er
 		return EgressResult{}, err
 	}
 
-	res, err := HostCall("torana_send_request", string(payload))
+	res, err := hostCallString("torana_send_request", string(payload))
 	if err != nil {
 		return EgressResult{}, err
 	}

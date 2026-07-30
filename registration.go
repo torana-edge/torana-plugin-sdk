@@ -56,8 +56,8 @@ func resetRegistrations() {
 	for k := range registered {
 		delete(registered, k)
 	}
-	chatRequestHandler = nil
-	chatResponseHandler = nil
+	beforeRequestHandler = nil
+	afterResponseHandler = nil
 	streamChunkHandler = nil
 	httpRequestHandler = nil
 	tickHandler = nil

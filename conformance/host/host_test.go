@@ -8,43 +8,27 @@ import (
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
-	"github.com/torana-edge/torana-plugin-sdk/pb"
+	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 	"google.golang.org/protobuf/proto"
 )
 
-func TestCompiledGuestsImplementBeforeRequestABI(t *testing.T) {
-	artifacts := []struct {
-		name string
-		env  string
-	}{
-		{name: "go", env: "TORANA_GO_GUEST"},
-		{name: "rust", env: "TORANA_RUST_GUEST"},
+func TestCompiledGoGuestImplementsRunHook(t *testing.T) {
+	path := os.Getenv("TORANA_GO_GUEST")
+	if path == "" {
+		t.Log("TORANA_GO_GUEST unset; exercised in CI")
+		return
 	}
-	for _, artifact := range artifacts {
-		path := os.Getenv(artifact.env)
-		if path == "" {
-			t.Logf("%s is unset; that compiled guest is exercised in CI", artifact.env)
-			continue
-		}
-		t.Run(artifact.name, func(t *testing.T) {
-			exerciseBeforeRequest(t, path)
-		})
-	}
+	exerciseRunHook(t, path)
 }
 
-func exerciseBeforeRequest(t *testing.T, path string) {
+func exerciseRunHook(t *testing.T, path string) {
 	t.Helper()
 	ctx := context.Background()
 	runtime := wazero.NewRuntime(ctx)
 	t.Cleanup(func() { _ = runtime.Close(ctx) })
 	wasi_snapshot_preview1.MustInstantiate(ctx, runtime)
-	_, err := runtime.NewHostModuleBuilder("env").
-		NewFunctionBuilder().
-		WithFunc(func(context.Context, api.Module, int32, uint32, uint32) {}).
-		Export("log").
-		Instantiate(ctx)
-	if err != nil {
-		t.Fatalf("instantiate host imports: %v", err)
+	if err := instantiateEnvImports(ctx, runtime); err != nil {
+		t.Fatal(err)
 	}
 	wasmBytes, err := os.ReadFile(path)
 	if err != nil {
@@ -59,15 +43,21 @@ func exerciseBeforeRequest(t *testing.T, path string) {
 			t.Fatalf("initialize guest: %v", err)
 		}
 	}
-	payload, err := proto.Marshal(&pb.ChatRequest{Model: "conformance"})
+	payload, err := proto.Marshal(&pbv2.HookInput{
+		RequestId: 1,
+		Payload:   &pbv2.HookInput_ChatRequest{ChatRequest: &pbv2.ChatRequest{Model: "conformance"}},
+	})
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
 	alloc := module.ExportedFunction("alloc")
-	hook := module.ExportedFunction("run_before_request")
+	hook := module.ExportedFunction("run_hook")
 	dealloc := module.ExportedFunction("dealloc")
 	if alloc == nil || hook == nil || dealloc == nil {
-		t.Fatal("guest is missing alloc, dealloc, or run_before_request")
+		t.Fatal("guest is missing alloc, dealloc, or run_hook")
+	}
+	if module.ExportedFunction("run_before_request") != nil {
+		t.Fatal("v1 run_before_request must not remain after Migration A")
 	}
 	pointers, err := alloc.Call(ctx, uint64(len(payload)))
 	if err != nil || len(pointers) != 1 {
@@ -77,14 +67,29 @@ func exerciseBeforeRequest(t *testing.T, path string) {
 	if !module.Memory().Write(ptr, payload) {
 		t.Fatal("write guest input")
 	}
-	result, err := hook.Call(ctx, 1, uint64(ptr), uint64(len(payload)))
+	result, err := hook.Call(ctx, uint64(ptr), uint64(len(payload)))
 	if err != nil {
 		t.Fatalf("call hook: %v", err)
 	}
 	if len(result) != 1 || result[0] != 0 {
-		t.Fatalf("logger should pass through, got %v", result)
+		t.Fatalf("pass-through guest should return 0, got %v", result)
 	}
 	if _, err := dealloc.Call(ctx, uint64(ptr), uint64(len(payload))); err != nil {
 		t.Fatalf("dealloc: %v", err)
 	}
+}
+
+func instantiateEnvImports(ctx context.Context, runtime wazero.Runtime) error {
+	_, err := runtime.NewHostModuleBuilder("env").
+		NewFunctionBuilder().
+		WithFunc(func(context.Context, api.Module, int32, uint32, uint32) {}).
+		Export("log").
+		NewFunctionBuilder().
+		WithFunc(func(context.Context, api.Module, int32, uint32, uint32, float64, uint32, uint32) {}).
+		Export("emit_metric").
+		NewFunctionBuilder().
+		WithFunc(func(context.Context, api.Module, uint32, uint32, uint32, uint32) uint64 { return 0 }).
+		Export("host_call").
+		Instantiate(ctx)
+	return err
 }

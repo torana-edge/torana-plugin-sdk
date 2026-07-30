@@ -3,185 +3,204 @@
 package sdktest
 
 import (
-	"context"
-	"encoding/json"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
 	sdk "github.com/torana-edge/torana-plugin-sdk"
-	"github.com/torana-edge/torana-plugin-sdk/pb"
+	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
 
-// RequestResult is the outcome of a run_before_request dispatch.
-//
-// Err being non-nil is not an ordinary test failure to shrug at: in production
-// the SDK panics on a handler error, which traps the guest, and the host then
-// applies the plugin's failure_mode. A test that ignores Err is testing a
-// path the host treats as a crash.
+// RequestResult is the outcome of a before-request dispatch.
 type RequestResult struct {
-	// Request is what the plugin returned. Nil means pass-through — the host
-	// forwards the caller's original bytes unchanged.
-	Request *pb.ChatRequest
-	// PassedThrough is true when the plugin declined to modify the request.
+	Request       *pbv2.ChatRequest
 	PassedThrough bool
 	Err           error
-
-	// Verdicts the plugin set. Nil when it set none.
-	Block   *BlockVerdict
-	Respond *RespondVerdict
-	Route   *RouteVerdict
+	Raw           *pbv2.HookResult
 }
 
-type BlockVerdict struct {
-	Status  int32  `json:"status"`
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-type RespondVerdict struct {
-	Content string `json:"content"`
-}
-
-type RouteVerdict struct {
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
-}
-
-// BeforeRequest dispatches run_before_request. It fails the test if the plugin
-// registered no handler, because a plugin whose hook is unreachable is the
-// exact silent failure this package exists to expose.
-func (h *Harness) BeforeRequest(req *pb.ChatRequest) RequestResult {
+// BeforeRequest dispatches run_before_request via the v2 trampoline path.
+func (h *Harness) BeforeRequest(req *pbv2.ChatRequest) RequestResult {
 	h.t.Helper()
-	handler := sdk.RegisteredBeforeRequest()
-	if handler == nil {
+	if sdk.RegisteredBeforeRequest() == nil {
 		h.t.Fatal("sdktest: no run_before_request handler registered — " +
-			"registration must happen in init(), not main(): with -buildmode=c-shared " +
-			"the host calls _initialize and main() never runs")
+			"registration must happen in init(), not main()")
 	}
-
-	var out *pb.ChatRequest
+	in := &pbv2.HookInput{
+		RequestId: 1,
+		Payload:   &pbv2.HookInput_ChatRequest{ChatRequest: req},
+	}
+	var raw []byte
 	var err error
-	h.with(func() { out, err = handler(context.Background(), req) })
-
-	res := RequestResult{Request: out, PassedThrough: out == nil, Err: err}
-	if out != nil {
-		res.Block, res.Respond, res.Route = decodeVerdicts(h.t, out.ToranaMetaJson)
+	h.with(func() { raw, err = sdk.DispatchHook(in) })
+	res := RequestResult{Err: err, PassedThrough: len(raw) == 0}
+	if len(raw) == 0 {
+		return res
 	}
+	var hr pbv2.HookResult
+	if uerr := proto.Unmarshal(raw, &hr); uerr != nil {
+		res.Err = uerr
+		return res
+	}
+	res.Raw = &hr
+	res.Request = hr.GetReplaceRequest()
 	return res
 }
 
 // AfterResponse dispatches run_after_response.
-//
-// The payload is a pb.ChatRequest because that is what the v1 contract carries
-// on the response path — the host marshals the response into the request shape
-// and reads the reply back as one. There is no ChatResponse in v1.
-func (h *Harness) AfterResponse(resp *pb.ChatRequest) RequestResult {
+func (h *Harness) AfterResponse(resp *pbv2.ChatResponse, mutable bool) RequestResult {
 	h.t.Helper()
-	handler := sdk.RegisteredAfterResponse()
-	if handler == nil {
+	if sdk.RegisteredAfterResponse() == nil {
 		h.t.Fatal("sdktest: no run_after_response handler registered")
 	}
-	var out *pb.ChatRequest
-	var err error
-	h.with(func() { out, err = handler(context.Background(), resp) })
-	return RequestResult{Request: out, PassedThrough: out == nil, Err: err}
-}
-
-// StreamResult is the outcome of a run_on_stream_chunk dispatch.
-type StreamResult struct {
-	Result *pb.StreamEventResult
-	Err    error
-}
-
-// Handled reports whether the plugin took over this event. An unhandled result
-// means the host forwards the original event — including when a plugin builds
-// a result by hand and forgets to set Handled, which is a common silent bug
-// and the reason sdk.Suppress/Replace/Emit exist.
-func (s StreamResult) Handled() bool {
-	return s.Result != nil && s.Result.Handled
-}
-
-// Events is what the plugin emitted in place of the original. Empty with
-// Handled true means the event was suppressed.
-func (s StreamResult) Events() []*pb.StreamEvent {
-	if s.Result == nil {
-		return nil
+	in := &pbv2.HookInput{
+		RequestId: 1,
+		Payload: &pbv2.HookInput_AfterResponse{AfterResponse: &pbv2.AfterResponse{
+			Response: resp,
+			Mutable:  mutable,
+		}},
 	}
-	return s.Result.Events
+	var raw []byte
+	var err error
+	h.with(func() { raw, err = sdk.DispatchHook(in) })
+	res := RequestResult{Err: err, PassedThrough: len(raw) == 0}
+	if len(raw) == 0 {
+		return res
+	}
+	var hr pbv2.HookResult
+	if uerr := proto.Unmarshal(raw, &hr); uerr != nil {
+		res.Err = uerr
+		return res
+	}
+	res.Raw = &hr
+	return res
 }
 
-// StreamChunk dispatches run_on_stream_chunk for one event.
-func (h *Harness) StreamChunk(ev *pb.StreamEvent) StreamResult {
+// StreamResult is the outcome of a stream-chunk dispatch.
+type StreamResult struct {
+	Events        []*pbv2.StreamEvent
+	PassedThrough bool
+	Suppressed    bool
+	Err           error
+	Raw           *pbv2.HookResult
+}
+
+// StreamChunk dispatches run_on_stream_chunk.
+func (h *Harness) StreamChunk(ev *pbv2.StreamEvent) StreamResult {
 	h.t.Helper()
-	handler := sdk.RegisteredStreamChunk()
-	if handler == nil {
+	if sdk.RegisteredStreamChunk() == nil {
 		h.t.Fatal("sdktest: no run_on_stream_chunk handler registered")
 	}
-	var out *pb.StreamEventResult
+	in := &pbv2.HookInput{
+		RequestId: 1,
+		Payload:   &pbv2.HookInput_StreamEvent{StreamEvent: ev},
+	}
+	var raw []byte
 	var err error
-	h.with(func() { out, err = handler(context.Background(), ev) })
-	return StreamResult{Result: out, Err: err}
+	h.with(func() { raw, err = sdk.DispatchHook(in) })
+	res := StreamResult{Err: err, PassedThrough: len(raw) == 0}
+	if len(raw) == 0 {
+		return res
+	}
+	var hr pbv2.HookResult
+	if uerr := proto.Unmarshal(raw, &hr); uerr != nil {
+		res.Err = uerr
+		return res
+	}
+	res.Raw = &hr
+	if hr.GetSuppress() != nil {
+		res.Suppressed = true
+		return res
+	}
+	if evs := hr.GetEmitEvents(); evs != nil {
+		res.Events = evs.Events
+	}
+	return res
 }
 
-// StreamChunks dispatches a whole sequence, returning what the host would have
-// forwarded downstream. Stream plugins buffer tool-call fragments across
-// events, so testing them one event at a time misses the case that matters.
-func (h *Harness) StreamChunks(evs ...*pb.StreamEvent) []*pb.StreamEvent {
+// HTTPResult is the outcome of an HTTP-request dispatch.
+type HTTPResult struct {
+	Response      *pbv2.HttpResponse
+	PassedThrough bool
+	Err           error
+}
+
+// HTTPRequest dispatches run_on_http_request.
+func (h *Harness) HTTPRequest(req *pbv2.HttpRequest) HTTPResult {
 	h.t.Helper()
-	var out []*pb.StreamEvent
-	for _, ev := range evs {
-		res := h.StreamChunk(ev)
-		if res.Err != nil {
-			h.t.Fatalf("sdktest: stream chunk: %v", res.Err)
+	if sdk.RegisteredHTTPRequest() == nil {
+		h.t.Fatal("sdktest: no run_on_http_request handler registered")
+	}
+	in := &pbv2.HookInput{
+		RequestId: 1,
+		Payload:   &pbv2.HookInput_HttpRequest{HttpRequest: req},
+	}
+	var raw []byte
+	var err error
+	h.with(func() { raw, err = sdk.DispatchHook(in) })
+	res := HTTPResult{Err: err, PassedThrough: len(raw) == 0}
+	if len(raw) == 0 {
+		return res
+	}
+	var hr pbv2.HookResult
+	if uerr := proto.Unmarshal(raw, &hr); uerr != nil {
+		res.Err = uerr
+		return res
+	}
+	res.Response = hr.GetServeHttp()
+	return res
+}
+
+// TickResult is the outcome of a tick dispatch.
+type TickResult struct {
+	Outcome       *pbv2.TickOutcome
+	PassedThrough bool
+	Err           error
+}
+
+// Tick dispatches run_on_tick.
+func (h *Harness) Tick(req *pbv2.TickRequest) TickResult {
+	h.t.Helper()
+	if sdk.RegisteredTick() == nil {
+		h.t.Fatal("sdktest: no run_on_tick handler registered")
+	}
+	in := &pbv2.HookInput{
+		RequestId: 1,
+		Payload:   &pbv2.HookInput_TickRequest{TickRequest: req},
+	}
+	var raw []byte
+	var err error
+	h.with(func() { raw, err = sdk.DispatchHook(in) })
+	res := TickResult{Err: err, PassedThrough: len(raw) == 0}
+	if len(raw) == 0 {
+		return res
+	}
+	var hr pbv2.HookResult
+	if uerr := proto.Unmarshal(raw, &hr); uerr != nil {
+		res.Err = uerr
+		return res
+	}
+	res.Outcome = hr.GetTickOutcome()
+	return res
+}
+
+// BlockCalls returns block host-calls recorded during dispatches.
+func (h *Harness) BlockCalls() []HostCallEntry {
+	var out []HostCallEntry
+	for _, c := range h.Calls() {
+		if c.Command == "env.block_request" {
+			out = append(out, c)
 		}
-		if !res.Handled() {
-			out = append(out, ev)
-			continue
-		}
-		out = append(out, res.Events()...)
 	}
 	return out
 }
 
-// HTTPRequest dispatches run_on_http_request.
-func (h *Harness) HTTPRequest(req *pb.HttpRequest) (*pb.HttpResponse, error) {
-	h.t.Helper()
-	handler := sdk.RegisteredHTTPRequest()
-	if handler == nil {
-		h.t.Fatal("sdktest: no run_on_http_request handler registered")
-	}
-	var out *pb.HttpResponse
-	var err error
-	h.with(func() { out, err = handler(context.Background(), req) })
-	return out, err
-}
-
-// Tick dispatches run_on_tick.
-func (h *Harness) Tick(req *pb.TickRequest) (*pb.TickResult, error) {
-	h.t.Helper()
-	handler := sdk.RegisteredTick()
-	if handler == nil {
-		h.t.Fatal("sdktest: no run_on_tick handler registered")
-	}
-	var out *pb.TickResult
-	var err error
-	h.with(func() { out, err = handler(context.Background(), req) })
-	return out, err
-}
-
-// decodeVerdicts pulls the verdict keys out of ToranaMetaJson, which is where
-// sdk.BlockRequest and friends write them in v1.
-func decodeVerdicts(t testing.TB, raw []byte) (*BlockVerdict, *RespondVerdict, *RouteVerdict) {
+// DecodeBlockArgs unmarshals BlockRequestArgs from a recorded call.
+func DecodeBlockArgs(t testing.TB, args string) *pbv2.BlockRequestArgs {
 	t.Helper()
-	if len(raw) == 0 {
-		return nil, nil, nil
+	var a pbv2.BlockRequestArgs
+	if err := proto.Unmarshal([]byte(args), &a); err != nil {
+		t.Fatal(err)
 	}
-	var meta struct {
-		Block   *BlockVerdict   `json:"_block"`
-		Respond *RespondVerdict `json:"_respond"`
-		Route   *RouteVerdict   `json:"_route"`
-	}
-	if err := json.Unmarshal(raw, &meta); err != nil {
-		t.Fatalf("sdktest: decode torana meta: %v", err)
-	}
-	return meta.Block, meta.Respond, meta.Route
+	return &a
 }

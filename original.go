@@ -13,7 +13,7 @@ import (
 // Requires the env.original_request permission grant. Returns ok=false when
 // the grant is missing, the call runs outside a request, or decoding fails.
 func OriginalRequest() (*pb.ChatRequest, bool) {
-	res, err := HostCall("env.original_request", "")
+	res, err := hostCallString("env.original_request", "")
 	if err != nil || res == "" || res == `{"status":"error","message":"permission denied"}` {
 		return nil, false
 	}
@@ -32,7 +32,7 @@ func OriginalRequest() (*pb.ChatRequest, bool) {
 // Requires the env.original_response permission grant. Returns ok=false when
 // unavailable.
 func OriginalResponse() ([]byte, bool) {
-	res, err := HostCall("env.original_response", "")
+	res, err := hostCallString("env.original_response", "")
 	if err != nil || res == "" || res == `{"status":"error","message":"permission denied"}` {
 		return nil, false
 	}
