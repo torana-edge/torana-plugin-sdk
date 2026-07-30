@@ -169,6 +169,8 @@ message ToolCallRef {
 }
 
 message ToolCallDelta {
+  // Must equal the ContentBlockStart.index of the open tool-call block this
+  // delta belongs to. See StreamEvent index invariants.
   int32 index = 1;
   string arguments_delta = 2;
 }
@@ -228,6 +230,12 @@ message ProviderBlock {
 // some — contradictions a reader would have to know were impossible. A oneof
 // makes them unrepresentable.
 message ContentBlockStart {
+  // Unique within one streamed message for the lifetime of the block.
+  // Deltas and ContentBlockStop must use this same index. Duplicate indexes,
+  // deltas/stops with no matching open start, and stops that leave a block
+  // open are invalid. Adapters MUST assign distinct indexes to parallel
+  // tool-call parts (emitting Index:0 for every Gemini functionCall is not
+  // conformant). SignatureScopeToolCallBlockByIndex depends on this.
   int32 index = 1;
   oneof block {
     TextBlock text = 2;
@@ -238,6 +246,7 @@ message ContentBlockStart {
 }
 
 message ContentBlockStop {
+  // Must match the ContentBlockStart.index being closed.
   int32 index = 1;
 }
 
@@ -258,12 +267,19 @@ message ContentBlockStop {
 // Usage may arrive before or after MessageStop depending on the provider, and
 // StreamError may replace the remainder at any point. Everything else is
 // ordered as shown, and every block is opened and closed exactly once.
+//
+// Block index invariants (ABI): indexes are unique within one streamed
+// message; every ToolCallDelta / ContentBlockStop index must name exactly one
+// currently open ContentBlockStart; duplicate, open-missing, and stop-missing
+// sequences are invalid. Host Migration B must fix adapters that violate this
+// (e.g. Gemini emitting Index:0 for every parallel functionCall) before
+// enabling ToolCallBlockByIndex signature enforcement.
 message StreamEvent {
-  // Outbound mutations compose topology + semantics (see capabilities_outbound.go):
-  // required = topology (cardinality/order/boundaries/kind) ∪ every semantic
-  // section changed/removed/added; any changed/removed/added host-owned fact
-  // rejects. Host-owned means immutable, not unreturnable — identical re-emit
-  // is a no-op. A one-for-one TextDelta rewrite needs only
+  // Outbound mutations compose topology + semantics (see package
+  // outboundpolicy): required = topology (cardinality/order/boundaries/kind)
+  // ∪ every semantic section changed/removed/added; any changed/removed/added
+  // host-owned fact rejects. Host-owned means immutable, not unreturnable —
+  // identical re-emit is a no-op. A one-for-one TextDelta rewrite needs only
   // ir.messages.write.assistant. The recursive field-diff verifier is
   // Migration B (needs a stream-path benchmark first).
   oneof event {
@@ -272,8 +288,11 @@ message StreamEvent {
     ToolCallDelta tool_call_delta = 3;
     Usage usage = 4;
     StreamError error = 5;
-    // Opaque provider signature paired with the surrounding block (Gemini
-    // thoughtSignature on a standalone text/thought part).
+    // Opaque provider signature. When emitted with open text/thinking content
+    // it binds that block (CurrentContentBlock). When emitted alone after
+    // closed blocks (Code Assist trailing thoughtSignature + empty text) it
+    // is TrailingStandalone — preserve as SignatureDelta; do not synthesize
+    // an empty content block. Not used for the tool-call signature path.
     string signature_delta = 6;
     MessageStart message_start = 7;
     MessageStop message_stop = 8;

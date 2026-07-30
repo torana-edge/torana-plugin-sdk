@@ -1,9 +1,10 @@
-package plugin_sdk
+package outboundpolicy
 
 import (
 	"fmt"
 	"sort"
 
+	plugin_sdk "github.com/torana-edge/torana-plugin-sdk"
 	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -55,14 +56,11 @@ import (
 // Registries are package-private. Constructors are package-private. Public
 // accessors return values/clones so importers cannot mutate the authority
 // table or mint invalid policies.
-
-const (
-	// SectionStreamWrite is the topology grant: Suppress, fan-out, event-kind
-	// change, and content-block boundary/index changes. It is additive to
-	// semantic content grants and never alone authorises altering host-owned
-	// facts.
-	SectionStreamWrite WriteSection = "ir.stream.write"
-)
+//
+// Host/linter only: WASM guests must not import this package. Guest-relevant
+// capability names (ir.stream.write, …) live in the root plugin_sdk module.
+// Descriptor reflection runs in Validate(), not package init, so importing
+// hosts pay once explicitly rather than on every guest module instance.
 
 // PolicyKind classifies a field or HookResult action for the inventory.
 type PolicyKind int
@@ -117,19 +115,33 @@ const (
 	SignatureScopeUnspecified SignatureScope = iota
 	// SignatureScopeSameMessage: field on the signature's own message.
 	SignatureScopeSameMessage
-	// SignatureScopeCurrentContentBlock: content of the currently open
-	// text/thinking block (Gemini/Anthropic thinking signatures via
-	// signature_delta). Not the tool-call path.
+	// SignatureScopeCurrentContentBlock: signature_delta emitted together with
+	// an open text/thinking block (same provider part carried text/thinking and
+	// a thoughtSignature). Not the tool-call path.
 	SignatureScopeCurrentContentBlock
+	// SignatureScopeTrailingStandalone: signature_delta with no open content
+	// block — Code Assist's final {"thoughtSignature","text":""} part after
+	// earlier text. Host normalization: preserve as a standalone SignatureDelta
+	// after prior ContentBlockStops; do not synthesize an empty text/thinking
+	// block. Binds the preceding closed text/thinking content the assembler
+	// attributed to this turn (reject-or-clear if that content mutates while
+	// the token remains). Does not bind tool-call blocks. Non-streaming
+	// adapters must not drop signature-only empty-text parts (today's
+	// appendModel disagreement is a host Migration B fix).
+	SignatureScopeTrailingStandalone
 	// SignatureScopeToolCallBlockByIndex: ToolCallRef.signature binds id/name
 	// on the start event and ToolCallDelta.arguments_delta events that share
-	// the same ContentBlockStart.index (parallel tool calls must not cross).
+	// the same ContentBlockStart.index. Requires the ABI invariant that block
+	// indexes are unique within one streamed message (adapters must assign
+	// distinct indexes to parallel Gemini parts — today's Index:0 for every
+	// call is invalid under this contract).
 	SignatureScopeToolCallBlockByIndex
 )
 
 func (s SignatureScope) valid() bool {
 	switch s {
-	case SignatureScopeSameMessage, SignatureScopeCurrentContentBlock, SignatureScopeToolCallBlockByIndex:
+	case SignatureScopeSameMessage, SignatureScopeCurrentContentBlock,
+		SignatureScopeTrailingStandalone, SignatureScopeToolCallBlockByIndex:
 		return true
 	}
 	return false
@@ -139,11 +151,11 @@ func (s SignatureScope) valid() bool {
 // Values come only from the package-private registry constructors.
 type FieldPolicy struct {
 	kind     PolicyKind
-	section  WriteSection
+	section  plugin_sdk.WriteSection
 	delegate DelegateKind
 }
 
-func sectionPolicy(s WriteSection) FieldPolicy {
+func sectionPolicy(s plugin_sdk.WriteSection) FieldPolicy {
 	return FieldPolicy{kind: PolicySection, section: s}
 }
 
@@ -152,7 +164,7 @@ func hostOwnedPolicy() FieldPolicy {
 }
 
 func topologyPolicy() FieldPolicy {
-	return FieldPolicy{kind: PolicyTopology, section: SectionStreamWrite}
+	return FieldPolicy{kind: PolicyTopology, section: plugin_sdk.SectionStreamWrite}
 }
 
 func delegatePolicy(d DelegateKind) FieldPolicy {
@@ -171,7 +183,7 @@ func (p FieldPolicy) IsContainer() bool { return p.kind == PolicyContainer }
 
 // Section returns the content or topology section when Kind is PolicySection
 // or PolicyTopology.
-func (p FieldPolicy) Section() (WriteSection, bool) {
+func (p FieldPolicy) Section() (plugin_sdk.WriteSection, bool) {
 	switch p.kind {
 	case PolicySection, PolicyTopology:
 		return p.section, true
@@ -192,10 +204,10 @@ func (p FieldPolicy) validate() error {
 	case PolicyUnspecified:
 		return fmt.Errorf("PolicyUnspecified is invalid")
 	case PolicySection:
-		if p.section == "" || p.section == SectionStreamWrite {
+		if p.section == "" || p.section == plugin_sdk.SectionStreamWrite {
 			return fmt.Errorf("PolicySection requires a non-topology write section")
 		}
-		if !IsWritePermission(string(p.section)) {
+		if !plugin_sdk.IsWritePermission(string(p.section)) {
 			return fmt.Errorf("PolicySection %q is not a write grant", p.section)
 		}
 		if p.delegate != DelegateUnspecified {
@@ -213,7 +225,7 @@ func (p FieldPolicy) validate() error {
 			return fmt.Errorf("PolicyDelegate must not set Section")
 		}
 	case PolicyTopology:
-		if p.section != SectionStreamWrite {
+		if p.section != plugin_sdk.SectionStreamWrite {
 			return fmt.Errorf("PolicyTopology must use ir.stream.write")
 		}
 		if p.delegate != DelegateUnspecified {
@@ -276,14 +288,14 @@ func (b SignatureBinding) validateShape() error {
 				return fmt.Errorf("%s.%s content[%d]: ToolCallBlockByIndex requires Message",
 					b.Message, b.SignatureField, i)
 			}
-		case SignatureScopeCurrentContentBlock:
+		case SignatureScopeCurrentContentBlock, SignatureScopeTrailingStandalone:
 			if b.SignatureField != "signature_delta" {
-				return fmt.Errorf("%s.%s: CurrentContentBlock only valid on signature_delta",
-					b.Message, b.SignatureField)
+				return fmt.Errorf("%s.%s: %v only valid on signature_delta",
+					b.Message, b.SignatureField, c.Scope)
 			}
 			if c.Message == "" {
-				return fmt.Errorf("%s.%s content[%d]: CurrentContentBlock requires Message",
-					b.Message, b.SignatureField, i)
+				return fmt.Errorf("%s.%s content[%d]: scope %v requires Message",
+					b.Message, b.SignatureField, i, c.Scope)
 			}
 		}
 	}
@@ -320,12 +332,17 @@ var signatureBindings = []SignatureBinding{
 		},
 	},
 	{
-		// Gemini/Anthropic thinking (and text) signatures — not the function-call path.
+		// Text/thinking signatures — not the function-call path.
+		// CurrentContentBlock: signature on the same provider part as text/thinking.
+		// TrailingStandalone: Code Assist final thoughtSignature-only part
+		// (see torana-edge gemini stream standalone branch + codeassist-stream-text.sse).
 		Message:        "torana.v2.StreamEvent",
 		SignatureField: "signature_delta",
 		Content: []SignatureContentRef{
 			{Scope: SignatureScopeCurrentContentBlock, Message: "torana.v2.StreamEvent", Field: "text_delta"},
 			{Scope: SignatureScopeCurrentContentBlock, Message: "torana.v2.StreamEvent", Field: "thinking_delta"},
+			{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.StreamEvent", Field: "text_delta"},
+			{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.StreamEvent", Field: "thinking_delta"},
 		},
 	},
 }
@@ -342,7 +359,7 @@ var chatResponseFieldPolicies = map[string]FieldPolicy{
 	"model":                    hostOwnedPolicy(),
 	"id":                       hostOwnedPolicy(),
 	"message":                  containerPolicy(), // recurse; do not auto-charge assistant
-	"finish_reason":            sectionPolicy(SectionMessagesAssistant),
+	"finish_reason":            sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 	"usage":                    hostOwnedPolicy(),
 	"upstream_status":          hostOwnedPolicy(),
 	"duration_ms":              hostOwnedPolicy(),
@@ -351,21 +368,21 @@ var chatResponseFieldPolicies = map[string]FieldPolicy{
 
 var responseMessageFieldPolicies = map[string]FieldPolicy{
 	"role":               hostOwnedPolicy(),
-	"content":            sectionPolicy(SectionMessagesAssistant),
-	"content_parts_json": sectionPolicy(SectionMessagesAssistant),
-	"thinking":           sectionPolicy(SectionMessagesAssistant),
+	"content":            sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	"content_parts_json": sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	"thinking":           sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 	"thinking_signature": hostOwnedPolicy(),
-	"redacted_thinking":  sectionPolicy(SectionMessagesAssistant),
-	"tool_calls":         sectionPolicy(SectionMessagesAssistant),
-	"tool_call_id":       sectionPolicy(SectionMessagesAssistant),
-	"tool_name":          sectionPolicy(SectionMessagesAssistant),
-	"cache_control_json": sectionPolicy(SectionMessagesAssistant),
+	"redacted_thinking":  sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	"tool_calls":         sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	"tool_call_id":       sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	"tool_name":          sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	"cache_control_json": sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 }
 
 var responseToolCallFieldPolicies = map[string]FieldPolicy{
-	"id":             sectionPolicy(SectionMessagesAssistant),
-	"name":           sectionPolicy(SectionMessagesAssistant),
-	"arguments_json": sectionPolicy(SectionMessagesAssistant),
+	"id":             sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	"name":           sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	"arguments_json": sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 	"signature":      hostOwnedPolicy(),
 }
 
@@ -377,8 +394,8 @@ var usageFieldPolicies = map[string]FieldPolicy{
 }
 
 var streamEventVariantPolicies = map[string]FieldPolicy{
-	"text_delta":          sectionPolicy(SectionMessagesAssistant),
-	"thinking_delta":      sectionPolicy(SectionMessagesAssistant),
+	"text_delta":          sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	"thinking_delta":      sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 	"tool_call_delta":     containerPolicy(), // index vs args decided by nested fields
 	"usage":               hostOwnedPolicy(),
 	"error":               hostOwnedPolicy(),
@@ -391,7 +408,7 @@ var streamEventVariantPolicies = map[string]FieldPolicy{
 
 var toolCallDeltaFieldPolicies = map[string]FieldPolicy{
 	"index":           topologyPolicy(),
-	"arguments_delta": sectionPolicy(SectionMessagesAssistant),
+	"arguments_delta": sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 }
 
 var streamErrorFieldPolicies = map[string]FieldPolicy{
@@ -406,7 +423,7 @@ var messageStartFieldPolicies = map[string]FieldPolicy{
 }
 
 var messageStopFieldPolicies = map[string]FieldPolicy{
-	"finish_reason": sectionPolicy(SectionMessagesAssistant),
+	"finish_reason": sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 }
 
 var contentBlockStartFieldPolicies = map[string]FieldPolicy{
@@ -418,8 +435,8 @@ var contentBlockStartFieldPolicies = map[string]FieldPolicy{
 }
 
 var toolCallRefFieldPolicies = map[string]FieldPolicy{
-	"id":        sectionPolicy(SectionMessagesAssistant),
-	"name":      sectionPolicy(SectionMessagesAssistant),
+	"id":        sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	"name":      sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 	"signature": hostOwnedPolicy(),
 }
 
@@ -482,11 +499,19 @@ var outboundMessageFieldPolicies = map[protoreflect.FullName]map[string]FieldPol
 //   - parallel tool calls: mutating block B args must not be gated by block A's signature
 //   - multi-block: signature_delta binds current text/thinking block only
 //
-// Topology:
+// Topology / indexes:
 //   - one-for-one TextDelta rewrite → assistant only
 //   - suppress TextDelta → topology + assistant
+//   - block indexes unique within one streamed message; delta/stop match open start
+//   - parallel tool calls: two indexes, only first signed → second args unbound by first sig
+//   - Gemini adapters must stop emitting Index:0 for every function-call part
+//
+// Trailing standalone signature (Code Assist):
+//   - SignatureDelta after closed text blocks, no open block → TrailingStandalone
+//   - do not synthesize empty text block; align non-stream appendModel drop
 
 func init() {
+	// Shape-only: no protobuf reflection (hosts call Validate once explicitly).
 	for msg, fields := range outboundMessageFieldPolicies {
 		for name, p := range fields {
 			if err := p.validate(); err != nil {
@@ -494,15 +519,51 @@ func init() {
 			}
 		}
 	}
-	descs := outboundDescriptors()
 	for _, b := range signatureBindings {
 		if err := b.validateShape(); err != nil {
 			panic(err)
 		}
-		if err := validateSignatureBindingAgainstProto(b, descs); err != nil {
-			panic(err)
+	}
+}
+
+// Validate checks the registry against protobuf descriptors and kind/field
+// invariants (PolicyContainer only on message fields, PolicyDelegate only on
+// message/wrapper fields). Hosts and linters should call this once at process
+// start. Guests must not import this package.
+func Validate() error {
+	descs := outboundDescriptors()
+	for msg, fields := range outboundMessageFieldPolicies {
+		desc, ok := descs[msg]
+		if !ok {
+			// Empty fieldless registries (TextBlock, Suppress, …) still need a descriptor.
+			return fmt.Errorf("outbound policy message %s has no protobuf descriptor", msg)
+		}
+		for name, p := range fields {
+			fd := desc.Fields().ByName(protoreflect.Name(name))
+			if fd == nil {
+				return fmt.Errorf("%s.%s missing from protobuf", msg, name)
+			}
+			switch p.Kind() {
+			case PolicyContainer:
+				if fd.Kind() != protoreflect.MessageKind {
+					return fmt.Errorf("%s.%s: PolicyContainer requires a message field, got %v", msg, name, fd.Kind())
+				}
+			case PolicyDelegate:
+				if fd.Kind() != protoreflect.MessageKind {
+					return fmt.Errorf("%s.%s: PolicyDelegate requires a message field, got %v", msg, name, fd.Kind())
+				}
+			}
 		}
 	}
+	for _, b := range signatureBindings {
+		if err := b.validateShape(); err != nil {
+			return err
+		}
+		if err := validateSignatureBindingAgainstProto(b, descs); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func outboundDescriptors() map[protoreflect.FullName]protoreflect.MessageDescriptor {
@@ -585,7 +646,7 @@ func validateSignatureBindingAgainstProto(b SignatureBinding, descs map[protoref
 // boundary/action changes. It does not alone authorise content or host-owned
 // changes. The recursive field-diff verifier that applies it lives in
 // Migration B.
-func StreamTopologySection() WriteSection { return SectionStreamWrite }
+func StreamTopologySection() plugin_sdk.WriteSection { return plugin_sdk.SectionStreamWrite }
 
 // OutboundMessageRegistered reports whether msg has a field-policy inventory.
 func OutboundMessageRegistered(msg protoreflect.FullName) bool {

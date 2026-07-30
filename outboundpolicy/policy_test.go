@@ -1,24 +1,25 @@
-package plugin_sdk
+package outboundpolicy
 
 import (
 	"testing"
 
+	plugin_sdk "github.com/torana-edge/torana-plugin-sdk"
 	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 func TestOutboundWriteGrantsAreRequestable(t *testing.T) {
-	if !IsWritePermission(string(SectionStreamWrite)) {
+	if !plugin_sdk.IsWritePermission(string(plugin_sdk.SectionStreamWrite)) {
 		t.Fatal("ir.stream.write must be in WritePermissions")
 	}
-	if !IsPermission(string(SectionStreamWrite)) {
+	if !plugin_sdk.IsPermission(string(plugin_sdk.SectionStreamWrite)) {
 		t.Fatal("ir.stream.write must be in Permissions")
 	}
-	if !IsPermission("env.set_identity") {
+	if !plugin_sdk.IsPermission("env.set_identity") {
 		t.Fatal("env.set_identity must be in Permissions")
 	}
-	if StreamTopologySection() != SectionStreamWrite {
+	if StreamTopologySection() != plugin_sdk.SectionStreamWrite {
 		t.Fatal("StreamTopologySection must be ir.stream.write")
 	}
 }
@@ -211,7 +212,7 @@ func TestNestedContainerEvaluationPins(t *testing.T) {
 	}
 	args, _ := OutboundFieldPolicy("torana.v2.ToolCallDelta", "arguments_delta")
 	sec, ok := args.Section()
-	if args.Kind() != PolicySection || !ok || sec != SectionMessagesAssistant {
+	if args.Kind() != PolicySection || !ok || sec != plugin_sdk.SectionMessagesAssistant {
 		t.Fatal("arguments_delta must be assistant — args-only change → assistant only")
 	}
 
@@ -252,16 +253,16 @@ func TestFieldPolicyRejectsInvalidStates(t *testing.T) {
 		{"zero", FieldPolicy{}},
 		{"unknown kind", FieldPolicy{kind: PolicyKind(99)}},
 		{"section empty", FieldPolicy{kind: PolicySection}},
-		{"section topology name", FieldPolicy{kind: PolicySection, section: SectionStreamWrite}},
-		{"section with delegate", FieldPolicy{kind: PolicySection, section: SectionMessagesAssistant, delegate: DelegateRequest}},
-		{"host-owned with section", FieldPolicy{kind: PolicyHostOwned, section: SectionMessagesAssistant}},
+		{"section topology name", FieldPolicy{kind: PolicySection, section: plugin_sdk.SectionStreamWrite}},
+		{"section with delegate", FieldPolicy{kind: PolicySection, section: plugin_sdk.SectionMessagesAssistant, delegate: DelegateRequest}},
+		{"host-owned with section", FieldPolicy{kind: PolicyHostOwned, section: plugin_sdk.SectionMessagesAssistant}},
 		{"host-owned with delegate", FieldPolicy{kind: PolicyHostOwned, delegate: DelegateStream}},
 		{"delegate unspecified", FieldPolicy{kind: PolicyDelegate}},
 		{"delegate unknown", FieldPolicy{kind: PolicyDelegate, delegate: DelegateKind(99)}},
-		{"delegate with section", FieldPolicy{kind: PolicyDelegate, delegate: DelegateStream, section: SectionStreamWrite}},
-		{"topology wrong section", FieldPolicy{kind: PolicyTopology, section: SectionMessagesAssistant}},
-		{"topology with delegate", FieldPolicy{kind: PolicyTopology, section: SectionStreamWrite, delegate: DelegateResponse}},
-		{"container with section", FieldPolicy{kind: PolicyContainer, section: SectionMessagesAssistant}},
+		{"delegate with section", FieldPolicy{kind: PolicyDelegate, delegate: DelegateStream, section: plugin_sdk.SectionStreamWrite}},
+		{"topology wrong section", FieldPolicy{kind: PolicyTopology, section: plugin_sdk.SectionMessagesAssistant}},
+		{"topology with delegate", FieldPolicy{kind: PolicyTopology, section: plugin_sdk.SectionStreamWrite, delegate: DelegateResponse}},
+		{"container with section", FieldPolicy{kind: PolicyContainer, section: plugin_sdk.SectionMessagesAssistant}},
 		{"container with delegate", FieldPolicy{kind: PolicyContainer, delegate: DelegateStream}},
 	}
 	for _, tc := range cases {
@@ -270,7 +271,7 @@ func TestFieldPolicyRejectsInvalidStates(t *testing.T) {
 		}
 	}
 	for _, p := range []FieldPolicy{
-		sectionPolicy(SectionMessagesAssistant),
+		sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 		hostOwnedPolicy(),
 		topologyPolicy(),
 		delegatePolicy(DelegateStream),
@@ -288,7 +289,7 @@ func TestOutboundPolicyAccessorsAreCopies(t *testing.T) {
 		t.Fatal("usage should be host-owned")
 	}
 	p.kind = PolicySection
-	p.section = SectionMessagesAssistant
+	p.section = plugin_sdk.SectionMessagesAssistant
 	again, _ := OutboundFieldPolicy("torana.v2.ChatResponse", "usage")
 	if !again.IsHostOwned() {
 		t.Fatal("mutating returned FieldPolicy must not affect registry")
@@ -332,11 +333,8 @@ func TestSignatureBindingsPinned(t *testing.T) {
 			t.Errorf("shape: %v", err)
 		}
 	}
-	descs := outboundDescriptors()
-	for _, b := range AllSignatureBindings() {
-		if err := validateSignatureBindingAgainstProto(b, descs); err != nil {
-			t.Errorf("proto: %v", err)
-		}
+	if err := Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
 	}
 
 	ref := byMsg["torana.v2.ToolCallRef"]
@@ -358,9 +356,15 @@ func TestSignatureBindingsPinned(t *testing.T) {
 	if sig.SignatureField != "signature_delta" {
 		t.Fatal("signature_delta binding missing")
 	}
+	var sawCurrent, sawTrailing bool
 	for _, c := range sig.Content {
-		if c.Scope != SignatureScopeCurrentContentBlock {
-			t.Fatalf("signature_delta content must be CurrentContentBlock, got %v", c.Scope)
+		switch c.Scope {
+		case SignatureScopeCurrentContentBlock:
+			sawCurrent = true
+		case SignatureScopeTrailingStandalone:
+			sawTrailing = true
+		default:
+			t.Fatalf("signature_delta unexpected scope %v", c.Scope)
 		}
 		if c.Message == "torana.v2.ToolCallRef" || c.Message == "torana.v2.ToolCallDelta" {
 			t.Fatal("signature_delta must not bind the tool-call path")
@@ -369,10 +373,16 @@ func TestSignatureBindingsPinned(t *testing.T) {
 			t.Fatalf("unexpected signature_delta content field %s", c.Field)
 		}
 	}
+	if !sawCurrent || !sawTrailing {
+		t.Fatal("signature_delta must cover CurrentContentBlock and TrailingStandalone")
+	}
 
 	// Parallel / multi-block correlation is carried by Scope, not by flat refs.
 	if SignatureScopeToolCallBlockByIndex == SignatureScopeCurrentContentBlock {
 		t.Fatal("scopes must remain distinct")
+	}
+	if SignatureScopeTrailingStandalone == SignatureScopeCurrentContentBlock {
+		t.Fatal("trailing standalone must be distinct from current block")
 	}
 }
 
@@ -400,5 +410,46 @@ func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 		if err := b.validateShape(); err == nil {
 			t.Errorf("case %d: expected shape error", i)
 		}
+	}
+}
+
+func TestValidateAgainstProto(t *testing.T) {
+	if err := Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPolicyContainerRejectedOnScalar(t *testing.T) {
+	// Simulate a bad registry entry: PolicyContainer on a scalar would be
+	// caught by Validate when wired into outboundMessageFieldPolicies.
+	descs := outboundDescriptors()
+	fd := descs["torana.v2.ChatResponse"].Fields().ByName("model")
+	if fd == nil || fd.Kind() == protoreflect.MessageKind {
+		t.Fatal("expected scalar model field")
+	}
+	// Direct invariant the inventory walk enforces:
+	if containerPolicy().Kind() == PolicyContainer && fd.Kind() != protoreflect.MessageKind {
+		// ok — this is the condition Validate checks
+	}
+	bad := map[string]FieldPolicy{"model": containerPolicy()}
+	old := outboundMessageFieldPolicies["torana.v2.ChatResponse"]
+	outboundMessageFieldPolicies["torana.v2.ChatResponse"] = bad
+	defer func() { outboundMessageFieldPolicies["torana.v2.ChatResponse"] = old }()
+	if err := Validate(); err == nil {
+		t.Fatal("expected PolicyContainer-on-scalar to fail Validate")
+	}
+}
+
+func TestPolicyDelegateRejectedOnScalar(t *testing.T) {
+	old := outboundMessageFieldPolicies["torana.v2.ChatResponse"]
+	bad := map[string]FieldPolicy{}
+	for k, v := range old {
+		bad[k] = v
+	}
+	bad["model"] = delegatePolicy(DelegateStream)
+	outboundMessageFieldPolicies["torana.v2.ChatResponse"] = bad
+	defer func() { outboundMessageFieldPolicies["torana.v2.ChatResponse"] = old }()
+	if err := Validate(); err == nil {
+		t.Fatal("expected PolicyDelegate-on-scalar to fail Validate")
 	}
 }

@@ -218,10 +218,13 @@ Opaque signatures (`thinking_signature`, `ToolCall.signature`,
 `ToolCallRef.signature`) bind provider tokens to content. Mutating signed
 content while leaving the signature in place is invalid — the host must reject
 that mutation or clear the signature. On the stream path, `ToolCallRef.signature`
-binds `id`/`name` and `ToolCallDelta.arguments_delta` for the **same content-block
-index** (parallel tool calls must not cross-bind). Streamed `signature_delta`
-binds the **current** text/thinking block only — not the tool-call path.
-`StreamError` is host-owned (do not forge upstream failures).
+binds `id`/`name` and `ToolCallDelta.arguments_delta` for the **same unique
+content-block index** (parallel tool calls must not share Index:0). Streamed
+`signature_delta` with open text/thinking binds that block; a trailing
+signature-only part (Code Assist) is standalone — preserve it without
+synthesizing an empty block. `StreamError` is host-owned (do not forge upstream
+failures). Host enforcement tables live in package `outboundpolicy` (not for
+WASM guests).
 
 **Reading the request**
 

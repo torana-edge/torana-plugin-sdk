@@ -215,13 +215,19 @@ authority matches (assistant text on request and response). Topology is separate
   Mutating signed content while leaving the signature in place is invalid; the
   host must reject that mutation or clear the signature. Streamed tool-call
   signatures bind `id`/`name` and assembled `arguments_delta` for the **same
-  content-block index**. `signature_delta` binds the current text/thinking
-  block only (not tool calls).
+  unique content-block index** (adapters must assign distinct indexes to
+  parallel calls). `signature_delta` with open text/thinking binds that block;
+  a trailing signature-only part (Code Assist) is standalone — preserve it, do
+  not synthesize an empty block, and bind the preceding attributed
+  text/thinking of the turn.
+* Block indexes are unique within one streamed message; delta/stop must match
+  the open start. Duplicate/open-missing/stop-missing sequences are invalid.
 * `StreamError` is host-owned. Do not forge provider-looking upstream failures;
   suppress under topology, trap under `failure_mode`, or use attributed verdicts.
 * Nested message fields use `PolicyContainer` (or presence-sensitive
   Section/Topology): same presence recurses without auto-charging the parent;
   an index-only `ToolCallDelta` change needs topology only, not assistant.
+  (Host enforcement vocabulary: package `outboundpolicy` — not imported by guests.)
 
 ## 7. Summary Checklist for AI Agents
 1. Did I use a real allocator (not a bump allocator)?

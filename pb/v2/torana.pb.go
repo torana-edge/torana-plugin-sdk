@@ -855,9 +855,11 @@ func (x *ToolCallRef) GetSignature() string {
 }
 
 type ToolCallDelta struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	Index          int32                  `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
-	ArgumentsDelta string                 `protobuf:"bytes,2,opt,name=arguments_delta,json=argumentsDelta,proto3" json:"arguments_delta,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Must equal the ContentBlockStart.index of the open tool-call block this
+	// delta belongs to. See StreamEvent index invariants.
+	Index          int32  `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	ArgumentsDelta string `protobuf:"bytes,2,opt,name=arguments_delta,json=argumentsDelta,proto3" json:"arguments_delta,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -1211,7 +1213,13 @@ func (x *ProviderBlock) GetKind() string {
 // makes them unrepresentable.
 type ContentBlockStart struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	Index int32                  `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	// Unique within one streamed message for the lifetime of the block.
+	// Deltas and ContentBlockStop must use this same index. Duplicate indexes,
+	// deltas/stops with no matching open start, and stops that leave a block
+	// open are invalid. Adapters MUST assign distinct indexes to parallel
+	// tool-call parts (emitting Index:0 for every Gemini functionCall is not
+	// conformant). SignatureScopeToolCallBlockByIndex depends on this.
+	Index int32 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
 	// Types that are valid to be assigned to Block:
 	//
 	//	*ContentBlockStart_Text
@@ -1332,8 +1340,9 @@ func (*ContentBlockStart_ToolCall) isContentBlockStart_Block() {}
 func (*ContentBlockStart_Provider) isContentBlockStart_Block() {}
 
 type ContentBlockStop struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Index         int32                  `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Must match the ContentBlockStart.index being closed.
+	Index         int32 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1392,13 +1401,20 @@ func (x *ContentBlockStop) GetIndex() int32 {
 // Usage may arrive before or after MessageStop depending on the provider, and
 // StreamError may replace the remainder at any point. Everything else is
 // ordered as shown, and every block is opened and closed exactly once.
+//
+// Block index invariants (ABI): indexes are unique within one streamed
+// message; every ToolCallDelta / ContentBlockStop index must name exactly one
+// currently open ContentBlockStart; duplicate, open-missing, and stop-missing
+// sequences are invalid. Host Migration B must fix adapters that violate this
+// (e.g. Gemini emitting Index:0 for every parallel functionCall) before
+// enabling ToolCallBlockByIndex signature enforcement.
 type StreamEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Outbound mutations compose topology + semantics (see capabilities_outbound.go):
-	// required = topology (cardinality/order/boundaries/kind) ∪ every semantic
-	// section changed/removed/added; any changed/removed/added host-owned fact
-	// rejects. Host-owned means immutable, not unreturnable — identical re-emit
-	// is a no-op. A one-for-one TextDelta rewrite needs only
+	// Outbound mutations compose topology + semantics (see package
+	// outboundpolicy): required = topology (cardinality/order/boundaries/kind)
+	// ∪ every semantic section changed/removed/added; any changed/removed/added
+	// host-owned fact rejects. Host-owned means immutable, not unreturnable —
+	// identical re-emit is a no-op. A one-for-one TextDelta rewrite needs only
 	// ir.messages.write.assistant. The recursive field-diff verifier is
 	// Migration B (needs a stream-path benchmark first).
 	//
@@ -1571,8 +1587,11 @@ type StreamEvent_Error struct {
 }
 
 type StreamEvent_SignatureDelta struct {
-	// Opaque provider signature paired with the surrounding block (Gemini
-	// thoughtSignature on a standalone text/thought part).
+	// Opaque provider signature. When emitted with open text/thinking content
+	// it binds that block (CurrentContentBlock). When emitted alone after
+	// closed blocks (Code Assist trailing thoughtSignature + empty text) it
+	// is TrailingStandalone — preserve as SignatureDelta; do not synthesize
+	// an empty content block. Not used for the tool-call signature path.
 	SignatureDelta string `protobuf:"bytes,6,opt,name=signature_delta,json=signatureDelta,proto3,oneof"`
 }
 
