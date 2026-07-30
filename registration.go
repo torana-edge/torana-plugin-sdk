@@ -12,8 +12,9 @@ import "reflect"
 // main() instead of init(), which is the most expensive footgun in the v1 SDK.
 //
 // Panicking is right here in a way it usually is not. This runs at
-// _initialize, before the host has dispatched anything, so the failure is a
-// broken build rather than a broken request — and a plugin whose handlers are
+// _initialize, before the host has dispatched anything, so it surfaces as a
+// plugin that fails to load rather than as a broken request. The plugin still
+// compiles — this is not a build error — and a plugin whose handlers are
 // ambiguous should not load at all.
 //
 // There is deliberately no multi-handler support. Two handlers for one hook
