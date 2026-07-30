@@ -113,11 +113,16 @@ jobs:
       - run: go test ./conformance/host
         env:
           TORANA_GO_GUEST: /tmp/go-allhooks.wasm
+          TORANA_GO_GUEST_MANIFEST: conformance/guests/go-allhooks/plugin.json
       # The example plugins are what release.yml actually publishes. Pointing
       # the conformance vars at the all-hooks guests above would leave the
       # shipped artifacts with only a compile check, so run the run_hook ABI
       # test against the Go example too.
       - run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -buildvcs=false -o /tmp/go-logger.wasm ./examples/go-logger
-      - run: go test ./conformance/host -run TestCompiledGoGuestImplementsRunHook -count=1
+      # Both the run_hook exercise and the bitmap/manifest comparison: the
+      # shipped example is what release.yml publishes, so its exported hook set
+      # must match its manifest exactly, not merely be non-zero.
+      - run: go test ./conformance/host -run 'TestCompiledGoGuestImplementsRunHook|TestGuestBitmapMatchesManifest' -count=1
         env:
           TORANA_GO_GUEST: /tmp/go-logger.wasm
+          TORANA_GO_GUEST_MANIFEST: examples/go-logger/plugin.json

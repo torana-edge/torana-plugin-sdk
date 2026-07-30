@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
 
 // The shipped Go logger is the customer-facing template. A compile-only check
@@ -33,22 +31,21 @@ func TestGoLoggerManifestMatchesV2Surface(t *testing.T) {
 	if len(m.Hooks) == 0 {
 		t.Fatal("go-logger must declare at least one hook")
 	}
-	var declared []pbv2.Hook
 	for _, h := range m.Hooks {
-		hk, ok := ManifestHookName(h.Name)
-		if !ok {
+		if _, ok := ManifestHookName(h.Name); !ok {
 			t.Fatalf("unknown hook %q in %s", h.Name, manifestPath)
 		}
-		declared = append(declared, hk)
 	}
-	// Exact bitmap the guest must export once registrations match the manifest.
-	want, err := pbv2.ExpectedBitmap(declared)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := pbv2.ValidateManifestHooks(want, declared); err != nil {
-		t.Fatal(err)
-	}
+	// Whether the BUILT guest exports this exact hook set is checked by
+	// conformance/host's TestGuestBitmapMatchesManifest, which reads
+	// supported_hooks out of the wasm.
+	//
+	// It deliberately is not checked here. This test previously derived the
+	// expected bitmap from the manifest with ExpectedBitmap and then validated
+	// that bitmap against the same manifest — two helpers agreeing with each
+	// other, never the guest. Changing the registration to tick while leaving
+	// the manifest alone passed, which is the drift it claimed to prevent.
+	// A source file cannot answer the question; only the compiled artifact can.
 
 	src, err := os.ReadFile(filepath.Join("examples", "go-logger", "main.go"))
 	if err != nil {
