@@ -16,10 +16,11 @@ option go_package = "github.com/torana-edge/torana-plugin-sdk/pb/v2";
 //     wrong hook until someone remembered to check.
 //   - Guests ALSO export supported_hooks() -> u32, a bitmap of hooks the module
 //     actually implements. That is startup introspection, not a second dispatch
-//     discriminator: run_hook still routes only from the payload. Without it,
-//     collapsing five exports to one would erase the only artifact-level proof
-//     that a declared manifest hook has a handler — a plugin could declare five,
-//     register one, pass load, and fail on customer traffic.
+//     discriminator: run_hook still routes only from the payload. The bitmap
+//     must exactly equal the manifest hook set (missing and unexpected bits,
+//     bit 0, unassigned bits, and an empty/zero set are load-time errors).
+//     Without it, collapsing five exports to one would erase the only
+//     artifact-level proof that a declared hook has a handler.
 //   - Hook payloads are enveloped and self-describing. In v1 a mis-dispatched
 //     payload decoded as an EMPTY message of whatever type the hook expected,
 //     and every plugin treated that as a legitimate empty request.
