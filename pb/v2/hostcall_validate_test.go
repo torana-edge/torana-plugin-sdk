@@ -188,6 +188,12 @@ func TestVerdictAndMetaAppendArgs(t *testing.T) {
 		if err := (&v2.BlockRequestArgs{Code: "pii"}).Validate(); err == nil {
 			t.Fatal("zero status must fail")
 		}
+		if err := (&v2.BlockRequestArgs{Status: 200, Code: "pii"}).Validate(); err == nil {
+			t.Fatal("2xx status must fail for a block verdict")
+		}
+		if err := (&v2.BlockRequestArgs{Status: 99, Code: "pii"}).Validate(); err == nil {
+			t.Fatal("status below 400 must fail")
+		}
 		if err := (&v2.BlockRequestArgs{Status: 422}).Validate(); err == nil {
 			t.Fatal("empty code must fail")
 		}

@@ -1809,8 +1809,11 @@ func (x *HttpRequest) GetBody() []byte {
 
 // Response produced by a plugin's run_on_http_request hook.
 type HttpResponse struct {
-	state  protoimpl.MessageState `protogen:"open.v1"`
-	Status int32                  `protobuf:"varint,1,opt,name=status,proto3" json:"status,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// HTTP status the host will write. Must be a final status in 200–599
+	// (informational 1xx is not terminal under net/http). 204, 205, and 304 must
+	// have an empty body; see HttpResponse.Validate.
+	Status int32 `protobuf:"varint,1,opt,name=status,proto3" json:"status,omitempty"`
 	// JSON-encoded map of response headers (map[string][]string). The host
 	// applies its own allowlist; anything outside it fails the response.
 	HeadersJson   []byte `protobuf:"bytes,2,opt,name=headers_json,json=headersJson,proto3" json:"headers_json,omitempty"`
@@ -1952,11 +1955,12 @@ func (x *TickRequest) GetIntervalMs() int64 {
 }
 
 // What a plugin did during a tick. Reported for observability only; the host
-// attaches no meaning to it.
+// attaches no meaning to it beyond refusing a negative count.
 type TickOutcome struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Actions       int32                  `protobuf:"varint,1,opt,name=actions,proto3" json:"actions,omitempty"`
-	Note          string                 `protobuf:"bytes,2,opt,name=note,proto3" json:"note,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Non-negative count of countable actions the plugin took. Zero is allowed.
+	Actions       int32  `protobuf:"varint,1,opt,name=actions,proto3" json:"actions,omitempty"`
+	Note          string `protobuf:"bytes,2,opt,name=note,proto3" json:"note,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2597,8 +2601,7 @@ func (*HostCallResult_Error) isHostCallResult_Result() {}
 // Short-circuits the pipeline with a provider-shaped error.
 type BlockRequestArgs struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// HTTP-like status the caller sees (e.g. 422). Value-range checks are
-	// separate; structural validation requires a non-zero status.
+	// HTTP-like rejection status the caller sees (e.g. 422). Must be in 400–599.
 	Status int32 `protobuf:"varint,1,opt,name=status,proto3" json:"status,omitempty"`
 	// Stable machine code (e.g. "pii_detected"). Required.
 	Code string `protobuf:"bytes,2,opt,name=code,proto3" json:"code,omitempty"`

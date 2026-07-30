@@ -14,26 +14,88 @@ import "fmt"
 // interpreting it, because every alternative is a guess about what a
 // misbehaving plugin meant.
 
+// httpResponseStatusOK reports whether status is a final HTTP status a plugin
+// may return from serve_http. Informational 1xx codes are interim under Go's
+// net/http writer and would be overwritten by a later final response; 101 is a
+// protocol switch this buffered API cannot implement.
+func httpResponseStatusOK(status int32) bool {
+	return status >= 200 && status <= 599
+}
+
+// blockRequestStatusOK reports whether status is a rejection status for
+// env.block_request. A block verdict is a provider-shaped error, so only
+// 4xx/5xx are meaningful.
+func blockRequestStatusOK(status int32) bool {
+	return status >= 400 && status <= 599
+}
+
+// httpBodyForbidden reports whether status must not carry a response body
+// (RFC 9110: 204, 205, and 304 terminate at the header section).
+func httpBodyForbidden(status int32) bool {
+	return status == 204 || status == 205 || status == 304
+}
+
 // Validate reports whether a stream event carries an actual event.
 //
 // A StreamEvent with no oneof variant set is a well-formed protobuf message
 // that says nothing. Nothing downstream can act on it, and a list of them is
 // indistinguishable in effect from an empty list — so it is a third spelling of
 // SUPPRESS, and refused.
+//
+// Typed-nil wrappers and nil nested messages are refused the same way
+// HookInput refuses them: the frame names an arm but hands over nothing usable.
 func (x *StreamEvent) Validate() error {
 	if x == nil {
 		return fmt.Errorf("stream event is nil")
 	}
-	if x.Event == nil {
+	switch e := x.Event.(type) {
+	case nil:
 		return fmt.Errorf("stream event carries no event")
-	}
-	if b, ok := x.Event.(*StreamEvent_ContentBlockStart); ok {
-		if b == nil || b.ContentBlockStart == nil {
+	case *StreamEvent_TextDelta:
+		if e == nil {
+			return fmt.Errorf("text delta wrapper is nil")
+		}
+	case *StreamEvent_ThinkingDelta:
+		if e == nil {
+			return fmt.Errorf("thinking delta wrapper is nil")
+		}
+	case *StreamEvent_SignatureDelta:
+		if e == nil {
+			return fmt.Errorf("signature delta wrapper is nil")
+		}
+	case *StreamEvent_ToolCallDelta:
+		if e == nil || e.ToolCallDelta == nil {
+			return fmt.Errorf("tool call delta is nil")
+		}
+		return e.ToolCallDelta.Validate()
+	case *StreamEvent_Usage:
+		if e == nil || e.Usage == nil {
+			return fmt.Errorf("usage is nil")
+		}
+	case *StreamEvent_Error:
+		if e == nil || e.Error == nil {
+			return fmt.Errorf("stream error is nil")
+		}
+	case *StreamEvent_MessageStart:
+		if e == nil || e.MessageStart == nil {
+			return fmt.Errorf("message start is nil")
+		}
+	case *StreamEvent_MessageStop:
+		if e == nil || e.MessageStop == nil {
+			return fmt.Errorf("message stop is nil")
+		}
+	case *StreamEvent_ContentBlockStart:
+		if e == nil || e.ContentBlockStart == nil {
 			return fmt.Errorf("content block start is nil")
 		}
-		if err := b.ContentBlockStart.Validate(); err != nil {
-			return err
+		return e.ContentBlockStart.Validate()
+	case *StreamEvent_ContentBlockStop:
+		if e == nil || e.ContentBlockStop == nil {
+			return fmt.Errorf("content block stop is nil")
 		}
+		return e.ContentBlockStop.Validate()
+	default:
+		return fmt.Errorf("stream event carries an unhandled event arm")
 	}
 	return nil
 }
@@ -46,13 +108,29 @@ func (x *StreamEvent) Validate() error {
 // which tool it opens cannot be assembled — its deltas have nothing to attach
 // to and its results have nothing to correlate against — so it is refused here
 // rather than surfacing later as a tool call with no name.
+//
+// Indexes are unique across the message and never reused; a negative index is
+// not a usable identifier.
 func (x *ContentBlockStart) Validate() error {
 	if x == nil {
 		return fmt.Errorf("content block start is nil")
 	}
+	if x.Index < 0 {
+		return fmt.Errorf("content block start index %d is negative", x.Index)
+	}
 	switch b := x.Block.(type) {
 	case nil:
 		return fmt.Errorf("content block start at index %d names no block kind", x.Index)
+
+	case *ContentBlockStart_Text:
+		if b == nil || b.Text == nil {
+			return fmt.Errorf("text block at index %d carries no block", x.Index)
+		}
+
+	case *ContentBlockStart_Thinking:
+		if b == nil || b.Thinking == nil {
+			return fmt.Errorf("thinking block at index %d carries no block", x.Index)
+		}
 
 	case *ContentBlockStart_ToolCall:
 		if b == nil || b.ToolCall == nil {
@@ -74,6 +152,58 @@ func (x *ContentBlockStart) Validate() error {
 			return fmt.Errorf("provider block at index %d names no kind, which is the "+
 				"only thing that makes it actionable", x.Index)
 		}
+
+	default:
+		return fmt.Errorf("content block start at index %d carries an unhandled block kind", x.Index)
+	}
+	return nil
+}
+
+// Validate reports whether a content block stop names a usable index.
+func (x *ContentBlockStop) Validate() error {
+	if x == nil {
+		return fmt.Errorf("content block stop is nil")
+	}
+	if x.Index < 0 {
+		return fmt.Errorf("content block stop index %d is negative", x.Index)
+	}
+	return nil
+}
+
+// Validate reports whether a tool-call delta names a usable index.
+func (x *ToolCallDelta) Validate() error {
+	if x == nil {
+		return fmt.Errorf("tool call delta is nil")
+	}
+	if x.Index < 0 {
+		return fmt.Errorf("tool call delta index %d is negative", x.Index)
+	}
+	return nil
+}
+
+// Validate reports whether an HTTP response carries a final status the host
+// can serve, and does not attach a body to a bodyless status.
+func (x *HttpResponse) Validate() error {
+	if x == nil {
+		return fmt.Errorf("http response is nil")
+	}
+	if !httpResponseStatusOK(x.Status) {
+		return fmt.Errorf("http response status %d is outside 200–599", x.Status)
+	}
+	if httpBodyForbidden(x.Status) && len(x.Body) != 0 {
+		return fmt.Errorf("http response status %d must not carry a body", x.Status)
+	}
+	return nil
+}
+
+// Validate reports whether a tick outcome carries a usable action count.
+// Zero actions is allowed (the plugin ran and did nothing countable).
+func (x *TickOutcome) Validate() error {
+	if x == nil {
+		return fmt.Errorf("tick outcome is nil")
+	}
+	if x.Actions < 0 {
+		return fmt.Errorf("tick outcome actions %d is negative", x.Actions)
 	}
 	return nil
 }
@@ -297,6 +427,16 @@ func (x *HookResult) ValidateFor(hook Hook) error {
 			if err := e.Validate(); err != nil {
 				return fmt.Errorf("hook result event %d: %w", i, err)
 			}
+		}
+	}
+	if http, ok := x.Action.(*HookResult_ServeHttp); ok {
+		if err := http.ServeHttp.Validate(); err != nil {
+			return fmt.Errorf("hook result: %w", err)
+		}
+	}
+	if tick, ok := x.Action.(*HookResult_TickOutcome); ok {
+		if err := tick.TickOutcome.Validate(); err != nil {
+			return fmt.Errorf("hook result: %w", err)
 		}
 	}
 	return nil
