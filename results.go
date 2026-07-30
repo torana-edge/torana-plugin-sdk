@@ -77,7 +77,7 @@ func PassResponse() ResponseResult { return ResponseResult{} }
 //
 // The host discards this when the dispatch is observational — a streamed or
 // errored response, where the bytes have already gone or there is no body to
-// rewrite. HookInput.Mutable says which, so a handler can check rather than
+// rewrite. AfterResponse.Mutable says which, so a handler can check rather than
 // discover it by having no effect.
 func ReplaceResponse(resp *pbv2.ChatResponse) ResponseResult {
 	if resp == nil {
