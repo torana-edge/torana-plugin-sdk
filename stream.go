@@ -2,10 +2,11 @@ package plugin_sdk
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"strconv"
-	"strings"
+
+	"google.golang.org/protobuf/proto"
 
 	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
@@ -13,7 +14,13 @@ import (
 // StreamAssembler is the advanced, host-backed stream state machine.
 // Feed never stores fragments on this Go value — successive WASM calls may
 // land on different module instances — so all durable state is request-scoped
-// host metadata keyed by block index.
+// host metadata keyed by block index via env.meta_append only.
+//
+// Call pattern for a buffered tool call (one typed host crossing each):
+//
+//	start → MetaAppend(index, length-prefixed ToolCallRef)
+//	delta → MetaAppend(index, arguments_delta)   // empty delta is a no-op
+//	stop  → MetaAppend(index, nil)               // read framed buffer
 type StreamAssembler struct {
 	// assembleTools enables tool-call buffering. StreamHandler sets this when
 	// an OnToolCall callback is registered so only interested plugins pay.
@@ -43,16 +50,6 @@ type FeedResult struct {
 	Err error
 }
 
-type toolCallHeader struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Signature string `json:"sig"`
-}
-
-func blockHeaderKey(index int32) string {
-	return "stream:block:" + strconv.FormatInt(int64(index), 10) + ":hdr"
-}
-
 // Feed processes one stream event. When tool assembly is enabled, tool-call
 // start/deltas are suppressed and stored; on stop, Complete carries the
 // assembled call and Emit is empty until the caller decides pass/replace/
@@ -75,24 +72,22 @@ func (a *StreamAssembler) Feed(ev *pbv2.StreamEvent) FeedResult {
 		if tc == nil {
 			return FeedResult{Emit: []*pbv2.StreamEvent{ev}}
 		}
-		hdr, err := json.Marshal(toolCallHeader{ID: tc.Id, Name: tc.Name, Signature: tc.Signature})
+		frame, err := encodeToolFrameHeader(tc)
 		if err != nil {
 			return FeedResult{Err: err}
 		}
-		if err := metaSetString(blockHeaderKey(start.Index), string(hdr)); err != nil {
+		if _, herr, err := MetaAppend(start.Index, frame); err != nil {
 			return FeedResult{Err: err}
+		} else if herr != nil {
+			return FeedResult{Err: fmt.Errorf("meta_append: %s", herr.Message)}
 		}
 		return FeedResult{Suppress: true}
 
 	case *pbv2.StreamEvent_ToolCallDelta:
 		d := e.ToolCallDelta
-		hdrJSON, err := metaGetString(blockHeaderKey(d.Index))
-		if err != nil {
-			return FeedResult{Err: err}
-		}
-		if hdrJSON == "" {
-			// Not assembling this index — pass through.
-			return FeedResult{Emit: []*pbv2.StreamEvent{ev}}
+		// Empty fragment is the meta_append read path — skip the host call.
+		if len(d.ArgumentsDelta) == 0 {
+			return FeedResult{Suppress: true}
 		}
 		if _, herr, err := MetaAppend(d.Index, []byte(d.ArgumentsDelta)); err != nil {
 			return FeedResult{Err: err}
@@ -103,17 +98,6 @@ func (a *StreamAssembler) Feed(ev *pbv2.StreamEvent) FeedResult {
 
 	case *pbv2.StreamEvent_ContentBlockStop:
 		stop := e.ContentBlockStop
-		hdrJSON, err := metaGetString(blockHeaderKey(stop.Index))
-		if err != nil {
-			return FeedResult{Err: err}
-		}
-		if hdrJSON == "" {
-			return FeedResult{Emit: []*pbv2.StreamEvent{ev}}
-		}
-		var hdr toolCallHeader
-		if err := json.Unmarshal([]byte(hdrJSON), &hdr); err != nil {
-			return FeedResult{Err: fmt.Errorf("tool-call header corrupt: %w", err)}
-		}
 		buf, herr, err := MetaAppend(stop.Index, nil)
 		if err != nil {
 			return FeedResult{Err: err}
@@ -121,22 +105,27 @@ func (a *StreamAssembler) Feed(ev *pbv2.StreamEvent) FeedResult {
 		if herr != nil {
 			return FeedResult{Err: fmt.Errorf("meta_append read: %s", herr.Message)}
 		}
-		_ = metaSetString(blockHeaderKey(stop.Index), "")
+		if len(buf) == 0 {
+			// No buffer for this index — not a tool block we started.
+			return FeedResult{Emit: []*pbv2.StreamEvent{ev}}
+		}
+		ref, args, err := decodeToolFrame(buf)
+		if err != nil {
+			return FeedResult{Err: fmt.Errorf("tool-call frame corrupt: %w", err)}
+		}
 		return FeedResult{
 			Suppress: true,
 			Complete: &ToolCall{
 				Index:     stop.Index,
-				ID:        hdr.ID,
-				Name:      hdr.Name,
-				Signature: hdr.Signature,
-				Arguments: string(buf),
+				ID:        ref.Id,
+				Name:      ref.Name,
+				Signature: ref.Signature,
+				Arguments: args,
 			},
 		}
 
 	case *pbv2.StreamEvent_Error:
-		// Terminal mid-block: abandon headers we can see is not possible without
-		// an index; pass the error through. Incomplete buffers stay in meta and
-		// are unused.
+		// Terminal mid-block: incomplete buffers stay in meta and are unused.
 		return FeedResult{Emit: []*pbv2.StreamEvent{ev}}
 
 	default:
@@ -144,14 +133,56 @@ func (a *StreamAssembler) Feed(ev *pbv2.StreamEvent) FeedResult {
 	}
 }
 
+// encodeToolFrameHeader builds the initial meta_append fragment for a tool
+// block: big-endian uint32 length + protobuf ToolCallRef. Argument bytes are
+// appended by later MetaAppend calls; decodeToolFrame splits them on read.
+func encodeToolFrameHeader(ref *pbv2.ToolCallRef) ([]byte, error) {
+	if ref == nil {
+		return nil, fmt.Errorf("tool-call frame: nil ToolCallRef")
+	}
+	raw, err := proto.Marshal(ref)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, 4+len(raw))
+	binary.BigEndian.PutUint32(out, uint32(len(raw)))
+	copy(out[4:], raw)
+	return out, nil
+}
+
+func decodeToolFrame(buf []byte) (*pbv2.ToolCallRef, string, error) {
+	if len(buf) < 4 {
+		return nil, "", fmt.Errorf("shorter than length prefix")
+	}
+	n := binary.BigEndian.Uint32(buf[:4])
+	if uint64(4)+uint64(n) > uint64(len(buf)) {
+		return nil, "", fmt.Errorf("header length %d exceeds buffer %d", n, len(buf))
+	}
+	ref := &pbv2.ToolCallRef{}
+	if err := proto.Unmarshal(buf[4:4+n], ref); err != nil {
+		return nil, "", err
+	}
+	return ref, string(buf[4+n:]), nil
+}
+
 // EmitAssembledToolCall builds start+delta+stop for an assembled tool call.
+//
+// When args differs from call.Arguments, Signature is cleared: the provider
+// binding covers id/name/arguments, and a stale signature must not ship.
+// Pass and fail-open re-emission keep call.Arguments (and thus Signature)
+// byte-identical so Migration B can verify the buffered tool block
+// transactionally — temporary suppress-then-reemit is not deletion/forgery.
 func EmitAssembledToolCall(call ToolCall, args string) []*pbv2.StreamEvent {
+	sig := call.Signature
+	if args != call.Arguments {
+		sig = ""
+	}
 	return []*pbv2.StreamEvent{
 		{Event: &pbv2.StreamEvent_ContentBlockStart{
 			ContentBlockStart: &pbv2.ContentBlockStart{
 				Index: call.Index,
 				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{
-					Id: call.ID, Name: call.Name, Signature: call.Signature,
+					Id: call.ID, Name: call.Name, Signature: sig,
 				}},
 			},
 		}},
@@ -303,33 +334,4 @@ func (s *StreamHandler) Handle(ctx context.Context, ev *pbv2.StreamEvent) (Strea
 // Register installs Handle as the stream-chunk hook.
 func (s *StreamHandler) Register() {
 	OnStreamChunk(s.Handle)
-}
-
-func metaSetString(key, value string) error {
-	payload, err := json.Marshal(map[string]any{"key": key, "value": value})
-	if err != nil {
-		return err
-	}
-	res, err := hostCallString("env.meta_set", string(payload))
-	if err != nil {
-		return err
-	}
-	if isPermissionDenied(res) {
-		return fmt.Errorf("torana: meta_set permission denied")
-	}
-	if res != "" && !strings.Contains(res, `"status":"ok"`) && strings.Contains(res, `"status":"error"`) {
-		return fmt.Errorf("torana: meta_set: %s", res)
-	}
-	return nil
-}
-
-func metaGetString(key string) (string, error) {
-	res, err := hostCallString("env.meta_get", key)
-	if err != nil {
-		return "", err
-	}
-	if isPermissionDenied(res) {
-		return "", fmt.Errorf("torana: meta_get permission denied")
-	}
-	return res, nil
 }

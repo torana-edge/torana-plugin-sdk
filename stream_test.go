@@ -3,7 +3,7 @@
 package plugin_sdk
 
 import (
-	"encoding/json"
+	"encoding/binary"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,10 +14,11 @@ import (
 	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
 
-// metaHost is a minimal host-backed meta store for StreamAssembler Feed tests.
+// metaHost is a minimal host-backed meta_append store for StreamAssembler Feed tests.
 type metaHost struct {
-	mu   sync.Mutex
-	meta map[string]string
+	mu    sync.Mutex
+	meta  map[string]string
+	calls []string
 }
 
 func newMetaHost() *metaHost { return &metaHost{meta: map[string]string{}} }
@@ -25,19 +26,8 @@ func newMetaHost() *metaHost { return &metaHost{meta: map[string]string{}} }
 func (m *metaHost) handle(cmd string, args []byte) ([]byte, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.calls = append(m.calls, cmd)
 	switch cmd {
-	case "env.meta_set":
-		var kv struct {
-			Key   string `json:"key"`
-			Value string `json:"value"`
-		}
-		if err := json.Unmarshal(args, &kv); err != nil {
-			return []byte(`{"status":"error"}`), nil
-		}
-		m.meta[kv.Key] = kv.Value
-		return []byte(`{"status":"ok"}`), nil
-	case "env.meta_get":
-		return []byte(m.meta[string(args)]), nil
 	case pbv2.MetaAppendCommand:
 		var a pbv2.MetaAppendArgs
 		if err := proto.Unmarshal(args, &a); err != nil {
@@ -88,7 +78,7 @@ func TestStreamAssemblerFeedCrossInstance(t *testing.T) {
 			ContentBlockStart: &pbv2.ContentBlockStart{
 				Index: 3,
 				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{
-					Id: "c", Name: "n",
+					Id: "c", Name: "n", Signature: "sig",
 				}},
 			},
 		}}
@@ -117,18 +107,58 @@ func TestStreamAssemblerFeedCrossInstance(t *testing.T) {
 		if fr.Complete.ID != "c" || fr.Complete.Name != "n" || fr.Complete.Index != 3 {
 			t.Fatalf("header %+v", fr.Complete)
 		}
+		if fr.Complete.Signature != "sig" {
+			t.Fatalf("signature %q", fr.Complete.Signature)
+		}
 	})
+}
+
+func TestStreamAssemblerOneHostCallPerFragment(t *testing.T) {
+	const n = 5
+	m := newMetaHost()
+	withMetaHost(m, func() {
+		asm := NewStreamAssembler().WithToolAssembly()
+		if fr := asm.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStart{
+			ContentBlockStart: &pbv2.ContentBlockStart{
+				Index: 0,
+				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{
+					Id: "1", Name: "t",
+				}},
+			},
+		}}); fr.Err != nil {
+			t.Fatal(fr.Err)
+		}
+		for i := 0; i < n; i++ {
+			if fr := asm.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ToolCallDelta{
+				ToolCallDelta: &pbv2.ToolCallDelta{Index: 0, ArgumentsDelta: "x"},
+			}}); fr.Err != nil {
+				t.Fatal(fr.Err)
+			}
+		}
+		if fr := asm.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStop{
+			ContentBlockStop: &pbv2.ContentBlockStop{Index: 0},
+		}}); fr.Err != nil || fr.Complete == nil {
+			t.Fatalf("%+v", fr)
+		}
+	})
+	want := n + 2 // start + N deltas + stop read
+	var metaAppend int
+	for _, c := range m.calls {
+		if c == pbv2.MetaAppendCommand {
+			metaAppend++
+		}
+		if c == "env.meta_set" || c == "env.meta_get" {
+			t.Fatalf("legacy string meta path used: %q", c)
+		}
+	}
+	if metaAppend != want {
+		t.Fatalf("meta_append calls: got %d want %d (calls=%v)", metaAppend, want, m.calls)
+	}
 }
 
 func TestStreamAssemblerFeedMetaAppendDenied(t *testing.T) {
 	WithTestHost(&TestHost{
 		HostCall: func(cmd string, args []byte) ([]byte, error) {
-			if cmd == "env.meta_set" {
-				return []byte(`{"status":"ok"}`), nil
-			}
-			if cmd == "env.meta_get" {
-				return []byte(`{"id":"1","name":"n","sig":""}`), nil
-			}
 			if cmd == pbv2.MetaAppendCommand {
 				return marshalHostErr(pbv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "permission denied"), nil
 			}
@@ -136,34 +166,56 @@ func TestStreamAssemblerFeedMetaAppendDenied(t *testing.T) {
 		},
 	}, func() {
 		asm := NewStreamAssembler().WithToolAssembly()
-		fr := asm.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ToolCallDelta{
-			ToolCallDelta: &pbv2.ToolCallDelta{Index: 0, ArgumentsDelta: "{}"},
+		fr := asm.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStart{
+			ContentBlockStart: &pbv2.ContentBlockStart{
+				Index: 0,
+				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{
+					Id: "1", Name: "n",
+				}},
+			},
 		}})
 		if fr.Err == nil || !strings.Contains(fr.Err.Error(), "meta_append") {
 			t.Fatalf("%+v", fr)
 		}
-		if len(fr.Emit) != 0 {
-			t.Fatal("must not emit fragment after buffering failure")
+		if fr.Suppress || len(fr.Emit) != 0 {
+			t.Fatal("must not suppress or emit after failed persist")
 		}
 	})
 }
 
-func TestStreamAssemblerFeedCorruptHeaderOnStop(t *testing.T) {
+func TestStreamAssemblerFeedCorruptFrameOnStop(t *testing.T) {
 	WithTestHost(&TestHost{
 		HostCall: func(cmd string, args []byte) ([]byte, error) {
-			if cmd == "env.meta_get" {
-				return []byte("not-json"), nil
+			if cmd != pbv2.MetaAppendCommand {
+				return nil, nil
 			}
-			return nil, nil
+			var a pbv2.MetaAppendArgs
+			_ = proto.Unmarshal(args, &a)
+			// Read path: return garbage that is not a framed ToolCallRef.
+			if len(a.Fragment) == 0 {
+				raw, _ := proto.Marshal(&pbv2.HostCallResult{
+					Result: &pbv2.HostCallResult_Value{Value: []byte("!!!")},
+				})
+				return raw, nil
+			}
+			raw, _ := proto.Marshal(&pbv2.HostCallResult{
+				Result: &pbv2.HostCallResult_Value{Value: nil},
+			})
+			return raw, nil
 		},
 	}, func() {
 		asm := NewStreamAssembler().WithToolAssembly()
-		stop := &pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStop{
+		_ = asm.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStart{
+			ContentBlockStart: &pbv2.ContentBlockStart{
+				Index: 0,
+				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{Id: "1", Name: "n"}},
+			},
+		}})
+		fr := asm.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStop{
 			ContentBlockStop: &pbv2.ContentBlockStop{Index: 0},
-		}}
-		fr := asm.Feed(stop)
+		}})
 		if fr.Err == nil {
-			t.Fatal("corrupt header must error")
+			t.Fatal("corrupt frame must error")
 		}
 		if len(fr.Emit) != 0 || fr.Complete != nil {
 			t.Fatalf("must not pass stop alone: %+v", fr)
@@ -171,12 +223,38 @@ func TestStreamAssemblerFeedCorruptHeaderOnStop(t *testing.T) {
 	})
 }
 
-func TestEmitAssembledToolCallRoundTrip(t *testing.T) {
-	evs := EmitAssembledToolCall(ToolCall{Index: 2, ID: "i", Name: "n", Arguments: "{}"}, `{"a":1}`)
-	if len(evs) != 3 {
-		t.Fatal(len(evs))
+func TestEmitAssembledToolCallClearsSignatureOnReplace(t *testing.T) {
+	call := ToolCall{Index: 2, ID: "i", Name: "n", Signature: "provider-sig", Arguments: `{"a":1}`}
+	pass := EmitAssembledToolCall(call, call.Arguments)
+	if pass[0].GetContentBlockStart().GetToolCall().GetSignature() != "provider-sig" {
+		t.Fatal("pass must keep signature")
 	}
-	if evs[1].GetToolCallDelta().GetArgumentsDelta() != `{"a":1}` {
-		t.Fatal(evs[1])
+	repl := EmitAssembledToolCall(call, `{"a":2}`)
+	if repl[0].GetContentBlockStart().GetToolCall().GetSignature() != "" {
+		t.Fatal("replace must clear signature")
+	}
+	if repl[1].GetToolCallDelta().GetArgumentsDelta() != `{"a":2}` {
+		t.Fatal(repl[1])
+	}
+}
+
+func TestToolFrameRoundTripPreservesUnknownFields(t *testing.T) {
+	ref := &pbv2.ToolCallRef{Id: "id", Name: "name", Signature: "sig"}
+	// Simulate an unknown field via proto marshaling of an extended message is
+	// hard without the field number; pin length-prefix framing instead.
+	frame, err := encodeToolFrameHeader(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame = append(frame, []byte(`{"k":1}`)...)
+	got, args, err := decodeToolFrame(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Id != "id" || got.Name != "name" || got.Signature != "sig" || args != `{"k":1}` {
+		t.Fatalf("%+v %q", got, args)
+	}
+	if binary.BigEndian.Uint32(frame[:4]) != uint32(len(frame)-4-len(args)) {
+		t.Fatal("length prefix mismatch")
 	}
 }

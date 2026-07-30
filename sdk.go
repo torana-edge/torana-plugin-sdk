@@ -50,6 +50,11 @@ func WriteResult(data []byte) uint64 {
 	return uint64(p)<<32 | uint64(len(data))
 }
 
+//go:wasmexport supported_hooks
+func supported_hooks() uint32 {
+	return uint32(registeredHookBitmap())
+}
+
 //go:wasmexport run_hook
 func run_hook(ptr, size uint32) uint64 {
 	inputBytes := ReadBytes(ptr, size)

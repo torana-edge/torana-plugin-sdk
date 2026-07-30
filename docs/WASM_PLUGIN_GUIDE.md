@@ -14,17 +14,18 @@ plugin, the SDK already implements all of this — start at
 This document is a critical reference for implementing WebAssembly (WASM) plugins in Torana Edge. **AI Coding Agents MUST read this document before generating or modifying Torana WASM plugins.**
 
 **ABI versioning (read this before the sections below).** Sections 1–5 describe
-the **current v1 trampoline ABI** still exported by guests today: five named
-hook exports (`run_before_request`, …), a separate `request_id` argument, and
-v1 result messages (`StreamEventResult.handled`, `TickResult.handled`). See
-[`proto/torana/v1/torana.proto`](../proto/torana/v1/torana.proto). Section 6 is a
-**v2 write-grant preview** for the contract in
-[`proto/torana/v2/torana.proto`](../proto/torana/v2/torana.proto) (`run_hook`,
-`supported_hooks`, single-action `HookResult`). Do not mix them into one hybrid
-guest. Migration A switches the export surface; until then, handwritten guests
-follow v1 for the boundary and treat §6 as capability vocabulary that will
-apply once v2 enforcement lands.
+the **v1 trampoline ABI** still used by **Rust** guests today: five named hook
+exports (`run_before_request`, …), a separate `request_id` argument, and v1
+result messages (`StreamEventResult.handled`, `TickResult.handled`). See
+[`proto/torana/v1/torana.proto`](../proto/torana/v1/torana.proto) and
+[`ABI.md`](../ABI.md).
 
+**Go guests (Migration A) use the v2 export surface:** `run_hook(ptr,size)->u64`,
+`supported_hooks()->u32`, and single-action `HookResult` over
+[`proto/torana/v2/torana.proto`](../proto/torana/v2/torana.proto). Declare
+`"abi_version": "v2"` in `plugin.json`. Do not mix v1 exports with a v2
+manifest (or the reverse). Section 6 is the write-grant / host-call vocabulary
+that Migration B enforces on the host.
 ## 1. The Core Architecture (Linear Memory) — v1 trampoline
 WASM plugins in Torana run inside a highly restricted sandbox (using `wazero`). 
 The Go host (Torana) and the guest (the plugin) do NOT share variables, structs, or garbage collection. They only share a single, flat byte array called **Linear Memory**.
@@ -258,14 +259,16 @@ panic on local/protocol failure, `HostCall(cmd, proto.Message)`, and
 3. Did I pack the return pointer and size into a `u64`?
 4. Did I return `0` for passthrough?
 5. Did I parse and serialize Protobuf properly within the memory bounds?
-6. Did I pick **either** the v1 trampoline boundary **or** the v2 export shape —
-   not a hybrid — and declare every `env.*` / `ir.*.write` I need?
+6. Did I pick **either** the v1 trampoline boundary (Rust) **or** the v2 export
+   shape (Go: `run_hook` + `supported_hooks`) — not a hybrid — and declare
+   matching `abi_version` plus every `env.*` / `ir.*.write` I need?
 7. If I Suppress or fan-out stream events (v2), did I request `ir.stream.write`
    **and** the content grants for what I change/remove/add (and avoid altering
    host-owned facts)?
 8. Did I avoid forging host-owned response facts (usage, model-that-answered,
    signatures, provider extension blobs), and avoid leaving stale signatures on
-   mutated signed content?
-9. If I implemented a tick: v1 must set `handled = true` on any intentional
-   result; `env.meta_*` works on the synthetic tick scope in both ABIs, but
-   original request/response and caller credentials still do not.
+   mutated signed content? (`ReplaceToolArguments` clears `ToolCallRef.signature`.)
+9. If I implemented a tick on **v1**: set `handled = true` on any intentional
+   result. On **v2 Go**: use `TickIdle` / `TickDid`. `env.meta_*` works on the
+   synthetic tick scope in both ABIs, but original request/response and caller
+   credentials still do not.

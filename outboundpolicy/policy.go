@@ -496,6 +496,11 @@ var outboundMessageFieldPolicies = map[protoreflect.FullName]map[string]FieldPol
 //   - identical Usage/MessageStart/signature_delta/TextDelta re-emit → no grant
 //   - suppress Usage / forge StreamError → reject
 //   - change args deltas for signed tool-call block index → reject or clear signature
+//   - StreamHandler ReplaceToolArguments clears ToolCallRef.signature in the
+//     re-emitted ContentBlockStart (SDK encodes this; host may also clear)
+//   - transactional tool-call buffering: suppress start+deltas then re-emit an
+//     identical assembled block (pass / fail-open) is NOT suppress/forge of the
+//     host-owned signature — verify across the whole tool block, not per event
 //   - parallel tool calls: mutating block B args must not be gated by block A's signature
 //   - multi-block: signature_delta binds current text/thinking block only
 //

@@ -53,11 +53,22 @@ func exerciseRunHook(t *testing.T, path string) {
 	alloc := module.ExportedFunction("alloc")
 	hook := module.ExportedFunction("run_hook")
 	dealloc := module.ExportedFunction("dealloc")
+	supported := module.ExportedFunction("supported_hooks")
 	if alloc == nil || hook == nil || dealloc == nil {
 		t.Fatal("guest is missing alloc, dealloc, or run_hook")
 	}
+	if supported == nil {
+		t.Fatal("v2 guest is missing supported_hooks")
+	}
 	if module.ExportedFunction("run_before_request") != nil {
 		t.Fatal("v1 run_before_request must not remain after Migration A")
+	}
+	bits, err := supported.Call(ctx)
+	if err != nil || len(bits) != 1 {
+		t.Fatalf("supported_hooks: %v %v", bits, err)
+	}
+	if bits[0] == 0 {
+		t.Fatal("supported_hooks must not be zero for a live guest")
 	}
 	pointers, err := alloc.Call(ctx, uint64(len(payload)))
 	if err != nil || len(pointers) != 1 {

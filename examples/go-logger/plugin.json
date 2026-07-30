@@ -3,7 +3,7 @@
   "id": "example/go-logger",
   "name": "go-logger",
   "version": "0.1.0",
-  "abi_version": "v1",
+  "abi_version": "v2",
   "failure_mode": "pass",
   "repository": "https://github.com/torana-edge/torana-plugin-sdk",
   "description": "Minimal Go Torana plugin template",

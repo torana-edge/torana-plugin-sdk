@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
 	sdk "github.com/torana-edge/torana-plugin-sdk"
 	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 	"github.com/torana-edge/torana-plugin-sdk/sdktest"
@@ -48,6 +50,9 @@ func TestHandlerErrorPropagates(t *testing.T) {
 	if res.Err == nil {
 		t.Fatal("expected handler error")
 	}
+	if res.PassedThrough {
+		t.Fatal("handler error must not look like pass-through; failure_mode decides")
+	}
 }
 
 func TestAfterResponseReplace(t *testing.T) {
@@ -62,8 +67,22 @@ func TestAfterResponseReplace(t *testing.T) {
 	if res.Err != nil {
 		t.Fatal(res.Err)
 	}
-	if res.PassedThrough || res.Response == nil || res.Response.Id != "rewritten" {
-		t.Fatalf("got %+v", res)
+	if res.PassedThrough || res.Applied == nil || res.Applied.Id != "rewritten" {
+		t.Fatalf("mutable apply got %+v", res)
+	}
+	if res.Replacement == nil || res.Replacement.Id != "rewritten" {
+		t.Fatalf("replacement %+v", res.Replacement)
+	}
+
+	obs := sdktest.New(t).AfterResponse(&pbv2.ChatResponse{Id: "orig"}, false)
+	if obs.Err != nil {
+		t.Fatal(obs.Err)
+	}
+	if obs.Applied != nil {
+		t.Fatal("mutable=false must not report Applied; host discards the proposal")
+	}
+	if obs.Replacement == nil || obs.Replacement.Id != "rewritten" {
+		t.Fatalf("guest proposal still visible as Replacement: %+v", obs)
 	}
 }
 
@@ -366,10 +385,12 @@ func TestStreamMetaAppendDeniedFailsClosed(t *testing.T) {
 	s.Register()
 	h.DenyPermission(pbv2.MetaAppendCommand)
 
-	h.StreamChunk(toolStart(0, "t"))
-	r := h.StreamChunk(toolDelta(0, `{}`))
+	r := h.StreamChunk(toolStart(0, "t"))
 	if r.Err == nil {
 		t.Fatal("permission-denied meta_append must fail closed, not pass fragment")
+	}
+	if r.PassedThrough {
+		t.Fatal("assembly error must not look like pass-through")
 	}
 }
 
@@ -383,20 +404,103 @@ func TestStreamCorruptStopDoesNotPassFragmentAlone(t *testing.T) {
 	})
 	s.Register()
 	h := sdktest.New(t)
-	h.StreamChunk(toolStart(0, "t"))
-	h.StreamChunk(toolDelta(0, `{}`))
-	h.StubHostCall("env.meta_get", func(key string) (string, error) {
-		if strings.HasSuffix(key, ":hdr") {
-			return "!!!", nil
+	// After a successful start, force the stop read to return garbage.
+	started := false
+	h.StubHostCall(pbv2.MetaAppendCommand, func(args string) (string, error) {
+		var a pbv2.MetaAppendArgs
+		if err := proto.Unmarshal([]byte(args), &a); err != nil {
+			t.Fatal(err)
 		}
-		return "", nil
+		if len(a.Fragment) != 0 {
+			started = true
+			raw, _ := proto.Marshal(&pbv2.HostCallResult{
+				Result: &pbv2.HostCallResult_Value{Value: nil},
+			})
+			return string(raw), nil
+		}
+		if !started {
+			t.Fatal("expected start before stop read")
+		}
+		raw, _ := proto.Marshal(&pbv2.HostCallResult{
+			Result: &pbv2.HostCallResult_Value{Value: []byte("!!!")},
+		})
+		return string(raw), nil
 	})
+	if r := h.StreamChunk(toolStart(0, "t")); r.Err != nil {
+		t.Fatal(r.Err)
+	}
 	r := h.StreamChunk(toolStop(0))
 	if r.Err == nil {
-		t.Fatal("corrupt header must fail closed")
+		t.Fatal("corrupt frame must fail closed")
 	}
-	if r.Suppressed || len(r.Events) > 0 {
+	if r.PassedThrough || r.Suppressed || len(r.Events) > 0 {
 		t.Fatalf("must not emit stop alone: %+v", r)
+	}
+}
+
+func TestSignedToolCallContract(t *testing.T) {
+	cases := []struct {
+		name string
+		act  func(sdk.ToolCall) (sdk.ToolCallAction, error)
+		sig  string
+		args string
+	}{
+		{
+			name: "pass-keeps-signature",
+			act:  func(sdk.ToolCall) (sdk.ToolCallAction, error) { return sdk.PassToolCall(), nil },
+			sig:  "provider-sig",
+			args: `{"x":1}`,
+		},
+		{
+			name: "fail-open-keeps-signature",
+			act: func(sdk.ToolCall) (sdk.ToolCallAction, error) {
+				return sdk.ToolCallAction{}, context.Canceled
+			},
+			sig:  "provider-sig",
+			args: `{"x":1}`,
+		},
+		{
+			name: "replace-clears-signature",
+			act: func(sdk.ToolCall) (sdk.ToolCallAction, error) {
+				return sdk.ReplaceToolArguments(`{"x":2}`), nil
+			},
+			sig:  "",
+			args: `{"x":2}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sdktest.Reset()
+			t.Cleanup(sdktest.Reset)
+			h := sdktest.New(t)
+			s := sdk.NewStreamHandler()
+			s.OnToolCall(func(_ context.Context, call sdk.ToolCall) (sdk.ToolCallAction, error) {
+				return tc.act(call)
+			})
+			s.Register()
+			start := &pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStart{
+				ContentBlockStart: &pbv2.ContentBlockStart{
+					Index: 0,
+					Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{
+						Id: "1", Name: "tool", Signature: "provider-sig",
+					}},
+				},
+			}}
+			h.StreamChunk(start)
+			h.StreamChunk(toolDelta(0, `{"x":1}`))
+			r := h.StreamChunk(toolStop(0))
+			if r.Err != nil {
+				t.Fatal(r.Err)
+			}
+			if len(r.Events) != 3 {
+				t.Fatalf("%+v", r)
+			}
+			gotSig := r.Events[0].GetContentBlockStart().GetToolCall().GetSignature()
+			gotArgs := r.Events[1].GetToolCallDelta().GetArgumentsDelta()
+			if gotSig != tc.sig || gotArgs != tc.args {
+				t.Fatalf("sig=%q args=%q want sig=%q args=%q", gotSig, gotArgs, tc.sig, tc.args)
+			}
+		})
 	}
 }
 

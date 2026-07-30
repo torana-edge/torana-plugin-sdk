@@ -156,13 +156,12 @@ obtainable from a host call that resolves its own configuration.
 
 Two more things:
 
-- **Set `handled = true`** on any `TickResult` you mean. An all-defaults message
-  encodes to zero bytes, which the host reads as "did nothing". Return `nil` when
-  there genuinely is nothing to do.
-- **`failure_mode` does not apply.** It selects whether a failing plugin blocks
-  or passes *the request*, and there is no request. A trapping tick is logged and
-  the other plugins' ticks continue.
-
+- **Return `TickIdle()`** (or a zero `TickResult`) when there is nothing to do.
+  Intentional work uses `TickDid(...)`. A zero-byte `HookResult` means
+  pass-through — there is no v1 `handled` flag on the Go v2 path.
+- **`failure_mode` does not apply to ticks.** It selects whether a failing
+  plugin blocks or passes *the request*, and there is no request. A trapping
+  tick is logged and the other plugins' ticks continue.
 Ticks require the `env.background_tick` permission and are off unless the
 operator also sets `plugins.runtime.tick_interval_seconds`. Both are deliberate:
 code running outside any request is work an operator cannot see in a trace, and

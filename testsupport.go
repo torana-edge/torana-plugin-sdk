@@ -76,3 +76,6 @@ func RegisteredHooks() []string {
 	}
 	return out
 }
+
+// RegisteredHookBitmap is the supported_hooks value derived from registrations.
+func RegisteredHookBitmap() pbv2.HookBitmap { return registeredHookBitmap() }

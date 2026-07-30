@@ -33,13 +33,14 @@ func (h *Harness) BeforeRequest(req *pbv2.ChatRequest) RequestResult {
 	var raw []byte
 	var err error
 	h.with(func() { raw, err = sdk.DispatchHook(in) })
-	res := RequestResult{Err: err, PassedThrough: len(raw) == 0}
-	if len(raw) == 0 {
+	res := RequestResult{Err: err, PassedThrough: err == nil && len(raw) == 0}
+	if err != nil || len(raw) == 0 {
 		return res
 	}
 	var hr pbv2.HookResult
 	if uerr := proto.Unmarshal(raw, &hr); uerr != nil {
 		res.Err = uerr
+		res.PassedThrough = false
 		return res
 	}
 	res.Raw = &hr
@@ -48,8 +49,15 @@ func (h *Harness) BeforeRequest(req *pbv2.ChatRequest) RequestResult {
 }
 
 // ResponseResult is the outcome of an after-response dispatch.
+//
+// Replacement is the guest's ReplaceResponse proposal. Applied is set only
+// when Mutable is true — the host discards replacements on observational
+// (mutable=false) dispatches, so tests must not treat Replacement as applied
+// output in that case.
 type ResponseResult struct {
-	Response      *pbv2.ChatResponse
+	Replacement   *pbv2.ChatResponse
+	Applied       *pbv2.ChatResponse
+	Mutable       bool
 	PassedThrough bool
 	Err           error
 	Raw           *pbv2.HookResult
@@ -71,17 +79,21 @@ func (h *Harness) AfterResponse(resp *pbv2.ChatResponse, mutable bool) ResponseR
 	var raw []byte
 	var err error
 	h.with(func() { raw, err = sdk.DispatchHook(in) })
-	res := ResponseResult{Err: err, PassedThrough: len(raw) == 0}
-	if len(raw) == 0 {
+	res := ResponseResult{Err: err, Mutable: mutable, PassedThrough: err == nil && len(raw) == 0}
+	if err != nil || len(raw) == 0 {
 		return res
 	}
 	var hr pbv2.HookResult
 	if uerr := proto.Unmarshal(raw, &hr); uerr != nil {
 		res.Err = uerr
+		res.PassedThrough = false
 		return res
 	}
 	res.Raw = &hr
-	res.Response = hr.GetReplaceResponse()
+	res.Replacement = hr.GetReplaceResponse()
+	if mutable {
+		res.Applied = res.Replacement
+	}
 	return res
 }
 
@@ -107,13 +119,14 @@ func (h *Harness) StreamChunk(ev *pbv2.StreamEvent) StreamResult {
 	var raw []byte
 	var err error
 	h.with(func() { raw, err = sdk.DispatchHook(in) })
-	res := StreamResult{Err: err, PassedThrough: len(raw) == 0}
-	if len(raw) == 0 {
+	res := StreamResult{Err: err, PassedThrough: err == nil && len(raw) == 0}
+	if err != nil || len(raw) == 0 {
 		return res
 	}
 	var hr pbv2.HookResult
 	if uerr := proto.Unmarshal(raw, &hr); uerr != nil {
 		res.Err = uerr
+		res.PassedThrough = false
 		return res
 	}
 	res.Raw = &hr
@@ -147,13 +160,14 @@ func (h *Harness) HTTPRequest(req *pbv2.HttpRequest) HTTPResult {
 	var raw []byte
 	var err error
 	h.with(func() { raw, err = sdk.DispatchHook(in) })
-	res := HTTPResult{Err: err, PassedThrough: len(raw) == 0}
-	if len(raw) == 0 {
+	res := HTTPResult{Err: err, PassedThrough: err == nil && len(raw) == 0}
+	if err != nil || len(raw) == 0 {
 		return res
 	}
 	var hr pbv2.HookResult
 	if uerr := proto.Unmarshal(raw, &hr); uerr != nil {
 		res.Err = uerr
+		res.PassedThrough = false
 		return res
 	}
 	res.Response = hr.GetServeHttp()
@@ -180,13 +194,14 @@ func (h *Harness) Tick(req *pbv2.TickRequest) TickResult {
 	var raw []byte
 	var err error
 	h.with(func() { raw, err = sdk.DispatchHook(in) })
-	res := TickResult{Err: err, PassedThrough: len(raw) == 0}
-	if len(raw) == 0 {
+	res := TickResult{Err: err, PassedThrough: err == nil && len(raw) == 0}
+	if err != nil || len(raw) == 0 {
 		return res
 	}
 	var hr pbv2.HookResult
 	if uerr := proto.Unmarshal(raw, &hr); uerr != nil {
 		res.Err = uerr
+		res.PassedThrough = false
 		return res
 	}
 	res.Outcome = hr.GetTickOutcome()
