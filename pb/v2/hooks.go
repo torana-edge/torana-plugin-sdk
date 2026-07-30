@@ -3,6 +3,8 @@ package v2
 import (
 	"fmt"
 	"strings"
+
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // MaxHookBit is the highest Hook enum value that can appear in a
@@ -16,26 +18,28 @@ const MaxHookBit = 31
 // HOOK_UNSPECIFIED is not a hook. See the Hook enum comment in torana.proto.
 type HookBitmap uint32
 
-// Bit returns the single-hook mask for h, or 0 if h is not a named hook in
-// 1..MaxHookBit. Derived from the generated enum map so a new Hook value in
-// range automatically participates; values outside the u32 bit capacity or
-// unknown numbers return 0.
+// Bit returns the single-hook mask for h, or 0 if h is not an assigned Hook
+// enum value in 1..MaxHookBit. Assignment is checked via the immutable
+// protobuf enum descriptor — not the generated Hook_name map, which is
+// mutable public state.
 func (h Hook) Bit() HookBitmap {
-	n := int32(h)
+	n := protoreflect.EnumNumber(h)
 	if n < 1 || n > MaxHookBit {
 		return 0
 	}
-	if _, ok := Hook_name[n]; !ok {
+	if h.Descriptor().Values().ByNumber(n) == nil {
 		return 0
 	}
 	return HookBitmap(1) << uint(n)
 }
 
-// KnownHooksMask is the union of Bit() for every named Hook in 1..MaxHookBit.
+// KnownHooksMask is the union of Bit() for every assigned Hook in 1..MaxHookBit.
 // Bits outside this mask on a guest bitmap are malformed.
 func KnownHooksMask() HookBitmap {
 	var b HookBitmap
-	for n := range Hook_name {
+	values := Hook(0).Descriptor().Values()
+	for i := 0; i < values.Len(); i++ {
+		n := values.Get(i).Number()
 		if n >= 1 && n <= MaxHookBit {
 			b |= HookBitmap(1) << uint(n)
 		}
@@ -45,7 +49,7 @@ func KnownHooksMask() HookBitmap {
 
 // BitmapOf returns the supported_hooks bitmap for the given hooks.
 // Values with Bit() == 0 are skipped; use ExpectedBitmap when validating a
-// manifest declaration list that must refuse unknowns.
+// manifest declaration list that must refuse unknowns and emptiness.
 func BitmapOf(hooks ...Hook) HookBitmap {
 	var b HookBitmap
 	for _, h := range hooks {
@@ -61,9 +65,12 @@ func (b HookBitmap) Has(h Hook) bool {
 }
 
 // ExpectedBitmap builds the bitmap a guest must return for declared.
-// Refuses HOOK_UNSPECIFIED, unknown enum values, values outside u32 capacity,
-// and duplicates.
+// Refuses an empty list, HOOK_UNSPECIFIED, unknown enum values, values outside
+// u32 capacity, and duplicates.
 func ExpectedBitmap(declared []Hook) (HookBitmap, error) {
+	if len(declared) == 0 {
+		return 0, fmt.Errorf("manifest declares no hooks; a module with no handlers is permanently dead")
+	}
 	var b HookBitmap
 	seen := make(map[Hook]struct{}, len(declared))
 	for _, h := range declared {
@@ -92,8 +99,9 @@ func ExpectedBitmap(declared []Hook) (HookBitmap, error) {
 // exactly matches the hooks declared in the manifest.
 //
 // Missing bits mean a declared hook has no handler. Unexpected bits mean the
-// guest registered a hook the manifest does not declare. Reserved bit 0 and
-// bits outside KnownHooksMask are always refused.
+// guest registered a hook the manifest does not declare. Reserved bit 0, bits
+// outside KnownHooksMask, and a zero bitmap / empty declaration are always
+// refused.
 func ValidateManifestHooks(bitmap HookBitmap, declared []Hook) error {
 	expected, err := ExpectedBitmap(declared)
 	if err != nil {
@@ -140,9 +148,8 @@ func hooksIn(b HookBitmap) []Hook {
 // execution-scope id for plugin-private ephemeral metadata (env.meta_*), which
 // is discarded when the tick ends — that is why the host allocates a unique
 // synthetic id rather than reusing a live request's. Do not use RequestScoped
-// as a blanket gate for meta_*; use it for caller-content host calls
-// (original_request, original_response, credentials, …). False for
-// HOOK_UNSPECIFIED too.
+// as a blanket gate for meta_*; use it for caller-content host calls, whose
+// availability is defined per command and hook. False for HOOK_UNSPECIFIED too.
 func (h Hook) RequestScoped() bool {
 	switch h {
 	case Hook_HOOK_BEFORE_REQUEST,

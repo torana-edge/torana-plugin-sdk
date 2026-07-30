@@ -38,7 +38,7 @@ const (
 // the envelope about which request a call belongs to.
 //
 // Guests also export supported_hooks() -> u32. Bit N is set when Hook value N
-// is implemented (bit 0 is unused because HOOK_UNSPECIFIED is not a hook):
+// is implemented:
 //
 //	bit 1 = HOOK_BEFORE_REQUEST
 //	bit 2 = HOOK_AFTER_RESPONSE
@@ -46,10 +46,17 @@ const (
 //	bit 4 = HOOK_ON_HTTP_REQUEST
 //	bit 5 = HOOK_ON_TICK
 //
+// The bitmap must exactly equal the manifest's hook set. Bit 0 and every
+// unassigned bit are invalid. A missing bit (declared, not registered) or an
+// unexpected bit (registered, not declared) is a load-time error. Hook values
+// that participate in this export are limited to 1..31 while the return type
+// is u32; a wider set needs a wider export. An empty declaration / zero bitmap
+// is also a load-time error — a module with no handlers is permanently dead,
+// and that must not pass installation.
+//
 // The SDK derives the bitmap from actual registrations; the host compares it
-// with the manifest before enabling the plugin. A missing bit for a declared
-// hook is a load-time error. This is not a dispatch input — run_hook never
-// consults it.
+// with the manifest before enabling the plugin. This is not a dispatch input —
+// run_hook never consults it.
 type Hook int32
 
 const (
@@ -2007,9 +2014,9 @@ type HookInput struct {
 	// it is not also a WASM argument.
 	//
 	// For request-scoped hooks (before_request, after_response, stream, http)
-	// this is the caller/request correlation id. Every stream event of one
-	// response shares it. Caller content (original_request, original_response,
-	// credentials, …) is available under that id.
+	// this identifies the caller request, and all stream events for one response
+	// share it. Availability of request-derived host calls is defined per
+	// command and hook; the ID alone grants or guarantees nothing.
 	//
 	// For ticks — which fire with no request in flight — the host supplies a
 	// unique synthetic scope id. Plugin-private ephemeral metadata (env.meta_*)

@@ -58,6 +58,16 @@ func TestHookBitmapBitsMatchDescriptor(t *testing.T) {
 	if v2.Hook(32).Bit() != 0 {
 		t.Fatal("Hook(32) is outside u32 bit capacity")
 	}
+
+	// Mutating the generated Hook_name map must not invent a contract hook.
+	v2.Hook_name[30] = "HOOK_FAKE"
+	t.Cleanup(func() { delete(v2.Hook_name, 30) })
+	if v2.Hook(30).Bit() != 0 {
+		t.Fatal("Hook.Bit must not honour a mutated Hook_name entry")
+	}
+	if v2.KnownHooksMask().Has(v2.Hook(30)) {
+		t.Fatal("KnownHooksMask must not honour a mutated Hook_name entry")
+	}
 }
 
 func TestValidateManifestHooksExactAgreement(t *testing.T) {
@@ -68,6 +78,20 @@ func TestValidateManifestHooksExactAgreement(t *testing.T) {
 		declared := []v2.Hook{before, after}
 		if err := v2.ValidateManifestHooks(v2.BitmapOf(declared...), declared); err != nil {
 			t.Fatalf("exact agreement must pass: %v", err)
+		}
+	})
+
+	t.Run("empty declaration", func(t *testing.T) {
+		err := v2.ValidateManifestHooks(0, nil)
+		if err == nil || !strings.Contains(err.Error(), "no hooks") {
+			t.Fatalf("want empty-declaration error, got %v", err)
+		}
+	})
+
+	t.Run("zero bitmap with declared hooks", func(t *testing.T) {
+		err := v2.ValidateManifestHooks(0, []v2.Hook{before})
+		if err == nil || !strings.Contains(err.Error(), "missing") {
+			t.Fatalf("want missing-hook error for zero bitmap, got %v", err)
 		}
 	})
 
