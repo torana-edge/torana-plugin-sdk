@@ -80,6 +80,10 @@ func (x *ContentBlockStart) Validate() error {
 
 // HookOf reports which hook an input belongs to, derived from its payload.
 // Returns HOOK_UNSPECIFIED when no payload is set.
+//
+// A oneof wrapper carrying a nil message still satisfies `Payload != nil`, so
+// this reports the hook for one — the frame does name a hook. Whether it names
+// anything USABLE is Validate's job.
 func (x *HookInput) HookOf() Hook {
 	if x == nil {
 		return Hook_HOOK_UNSPECIFIED
@@ -99,6 +103,28 @@ func (x *HookInput) HookOf() Hook {
 	return Hook_HOOK_UNSPECIFIED
 }
 
+// payloadPresent reports whether the oneof wrapper carries an actual message.
+//
+// A wrapper with a nil message is a well-formed protobuf frame that says a hook
+// and then hands over nothing. Checking only that the wrapper exists let all of
+// those through — so a handwritten guest could submit a frame the normative
+// validator accepted and the host then dereferenced.
+func (x *HookInput) payloadPresent() bool {
+	switch p := x.Payload.(type) {
+	case *HookInput_ChatRequest:
+		return p.ChatRequest != nil
+	case *HookInput_ChatResponse:
+		return p.ChatResponse != nil
+	case *HookInput_StreamEvent:
+		return p.StreamEvent != nil
+	case *HookInput_HttpRequest:
+		return p.HttpRequest != nil
+	case *HookInput_TickRequest:
+		return p.TickRequest != nil
+	}
+	return false
+}
+
 // Validate reports whether an input is well formed on its own terms: that it
 // carries a payload at all.
 //
@@ -112,6 +138,14 @@ func (x *HookInput) Validate() error {
 	}
 	if x.HookOf() == Hook_HOOK_UNSPECIFIED {
 		return fmt.Errorf("hook input carries no payload, so there is no hook to dispatch")
+	}
+	if !x.payloadPresent() {
+		return fmt.Errorf("hook input names %v but its payload is nil", x.HookOf())
+	}
+	if ev, ok := x.Payload.(*HookInput_StreamEvent); ok {
+		if err := ev.StreamEvent.Validate(); err != nil {
+			return fmt.Errorf("hook input: %w", err)
+		}
 	}
 	return nil
 }
@@ -130,6 +164,24 @@ func (x *HookInput) ValidateFor(hook Hook) error {
 		return fmt.Errorf("%v was dispatched a %v payload", hook, got)
 	}
 	return nil
+}
+
+// payloadPresent reports whether the oneof wrapper carries an actual message.
+// See HookInput.payloadPresent — the same hole existed here.
+func (x *HookResult) payloadPresent() bool {
+	switch p := x.Payload.(type) {
+	case *HookResult_ChatRequest:
+		return p.ChatRequest != nil
+	case *HookResult_ChatResponse:
+		return p.ChatResponse != nil
+	case *HookResult_StreamEvents:
+		return p.StreamEvents != nil
+	case *HookResult_HttpResponse:
+		return p.HttpResponse != nil
+	case *HookResult_TickOutcome:
+		return p.TickOutcome != nil
+	}
+	return false
 }
 
 // HookOf reports which hook a result belongs to, derived from its payload.
@@ -195,6 +247,9 @@ func (x *HookResult) ValidateFor(hook Hook) error {
 		}
 		if got := x.HookOf(); got != hook {
 			return fmt.Errorf("hook result for %v carries a %v payload", hook, got)
+		}
+		if !x.payloadPresent() {
+			return fmt.Errorf("hook result says REPLACE for %v but its payload is nil", hook)
 		}
 		// REPLACE with no events emits nothing, which is what SUPPRESS means.
 		// Two encodings of one action is the ambiguity this contract exists to
