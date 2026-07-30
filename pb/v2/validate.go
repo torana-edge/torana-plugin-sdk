@@ -30,9 +30,9 @@ func blockRequestStatusOK(status int32) bool {
 }
 
 // httpBodyForbidden reports whether status must not carry a response body
-// (RFC 9110 / Go net/http transfer writer: 204, 304).
+// (RFC 9110: 204, 205, and 304 terminate at the header section).
 func httpBodyForbidden(status int32) bool {
-	return status == 204 || status == 304
+	return status == 204 || status == 205 || status == 304
 }
 
 // Validate reports whether a stream event carries an actual event.

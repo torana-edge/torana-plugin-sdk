@@ -1811,8 +1811,8 @@ func (x *HttpRequest) GetBody() []byte {
 type HttpResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// HTTP status the host will write. Must be a final status in 200–599
-	// (informational 1xx is not terminal under net/http). 204 and 304 must have
-	// an empty body; see HttpResponse.Validate.
+	// (informational 1xx is not terminal under net/http). 204, 205, and 304 must
+	// have an empty body; see HttpResponse.Validate.
 	Status int32 `protobuf:"varint,1,opt,name=status,proto3" json:"status,omitempty"`
 	// JSON-encoded map of response headers (map[string][]string). The host
 	// applies its own allowlist; anything outside it fails the response.

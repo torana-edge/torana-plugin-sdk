@@ -97,7 +97,7 @@ func TestHTTPStatusRange(t *testing.T) {
 }
 
 func TestHttpResponseBodylessStatuses(t *testing.T) {
-	for _, status := range []int32{204, 304} {
+	for _, status := range []int32{204, 205, 304} {
 		if err := (&v2.HttpResponse{Status: status}).Validate(); err != nil {
 			t.Fatalf("status %d with empty body must pass: %v", status, err)
 		}
