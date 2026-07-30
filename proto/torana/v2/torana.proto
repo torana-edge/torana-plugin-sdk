@@ -132,17 +132,26 @@ message ChatRequest {
 // plugin could not observe. Four independent auditors reported that as a bug.
 message ChatResponse {
   // Model that actually answered, which may differ from the one requested.
+  // Host-owned: observed fact — request ir.model.write does not authorise
+  // forging it.
   string model = 1;
   // Provider's response id, empty when it reported none.
+  // Host-owned: forging it breaks correlation.
   string id = 2;
-  // The assistant's turn.
+  // The assistant's turn. Content governed by ir.messages.write.assistant;
+  // role and opaque signatures inside Message are host-owned.
   Message message = 3;
+  // Governed by ir.messages.write.assistant (assistant-turn metadata).
   string finish_reason = 4;
+  // Host-owned: forging usage forges the bill / observability.
   Usage usage = 5;
   // Upstream HTTP status. Non-2xx responses reach observational hooks too.
+  // Host-owned: host-measured fact.
   int32 upstream_status = 6;
+  // Host-owned: host-measured latency.
   int64 duration_ms = 7;
   // Provider fields Torana did not model, verbatim.
+  // Host-owned: opaque provider output — not request ir.params.write.
   bytes provider_extensions_json = 8;
 }
 
@@ -160,11 +169,18 @@ message ToolCallRef {
 }
 
 message ToolCallDelta {
+  // Must equal the ContentBlockStart.index of the open tool-call block this
+  // delta belongs to. See StreamEvent index invariants.
   int32 index = 1;
   string arguments_delta = 2;
 }
 
 message StreamError {
+  // Terminal abort of the streamed message. See StreamEvent stream-state rules:
+  // may arrive while a content block is open; abandons that block without a
+  // ContentBlockStop; ends the stream (no MessageStop required); no further
+  // events. Incomplete tool-call argument buffers must be discarded, not
+  // assembled into an executable call.
   int32 code = 1;
   string message = 2;
 }
@@ -218,7 +234,20 @@ message ProviderBlock {
 // A string would allow "tool_call" with no tool metadata, and "text" carrying
 // some — contradictions a reader would have to know were impossible. A oneof
 // makes them unrepresentable.
+//
+// Stream-state rule: within one message, at most one ContentBlockStart may be
+// open. A second start before the matching ContentBlockStop is invalid.
+// "Parallel" tool calls are sequential blocks with distinct indexes — they are
+// not simultaneously open. TextDelta / ThinkingDelta / signature_delta under
+// CurrentContentBlock belong to that single open block (and are invalid when
+// no compatible block is open).
 message ContentBlockStart {
+  // Unique across the entire streamed message; never reused after the block
+  // closes. Deltas and ContentBlockStop must use this same index. A
+  // ContentBlockStop / ToolCallDelta whose index does not name the currently
+  // open start is invalid. Adapters MUST assign distinct indexes to sequential
+  // parallel tool-call parts (emitting Index:0 for every Gemini functionCall
+  // is not conformant). SignatureScopeToolCallBlockByIndex depends on this.
   int32 index = 1;
   oneof block {
     TextBlock text = 2;
@@ -229,6 +258,7 @@ message ContentBlockStart {
 }
 
 message ContentBlockStop {
+  // Must match the currently open ContentBlockStart.index.
   int32 index = 1;
 }
 
@@ -246,18 +276,53 @@ message ContentBlockStop {
 //   Usage
 //   MessageStop{finish_reason}
 //
-// Usage may arrive before or after MessageStop depending on the provider, and
-// StreamError may replace the remainder at any point. Everything else is
-// ordered as shown, and every block is opened and closed exactly once.
+// Usage may arrive before or after MessageStop depending on the provider.
+// StreamError is a terminal abort (see invariants below) and may replace the
+// remainder at any point, including mid-block. Everything else is ordered as
+// shown, and every successfully completed block is opened and closed exactly
+// once.
+//
+// Stream-state / index invariants (ABI):
+//   - At most one content block is open at a time. A second ContentBlockStart
+//     before the matching stop is invalid.
+//   - Indexes are unique across the entire streamed message and are never
+//     reused after close.
+//   - Every ToolCallDelta / ContentBlockStop index must name the currently
+//     open ContentBlockStart; open-missing indexes are invalid.
+//   - TextDelta / ThinkingDelta / CurrentContentBlock signature_delta require
+//     a compatible open block; otherwise invalid.
+//   - StreamError is a terminal abort: it may occur at any point, including
+//     while a content block is open. It implicitly abandons/clears that open
+//     block and any buffered incomplete tool-call arguments — this is not a
+//     successful ContentBlockStop and must not be represented as one. It
+//     terminates the message/stream; neither MessageStop nor a synthetic block
+//     stop is required. Any event after StreamError is invalid.
+//   - MessageStop / end-of-stream while any block remains open is invalid,
+//     unless that open block was terminally aborted by StreamError (in which
+//     case the stream already ended at the error — ordinary EOF after a
+//     non-error open block is still invalid).
+//   - Host Migration B must fix adapters that violate index uniqueness (e.g.
+//     Gemini emitting Index:0 for every parallel functionCall) before enabling
+//     ToolCallBlockByIndex signature enforcement.
 message StreamEvent {
+  // Outbound mutations compose topology + semantics (see package
+  // outboundpolicy): required = topology (cardinality/order/boundaries/kind)
+  // ∪ every semantic section changed/removed/added; any changed/removed/added
+  // host-owned fact rejects. Host-owned means immutable, not unreturnable —
+  // identical re-emit is a no-op. A one-for-one TextDelta rewrite needs only
+  // ir.messages.write.assistant. The recursive field-diff verifier is
+  // Migration B (needs a stream-path benchmark first).
   oneof event {
     string text_delta = 1;
     string thinking_delta = 2;
     ToolCallDelta tool_call_delta = 3;
     Usage usage = 4;
     StreamError error = 5;
-    // Opaque provider signature paired with the surrounding block (Gemini
-    // thoughtSignature on a standalone text/thought part).
+    // Opaque provider signature. When emitted with open text/thinking content
+    // it binds that block (CurrentContentBlock). When emitted alone after
+    // closed blocks (Code Assist trailing thoughtSignature + empty text) it
+    // is TrailingStandalone — preserve as SignatureDelta; do not synthesize
+    // an empty content block. Not used for the tool-call signature path.
     string signature_delta = 6;
     MessageStart message_start = 7;
     MessageStop message_stop = 8;

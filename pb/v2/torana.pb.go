@@ -680,17 +680,26 @@ func (x *ChatRequest) GetToranaMetaJson() []byte {
 type ChatResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Model that actually answered, which may differ from the one requested.
+	// Host-owned: observed fact — request ir.model.write does not authorise
+	// forging it.
 	Model string `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
 	// Provider's response id, empty when it reported none.
+	// Host-owned: forging it breaks correlation.
 	Id string `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
-	// The assistant's turn.
-	Message      *Message `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
-	FinishReason string   `protobuf:"bytes,4,opt,name=finish_reason,json=finishReason,proto3" json:"finish_reason,omitempty"`
-	Usage        *Usage   `protobuf:"bytes,5,opt,name=usage,proto3" json:"usage,omitempty"`
+	// The assistant's turn. Content governed by ir.messages.write.assistant;
+	// role and opaque signatures inside Message are host-owned.
+	Message *Message `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	// Governed by ir.messages.write.assistant (assistant-turn metadata).
+	FinishReason string `protobuf:"bytes,4,opt,name=finish_reason,json=finishReason,proto3" json:"finish_reason,omitempty"`
+	// Host-owned: forging usage forges the bill / observability.
+	Usage *Usage `protobuf:"bytes,5,opt,name=usage,proto3" json:"usage,omitempty"`
 	// Upstream HTTP status. Non-2xx responses reach observational hooks too.
+	// Host-owned: host-measured fact.
 	UpstreamStatus int32 `protobuf:"varint,6,opt,name=upstream_status,json=upstreamStatus,proto3" json:"upstream_status,omitempty"`
-	DurationMs     int64 `protobuf:"varint,7,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+	// Host-owned: host-measured latency.
+	DurationMs int64 `protobuf:"varint,7,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
 	// Provider fields Torana did not model, verbatim.
+	// Host-owned: opaque provider output — not request ir.params.write.
 	ProviderExtensionsJson []byte `protobuf:"bytes,8,opt,name=provider_extensions_json,json=providerExtensionsJson,proto3" json:"provider_extensions_json,omitempty"`
 	unknownFields          protoimpl.UnknownFields
 	sizeCache              protoimpl.SizeCache
@@ -846,9 +855,11 @@ func (x *ToolCallRef) GetSignature() string {
 }
 
 type ToolCallDelta struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	Index          int32                  `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
-	ArgumentsDelta string                 `protobuf:"bytes,2,opt,name=arguments_delta,json=argumentsDelta,proto3" json:"arguments_delta,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Must equal the ContentBlockStart.index of the open tool-call block this
+	// delta belongs to. See StreamEvent index invariants.
+	Index          int32  `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	ArgumentsDelta string `protobuf:"bytes,2,opt,name=arguments_delta,json=argumentsDelta,proto3" json:"arguments_delta,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -898,9 +909,14 @@ func (x *ToolCallDelta) GetArgumentsDelta() string {
 }
 
 type StreamError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Terminal abort of the streamed message. See StreamEvent stream-state rules:
+	// may arrive while a content block is open; abandons that block without a
+	// ContentBlockStop; ends the stream (no MessageStop required); no further
+	// events. Incomplete tool-call argument buffers must be discarded, not
+	// assembled into an executable call.
+	Code          int32  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1200,9 +1216,22 @@ func (x *ProviderBlock) GetKind() string {
 // A string would allow "tool_call" with no tool metadata, and "text" carrying
 // some — contradictions a reader would have to know were impossible. A oneof
 // makes them unrepresentable.
+//
+// Stream-state rule: within one message, at most one ContentBlockStart may be
+// open. A second start before the matching ContentBlockStop is invalid.
+// "Parallel" tool calls are sequential blocks with distinct indexes — they are
+// not simultaneously open. TextDelta / ThinkingDelta / signature_delta under
+// CurrentContentBlock belong to that single open block (and are invalid when
+// no compatible block is open).
 type ContentBlockStart struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	Index int32                  `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	// Unique across the entire streamed message; never reused after the block
+	// closes. Deltas and ContentBlockStop must use this same index. A
+	// ContentBlockStop / ToolCallDelta whose index does not name the currently
+	// open start is invalid. Adapters MUST assign distinct indexes to sequential
+	// parallel tool-call parts (emitting Index:0 for every Gemini functionCall
+	// is not conformant). SignatureScopeToolCallBlockByIndex depends on this.
+	Index int32 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
 	// Types that are valid to be assigned to Block:
 	//
 	//	*ContentBlockStart_Text
@@ -1323,8 +1352,9 @@ func (*ContentBlockStart_ToolCall) isContentBlockStart_Block() {}
 func (*ContentBlockStart_Provider) isContentBlockStart_Block() {}
 
 type ContentBlockStop struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Index         int32                  `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Must match the currently open ContentBlockStart.index.
+	Index         int32 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1380,11 +1410,44 @@ func (x *ContentBlockStop) GetIndex() int32 {
 //	Usage
 //	MessageStop{finish_reason}
 //
-// Usage may arrive before or after MessageStop depending on the provider, and
-// StreamError may replace the remainder at any point. Everything else is
-// ordered as shown, and every block is opened and closed exactly once.
+// Usage may arrive before or after MessageStop depending on the provider.
+// StreamError is a terminal abort (see invariants below) and may replace the
+// remainder at any point, including mid-block. Everything else is ordered as
+// shown, and every successfully completed block is opened and closed exactly
+// once.
+//
+// Stream-state / index invariants (ABI):
+//   - At most one content block is open at a time. A second ContentBlockStart
+//     before the matching stop is invalid.
+//   - Indexes are unique across the entire streamed message and are never
+//     reused after close.
+//   - Every ToolCallDelta / ContentBlockStop index must name the currently
+//     open ContentBlockStart; open-missing indexes are invalid.
+//   - TextDelta / ThinkingDelta / CurrentContentBlock signature_delta require
+//     a compatible open block; otherwise invalid.
+//   - StreamError is a terminal abort: it may occur at any point, including
+//     while a content block is open. It implicitly abandons/clears that open
+//     block and any buffered incomplete tool-call arguments — this is not a
+//     successful ContentBlockStop and must not be represented as one. It
+//     terminates the message/stream; neither MessageStop nor a synthetic block
+//     stop is required. Any event after StreamError is invalid.
+//   - MessageStop / end-of-stream while any block remains open is invalid,
+//     unless that open block was terminally aborted by StreamError (in which
+//     case the stream already ended at the error — ordinary EOF after a
+//     non-error open block is still invalid).
+//   - Host Migration B must fix adapters that violate index uniqueness (e.g.
+//     Gemini emitting Index:0 for every parallel functionCall) before enabling
+//     ToolCallBlockByIndex signature enforcement.
 type StreamEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// Outbound mutations compose topology + semantics (see package
+	// outboundpolicy): required = topology (cardinality/order/boundaries/kind)
+	// ∪ every semantic section changed/removed/added; any changed/removed/added
+	// host-owned fact rejects. Host-owned means immutable, not unreturnable —
+	// identical re-emit is a no-op. A one-for-one TextDelta rewrite needs only
+	// ir.messages.write.assistant. The recursive field-diff verifier is
+	// Migration B (needs a stream-path benchmark first).
+	//
 	// Types that are valid to be assigned to Event:
 	//
 	//	*StreamEvent_TextDelta
@@ -1554,8 +1617,11 @@ type StreamEvent_Error struct {
 }
 
 type StreamEvent_SignatureDelta struct {
-	// Opaque provider signature paired with the surrounding block (Gemini
-	// thoughtSignature on a standalone text/thought part).
+	// Opaque provider signature. When emitted with open text/thinking content
+	// it binds that block (CurrentContentBlock). When emitted alone after
+	// closed blocks (Code Assist trailing thoughtSignature + empty text) it
+	// is TrailingStandalone — preserve as SignatureDelta; do not synthesize
+	// an empty content block. Not used for the tool-call signature path.
 	SignatureDelta string `protobuf:"bytes,6,opt,name=signature_delta,json=signatureDelta,proto3,oneof"`
 }
 

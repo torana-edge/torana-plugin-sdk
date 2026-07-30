@@ -189,6 +189,45 @@ helpers surface it as an error, so a plugin should degrade rather than assume.
 | `env.block_request` | `sdk.BlockRequest` | Reject the request with a provider-shaped error. |
 | `env.respond_request` | `sdk.RespondRequest` | Answer directly without going upstream. |
 | `env.route_request` | `sdk.RouteRequest` | Send the request to a different provider. |
+| `env.set_identity` | (v2 host call) | Override the rate-limit / identity key for this request. |
+
+**IR write grants — what a plugin may CHANGE**
+
+These apply across hooks for the same semantic area where the authority is
+actually the same (assistant text/thinking/tool arguments). Observed response
+facts (answering model, response id, usage, role, provider extension blobs,
+opaque signatures) are **host-owned** — immutable under plugin mutation
+(identical re-emit is a no-op; change/remove/forge rejects). Request
+`ir.model.write` / `ir.params.write` do not authorise forging them.
+
+| Capability | Covers |
+| --- | --- |
+| `ir.messages.write.{user,assistant,system,tool,developer,other}` | Message **content** of that role (request and response). Not response role or signatures. |
+| `ir.tools.write` | Tool definitions on the request. |
+| `ir.model.write` | **Request** model selection only. |
+| `ir.params.write` | Request sampling params and request provider extension blobs. |
+| `ir.stream.write` | **Additive** topology grant: Suppress, fan-out, kind change, block boundaries/indexes. Required **in addition to** content grants for what was changed/removed/added. Cannot alone alter host-owned facts. |
+
+Stream composition (Migration B verifies by field diff): `required = topology
+(when cardinality/order/boundaries/kind change) ∪ every semantic section
+changed/removed/added`. A one-for-one `TextDelta` rewrite needs only
+`ir.messages.write.assistant`. When `AfterResponse.mutable` is false, a
+`ReplaceResponse` is discarded by the host.
+
+Opaque signatures (`thinking_signature`, `ToolCall.signature`,
+`ToolCallRef.signature`) bind provider tokens to content. Mutating signed
+content while leaving the signature in place is invalid — the host must reject
+that mutation or clear the signature. On the stream path, `ToolCallRef.signature`
+binds `id`/`name` and `ToolCallDelta.arguments_delta` for the **same unique
+content-block index** (never reused after close; parallel tool calls are
+sequential blocks with distinct indexes). At most one content block may be open.
+`StreamError` is a terminal abort: it may arrive mid-block, abandons the open
+block and incomplete tool-call buffers without a synthetic stop, ends the
+stream, and makes any later event invalid. Streamed `signature_delta` with open
+text/thinking binds that block; a trailing signature-only part (Code Assist) is
+standalone — preserve it without synthesizing an empty block. `StreamError` is
+also host-owned (do not forge upstream failures). Host enforcement tables live
+in package `outboundpolicy` (not for WASM guests).
 
 **Reading the request**
 

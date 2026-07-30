@@ -44,6 +44,7 @@ var WritePermissions = []string{
 	"ir.messages.write.user",
 	"ir.model.write",
 	"ir.params.write",
+	"ir.stream.write",
 	"ir.tools.write",
 }
 
@@ -89,6 +90,12 @@ const (
 	// SectionParams covers temperature, top_p, max_tokens, stop sequences, the
 	// stream flag, and the provider-specific extension blobs.
 	SectionParams WriteSection = "ir.params.write"
+
+	// SectionStreamWrite is the additive topology grant: Suppress, fan-out,
+	// event-kind change, and content-block boundary/index changes. Declared by
+	// guests in plugin.json; enforcement vocabulary lives in package
+	// outboundpolicy (host/linter only — do not import it from WASM guests).
+	SectionStreamWrite WriteSection = "ir.stream.write"
 )
 
 // MessageWriteSection returns the grant governing writes to a message of the
