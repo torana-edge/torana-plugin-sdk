@@ -13,7 +13,19 @@ plugin, the SDK already implements all of this — start at
 
 This document is a critical reference for implementing WebAssembly (WASM) plugins in Torana Edge. **AI Coding Agents MUST read this document before generating or modifying Torana WASM plugins.**
 
-## 1. The Core Architecture (Linear Memory)
+**ABI versioning (read this before the sections below).** Sections 1–5 describe
+the **current v1 trampoline ABI** still exported by guests today: five named
+hook exports (`run_before_request`, …), a separate `request_id` argument, and
+v1 result messages (`StreamEventResult.handled`, `TickResult.handled`). See
+[`proto/torana/v1/torana.proto`](../proto/torana/v1/torana.proto). Section 6 is a
+**v2 write-grant preview** for the contract in
+[`proto/torana/v2/torana.proto`](../proto/torana/v2/torana.proto) (`run_hook`,
+`supported_hooks`, single-action `HookResult`). Do not mix them into one hybrid
+guest. Migration A switches the export surface; until then, handwritten guests
+follow v1 for the boundary and treat §6 as capability vocabulary that will
+apply once v2 enforcement lands.
+
+## 1. The Core Architecture (Linear Memory) — v1 trampoline
 WASM plugins in Torana run inside a highly restricted sandbox (using `wazero`). 
 The Go host (Torana) and the guest (the plugin) do NOT share variables, structs, or garbage collection. They only share a single, flat byte array called **Linear Memory**.
 
@@ -23,7 +35,7 @@ To pass a Protobuf byte array from the host to the plugin:
 3. The host writes the Protobuf byte array into the plugin's memory at that pointer.
 4. The host calls the plugin's hook (e.g., `run_before_request(reqID, ptr, size)`).
 
-## 2. The Golden Rule of Memory Allocation
+## 2. The Golden Rule of Memory Allocation — v1 trampoline
 **NEVER USE STATIC BUMP ALLOCATORS.**
 
 ### ❌ WRONG (Causes OOM Crashes):
@@ -98,14 +110,14 @@ Use the standard library allocator for your language.
   }
   ```
 
-## 3. The 64-bit Return ABI
+## 3. The 64-bit Return ABI — v1 trampoline
 Hooks like `run_before_request(reqID: u64, ptr: u32, size: u32)` must return a **64-bit integer (`u64` or `uint64`)**.
 Because WASM32 only supports 32-bit pointers, we pack the pointer and the length of the response into a single 64-bit integer.
 
 * **Format**: `(pointer << 32) | size`
 * **Pass-Through**: If you don't want to modify the request, return `0`.
 
-**Stream hook return type**: `run_on_stream_chunk` returns a serialized
+**Stream hook return type (v1):** `run_on_stream_chunk` returns a serialized
 `torana.v1.StreamEventResult` (NOT a bare `StreamEvent`):
 ```proto
 message StreamEventResult {
@@ -116,6 +128,8 @@ message StreamEventResult {
 Returning `0` bytes still means pass-through. `handled=true` with zero
 events suppresses the input event — this is how buffering plugins drop
 argument fragments before re-emitting the assembled result at ToolCallEnd.
+(Under v2 the stream action is `HookResult.emit_events` / `suppress` with no
+`handled` flag — zero-byte return remains pass-through.)
 
 ### Packing Example (Rust):
 ```rust
@@ -124,7 +138,7 @@ let out_ptr = alloc(output.len() as u32);
 return ((out_ptr as u64) << 32) | (output.len() as u64);
 ```
 
-## 4. Host Functions (`env.*`)
+## 4. Host Functions (`env.*`) — v1 trampoline
 Torana exports several functions to the plugin via the `env` module.
 If you use these, you must request them in your `plugin.json` under the `permissions` array, or the host will reject the plugin.
 
@@ -133,32 +147,38 @@ If you use these, you must request them in your `plugin.json` under the `permiss
 
 When passing strings TO the host, you don't need to pack them into a 64-bit integer. You just pass the 32-bit `ptr` and `len` as separate arguments.
 
-## 5. Background Ticks (`run_on_tick`)
+## 5. Background Ticks (`run_on_tick`) — v1 trampoline
 
 Every other hook is reactive — it runs because a request is passing through.
 `run_on_tick` fires on a timer with **no request in flight**, so a plugin can act
 when nothing is happening.
 
-It has the same signature as every other hook,
-`(request_id: u64, ptr: u32, len: u32) -> u64`, taking a `TickRequest` and
-returning a `TickResult`. Two things differ, and both are easy to get wrong:
+**v1 export shape:** `(request_id: u64, ptr: u32, len: u32) -> u64`, taking a
+`TickRequest` and returning a `TickResult` with `handled`.
 
-**There is no request, so most host calls have nothing to answer with.**
-`env.original_request`, `env.original_response`, and `env.meta_*` are all
-request-scoped. On a tick they return empty rather than failing. The caller's
-credential does not exist either. Everything a tick needs must come from the
-plugin's own durable state or from a host call that resolves its own config.
+**There is no caller request.** `env.original_request`, `env.original_response`,
+and the caller's credential do not exist on a tick — those calls return empty
+rather than failing. Everything a tick needs from durable storage must come from
+the plugin's own state or from a host call that resolves its own config.
 
-**You must set `handled = true`.** An all-defaults protobuf message encodes to
-zero bytes, and the host reads zero bytes as "did nothing". A plugin that acted
-but left `handled` false is indistinguishable from one that never ran. Return
-`0` (a null pointer) when there genuinely was nothing to do.
+**Tick metadata (v1 vs v2).** Under the **v1 trampoline**, treat `env.meta_*` as
+unavailable on ticks (no request scope). Under the **v2 contract**, the host
+supplies a synthetic `request_id` scope: there is still no caller request or
+original request/response, but plugin-private `env.meta_*` is available for that
+tick scope and is cleared when the tick ends (`EndRequest`). See
+`HookInput.request_id` comments in `proto/torana/v2/torana.proto`.
+
+**You must set `handled = true` (v1).** An all-defaults protobuf message encodes
+to zero bytes, and the host reads zero bytes as "did nothing". A plugin that
+acted but left `handled` false is indistinguishable from one that never ran.
+Return `0` (a null pointer) when there genuinely was nothing to do. (v2 uses
+`HookResult.tick_outcome` with no `handled` flag; zero bytes remain pass-through.)
 
 Ticks are gated on the `env.background_tick` permission, and an operator must
 approve it against your exact bundle digest before the hook is ever called.
 
 ```rust
-// Rust: the SDK macro handles the boundary.
+// Rust: the SDK macro handles the boundary (v1 TickResult).
 torana_plugin_sdk::export_tick!(my_tick_handler);
 
 fn my_tick_handler(tick: &pb::TickRequest) -> Result<Option<pb::TickResult>, Box<dyn Error>> {
@@ -166,27 +186,34 @@ fn my_tick_handler(tick: &pb::TickRequest) -> Result<Option<pb::TickResult>, Box
         return Ok(None);            // encodes to a 0 return: "did nothing"
     }
     Ok(Some(pb::TickResult {
-        handled: true,              // REQUIRED, or the host cannot tell
+        handled: true,              // REQUIRED on v1, or the host cannot tell
         actions: 2,
         note: "refreshed 2 conversations".into(),
     }))
 }
 ```
 
-## 6. IR write grants (request, response, stream)
+## 6. IR write grants (v2 preview)
 
-Declare every `ir.*.write` capability you need in `plugin.json`. Content grants
-reuse the same names across hooks where the authority matches (assistant text
-on request and response). Topology is separate:
+Vocabulary for [`proto/torana/v2/torana.proto`](../proto/torana/v2/torana.proto).
+Enforcement is Migration B. Declare every `ir.*.write` capability you need in
+`plugin.json`. Content grants reuse the same names across hooks where the
+authority matches (assistant text on request and response). Topology is separate:
 
 * `ir.stream.write` is **additive**. Suppress, fan-out, event-kind change, and
-  block-boundary edits need it **plus** every content section you change,
-  remove, or add. It cannot alone authorise removing or forging host-owned
+  block-boundary edits need it **plus** every content section you **change,
+  remove, or add**. It cannot alone authorise changing or forging host-owned
   facts (usage, message_start, signature_delta, response model/id/role, opaque
-  signatures, provider extension blobs).
+  signatures, provider extension blobs). Host-owned means **immutable**: an
+  identical re-emit needs no grant; Suppress/forge of those facts is forbidden.
 * A one-for-one `TextDelta` rewrite needs only `ir.messages.write.assistant`.
 * `ir.model.write` / `ir.params.write` cover **request** selection/params, not
   observed response facts.
+* Opaque signatures (`thinking_signature`, `ToolCall.signature`,
+  `ToolCallRef.signature`, `signature_delta`) bind provider tokens to content.
+  Mutating signed content while leaving the signature in place is invalid; the
+  host must reject that mutation or clear the signature. `signature_delta` is
+  cross-event — the stream assembler/host verifier owns that pairing.
 
 ## 7. Summary Checklist for AI Agents
 1. Did I use a real allocator (not a bump allocator)?
@@ -194,11 +221,14 @@ on request and response). Topology is separate:
 3. Did I pack the return pointer and size into a `u64`?
 4. Did I return `0` for passthrough?
 5. Did I parse and serialize Protobuf properly within the memory bounds?
-6. Did I declare every `env.*` and `ir.*.write` capability I call or need?
-7. If I Suppress or fan-out stream events, did I request `ir.stream.write`
-   **and** the content grants for what I remove/add (and avoid host-owned
-   events)?
+6. Did I pick **either** the v1 trampoline boundary **or** the v2 export shape —
+   not a hybrid — and declare every `env.*` / `ir.*.write` I need?
+7. If I Suppress or fan-out stream events (v2), did I request `ir.stream.write`
+   **and** the content grants for what I change/remove/add (and avoid altering
+   host-owned facts)?
 8. Did I avoid forging host-owned response facts (usage, model-that-answered,
-   signatures, provider extension blobs)?
-9. If I implemented `run_on_tick`, did I set `handled = true` on any result I
-   actually meant, and avoid relying on request-scoped host calls?
+   signatures, provider extension blobs), and avoid leaving stale signatures on
+   mutated signed content?
+9. If I implemented a tick: v1 must set `handled = true` on any intentional
+   result; under v2, `env.meta_*` is available on the synthetic tick scope, but
+   original request/response and caller credentials still are not.

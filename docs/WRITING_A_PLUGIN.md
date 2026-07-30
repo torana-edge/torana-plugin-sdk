@@ -196,8 +196,9 @@ helpers surface it as an error, so a plugin should degrade rather than assume.
 These apply across hooks for the same semantic area where the authority is
 actually the same (assistant text/thinking/tool arguments). Observed response
 facts (answering model, response id, usage, role, provider extension blobs,
-opaque signatures) are **host-owned** — request `ir.model.write` /
-`ir.params.write` do not authorise forging them.
+opaque signatures) are **host-owned** — immutable under plugin mutation
+(identical re-emit is a no-op; change/remove/forge rejects). Request
+`ir.model.write` / `ir.params.write` do not authorise forging them.
 
 | Capability | Covers |
 | --- | --- |
@@ -205,9 +206,19 @@ opaque signatures) are **host-owned** — request `ir.model.write` /
 | `ir.tools.write` | Tool definitions on the request. |
 | `ir.model.write` | **Request** model selection only. |
 | `ir.params.write` | Request sampling params and request provider extension blobs. |
-| `ir.stream.write` | **Additive** topology grant: Suppress, fan-out, kind change, block boundaries. Required **in addition to** content grants for what was changed/removed/added. Cannot alone alter or remove host-owned facts (e.g. Suppress of `Usage` is forbidden). |
+| `ir.stream.write` | **Additive** topology grant: Suppress, fan-out, kind change, block boundaries/indexes. Required **in addition to** content grants for what was changed/removed/added. Cannot alone alter host-owned facts. |
 
-Stream composition: `required = topology (when cardinality/order/boundaries change) ∪ every semantic section changed/removed/added`. A one-for-one `TextDelta` rewrite needs only `ir.messages.write.assistant`. When `AfterResponse.mutable` is false, a `ReplaceResponse` is discarded by the host.
+Stream composition (Migration B verifies by field diff): `required = topology
+(when cardinality/order/boundaries/kind change) ∪ every semantic section
+changed/removed/added`. A one-for-one `TextDelta` rewrite needs only
+`ir.messages.write.assistant`. When `AfterResponse.mutable` is false, a
+`ReplaceResponse` is discarded by the host.
+
+Opaque signatures (`thinking_signature`, `ToolCall.signature`,
+`ToolCallRef.signature`) bind provider tokens to content. Mutating signed
+content while leaving the signature in place is invalid — the host must reject
+that mutation or clear the signature. Streamed `signature_delta` is cross-event
+state owned by the stream assembler/host verifier.
 
 **Reading the request**
 
