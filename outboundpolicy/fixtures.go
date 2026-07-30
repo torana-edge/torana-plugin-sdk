@@ -35,6 +35,10 @@ type StreamFixture struct {
 	Returned []*pbv2.StreamEvent
 	// Index is the content block the expectation is about. Fixtures with more
 	// than one block exist precisely to catch verifiers that correlate wrongly.
+	//
+	// Multi-block fixtures are SEQUENTIAL — one block opens, fills and stops
+	// before the next opens. v2 forbids two simultaneously open content blocks,
+	// so an "interleaved" fixture would teach a topology the contract rejects.
 	Index int32
 	// Want is the classification for that block's signature.
 	Want SignatureMutation
@@ -140,7 +144,7 @@ func SignatureStreamFixtures() []StreamFixture {
 			Why:      "Most tool calls carry no signature and must not need special handling.",
 		},
 		{
-			Name: "two interleaved blocks, only the second changed",
+			Name: "two sequential blocks, only the second changed",
 			Accepted: append(
 				toolBlockDeltas(0, "call_1", "read_file", sigA, `{"path":`, `"/a"}`),
 				toolBlockDeltas(1, "call_2", "write_file", sigB, `{"path":`, `"/b"}`)...),
@@ -153,7 +157,7 @@ func SignatureStreamFixtures() []StreamFixture {
 				"block 1's change here and rejects an innocent block.",
 		},
 		{
-			Name: "two interleaved blocks, the changed one is judged",
+			Name: "two sequential blocks, the changed one is judged",
 			Accepted: append(
 				toolBlockDeltas(0, "call_1", "read_file", sigA, `{"path":`, `"/a"}`),
 				toolBlockDeltas(1, "call_2", "write_file", sigB, `{"path":`, `"/b"}`)...),

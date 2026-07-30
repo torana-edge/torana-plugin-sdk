@@ -118,7 +118,7 @@ func TestSignatureStreamFixturesExerciseTheHardCases(t *testing.T) {
 		t.Error("no fixture splits arguments across deltas")
 	}
 	if multiBlock < 2 {
-		t.Error("fewer than two fixtures use interleaved block indexes; " +
+		t.Error("fewer than two fixtures use a second sequential block index; " +
 			"one is not enough to catch a verifier that correlates wrongly")
 	}
 	if differingFraming == 0 {
