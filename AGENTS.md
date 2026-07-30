@@ -66,8 +66,11 @@ Adding a hook or host call touches more places than it looks:
   While `proto/torana/v1` still exists, CI protects only v1. The hard guarantee
   that no `v0.3.x` (or later) tag can ship before the cut is
   `scripts/assert-v2-cut-for-release.sh` in `release.yml`, which runs **before**
-  any package or publish step and refuses unless both v1 copies are gone and CI
-  protects v2. A guard that lived only on `pull_request` would notice too late.
+  any package or publish step. It proves behaviour, not string presence:
+  `check-abi-breaking.sh --print-path` must return `proto/torana/v2`, `ci.yml`
+  must actually `run:` that script, both v2 sources must exist, both v1 sources
+  and `pb/torana.pb.go` must be gone. A guard that lived only on `pull_request`
+  would notice too late.
 - Update `docs/WASM_PLUGIN_GUIDE.md` too. It is the document that makes this SDK
   usable by weaker models, and a capability missing from its checklist silently
   makes the guide insufficient.
