@@ -327,9 +327,9 @@ the degrade paths for you.
 | Capability | SDK | Description |
 | --- | --- | --- |
 | `env.host_call.torana_cache_pricing` | `sdk.GetCachePricing` | Cache prices, lifetimes, and the break-even refresh count for a provider/model. |
-| `env.host_call.torana_evaluate_compaction` | `sdk.HostCall` | Ask whether a proposed compaction pays for itself. |
-| `env.host_call.torana_record_savings` | `sdk.HostCall` | Report bytes saved, attributed to your plugin. |
-| `env.host_call.torana_offload_completion` | `sdk.HostCall` | Summarize via the configured cheap model. |
+| `env.host_call.torana_evaluate_compaction` | `sdk.HostCallExtension` | Ask whether a proposed compaction pays for itself. |
+| `env.host_call.torana_record_savings` | `sdk.HostCallExtension` | Report bytes saved, attributed to your plugin. |
+| `env.host_call.torana_offload_completion` | `sdk.HostCallExtension` | Summarize via the configured cheap model. |
 
 **Observability**
 
@@ -337,7 +337,7 @@ the degrade paths for you.
 | --- | --- | --- |
 | `env.log` | `sdk.Log` | Diagnostic logging. |
 | `env.emit_metric` | `sdk.EmitMetric` | OTel metrics. |
-| `env.host_call.torana_plugin_counter` | `sdk.HostCall` | Named counters that appear in `/stats`. |
+| `env.host_call.torana_plugin_counter` | `sdk.HostCallExtension` | Named counters that appear in `/stats`. |
 | `env.serve_http` | `sdk.OnHTTPRequest` | Serve pages and JSON under `/_torana/plugin/<name>/`. |
 | `env.plugin_config` | `sdk.PluginConfig` | Read your own `plugins.config.<name>` blob. |
 
@@ -522,7 +522,7 @@ func TestBlocksOnDetectedPII(t *testing.T) {
 	h := sdktest.New(t)
 	h.SetConfig(`{"on_error":"block"}`)
 	h.StubHostCall("torana_offload_completion", func(args string) (string, error) {
-		return `{"completion":"EMAIL"}`, nil
+		return sdktest.HostResultValue([]byte(`{"completion":"EMAIL"}`)), nil
 	})
 
 	res := h.BeforeRequest(&pbv2.ChatRequest{Messages: []*pbv2.Message{
@@ -548,6 +548,8 @@ runs, so there is nothing to wire up.
 | `BlockCalls` / `Calls` | assert attributed verdicts and other host calls |
 | `SetConfig` | what `sdk.PluginConfig()` returns |
 | `StubHostCall` / `DenyPermission` | override one command, or make it answer with the host's permission-denied envelope |
+| `HostResultValue` / `HostResultError` | frame a stub's reply. Typed and extension commands speak `HostCallResult`, so a stub returning a bare payload produces a decode error rather than the value it meant |
+| `Run(fn)` | run helper code that makes host calls outside a hook. Do not nest a dispatch method inside it |
 | `SeedCache` / `SeedState` / `Cache` / `State` | start from a warm store, and assert what the plugin wrote |
 | `Logs` / `Metrics` / `Calls` | everything the plugin emitted or asked for, in order |
 | `SetNow` | fix the clock, so time-dependent logic is deterministic |

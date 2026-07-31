@@ -25,6 +25,14 @@ func HostCall(cmd string, args proto.Message) ([]byte, *pbv2.HostError, error) {
 	if cmd == "" {
 		return nil, nil, fmt.Errorf("torana: host-call command is required")
 	}
+	if !strings.HasPrefix(cmd, "env.") {
+		// Otherwise there are two ways to invoke one operation: a caller could
+		// send a proto to torana_plugin_counter and an opaque body to the same
+		// command, and only one of them is the contract. One route per
+		// operation is the point of splitting the paths at all.
+		return nil, nil, fmt.Errorf("torana: %q is a host-feature command, not a core "+
+			"host call; use HostCallExtension with an opaque body", cmd)
+	}
 	if v, ok := args.(validator); ok {
 		if err := v.Validate(); err != nil {
 			return nil, nil, fmt.Errorf("torana: host-call args: %w", err)
@@ -82,6 +90,17 @@ func HostCallExtension(cmd string, args []byte) ([]byte, *pbv2.HostError, error)
 		return nil, nil, fmt.Errorf("torana: %q is a core host call, not an extension; "+
 			"use HostCall with its typed arguments — routing it here would bypass "+
 			"the typed contract for verdicts, metadata, cache and state", cmd)
+	}
+	// The extension set is closed today, so an unrecognised token is a typo or
+	// a command this SDK does not support. Catching it here fails at the call
+	// site instead of at host dispatch in production, and it enforces the
+	// canonical form: the capability is env.host_call.<cmd>, so passing the
+	// permission string itself does not accidentally resolve.
+	if !IsPermission("env.host_call." + cmd) {
+		return nil, nil, fmt.Errorf("torana: %q is not a supported extension command; "+
+			"pass the canonical token (for example \"torana_plugin_counter\", not "+
+			"\"env.host_call.torana_plugin_counter\"). Supported extensions are a "+
+			"closed set in this SDK version", cmd)
 	}
 	return dispatchHostCall(cmd, args)
 }
@@ -163,6 +182,11 @@ func hostErrorReason(herr *pbv2.HostError) string {
 		return "not_found"
 	case pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT:
 		return "invalid_argument"
+	case pbv2.ErrorCode_ERROR_CODE_INTERNAL:
+		return "internal"
 	}
-	return "error"
+	// Only UNSPECIFIED or a code from a newer build reaches here. Both mean
+	// "this build cannot classify it", which is different from any known code
+	// and must not be silently folded into one of them.
+	return "unclassified"
 }

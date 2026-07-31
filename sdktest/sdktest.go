@@ -16,7 +16,7 @@
 //		h := sdktest.New(t)
 //		h.SetConfig(`{"on_error":"block"}`)
 //		h.StubHostCall("torana_offload_completion", func(args string) (string, error) {
-//			return `{"completion":"EMAIL"}`, nil
+//			return sdktest.HostResultValue([]byte(`{"completion":"EMAIL"}`)), nil
 //		})
 //
 //		res := h.BeforeRequest(&pbv2.ChatRequest{Messages: []*pbv2.Message{
@@ -655,6 +655,19 @@ func HostResultValue(value []byte) string {
 
 // HostResultError frames a classified refusal for StubHostCall, so a plugin's
 // degrade path can be tested with the code it will really see.
+//
+// Panics on an unspecified or unknown code. The whole purpose of this
+// constructor is to produce a CLASSIFIED refusal; returning a frame that
+// HostCallResult.Validate rejects would surface as a protocol error inside the
+// plugin under test, and the author would debug their plugin instead of their
+// fixture. A test that deliberately wants a malformed frame can return a raw
+// string from StubHostCall.
 func HostResultError(code pbv2.ErrorCode, msg string) string {
+	frame := &pbv2.HostError{Code: code, Message: msg}
+	if err := frame.Validate(); err != nil {
+		panic(fmt.Sprintf("sdktest: HostResultError(%v): %v — this constructor "+
+			"builds classified refusals; return a raw string from StubHostCall "+
+			"if you want a malformed frame", code, err))
+	}
 	return string(hostCallResultError(code, msg))
 }
