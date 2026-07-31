@@ -497,7 +497,7 @@ var chatResponseFieldPolicies = map[string]FieldPolicy{
 	"model":                    hostOwnedPolicy(),
 	"id":                       hostOwnedPolicy(),
 	"message":                  containerPolicy(), // recurse; do not auto-charge assistant
-	"finish_reason":            sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	"finish_reason":            hostOwnedPolicy(),
 	"usage":                    hostOwnedPolicy(),
 	"upstream_status":          hostOwnedPolicy(),
 	"duration_ms":              hostOwnedPolicy(),
@@ -507,18 +507,20 @@ var chatResponseFieldPolicies = map[string]FieldPolicy{
 var responseMessageFieldPolicies = map[string]FieldPolicy{
 	"role":               hostOwnedPolicy(),
 	"content":            sectionPolicy(plugin_sdk.SectionMessagesAssistant),
-	"content_parts_json": sectionPolicy(plugin_sdk.SectionMessagesAssistant),
-	"thinking":           sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	"content_parts_json": hostOwnedPolicy(),
+	"thinking":           hostOwnedPolicy(),
 	"thinking_signature": boundSignaturePolicy(),
-	"redacted_thinking":  sectionPolicy(plugin_sdk.SectionMessagesAssistant),
-	"tool_calls":         sectionPolicy(plugin_sdk.SectionMessagesAssistant),
-	"tool_call_id":       sectionPolicy(plugin_sdk.SectionMessagesAssistant),
-	"tool_name":          sectionPolicy(plugin_sdk.SectionMessagesAssistant),
-	"cache_control_json": sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	"redacted_thinking":  hostOwnedPolicy(),
+	// Fixed cardinality/order container: recurse into ToolCall children for
+	// in-place name/arguments edits; count/order/IDs are host-owned.
+	"tool_calls":         containerPolicy(),
+	"tool_call_id":       hostOwnedPolicy(),
+	"tool_name":          hostOwnedPolicy(),
+	"cache_control_json": hostOwnedPolicy(),
 }
 
 var responseToolCallFieldPolicies = map[string]FieldPolicy{
-	"id":             sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	"id":             hostOwnedPolicy(),
 	"name":           sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 	"arguments_json": sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 	"signature":      boundSignaturePolicy(),
