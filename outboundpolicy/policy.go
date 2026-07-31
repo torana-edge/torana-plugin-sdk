@@ -797,14 +797,51 @@ func Validate() error {
 			}
 		}
 	}
+	if err := validateSignatureBindingUniqueness(); err != nil {
+		return err
+	}
 	if err := validateBoundSignaturePairing(); err != nil {
 		return err
 	}
 	return nil
 }
 
-// validateBoundSignaturePairing checks that the field registry and the
-// signature-binding table describe the same set of tokens.
+// validateSignatureBindingUniqueness enforces one-token/one-scope across every
+// domain. Keyed by (Domain, Message, SignatureField): the same proto field may
+// appear in different domains only if those are deliberately separate
+// contracts (today Message.thinking_signature is request-only). Duplicate
+// bindings within one key, or duplicate content refs within one binding, leave
+// Migration B without a unique enforcement contract.
+func validateSignatureBindingUniqueness() error {
+	type bindingKey struct {
+		domain SignatureDomain
+		msg    protoreflect.FullName
+		field  string
+	}
+	claimed := map[bindingKey]bool{}
+	for _, b := range signatureBindings {
+		key := bindingKey{b.Domain, b.Message, b.SignatureField}
+		if claimed[key] {
+			return fmt.Errorf("signature binding %s.%s (domain %v) is declared more than once: "+
+				"a token must have exactly one definition of the content it covers",
+				b.Message, b.SignatureField, b.Domain)
+		}
+		claimed[key] = true
+
+		seenRef := map[SignatureContentRef]bool{}
+		for _, c := range b.Content {
+			if seenRef[c] {
+				return fmt.Errorf("signature binding %s.%s lists content ref %s.%s (scope %v) twice",
+					b.Message, b.SignatureField, c.Message, c.Field, c.Scope)
+			}
+			seenRef[c] = true
+		}
+	}
+	return nil
+}
+
+// validateBoundSignaturePairing checks that the outbound field registry and the
+// outbound-domain signature-binding table describe the same set of tokens.
 //
 // The two are separate structures saying related things: the registry says
 // "this field is a bound signature", the binding says "this is the content it
@@ -814,6 +851,10 @@ func Validate() error {
 // field the registry still calls unconditionally host-owned is precisely the
 // contradiction this pairing exists to prevent — the SDK clears the token and
 // a faithful verifier rejects it.
+//
+// Uniqueness of bindings (including request-domain) is
+// validateSignatureBindingUniqueness. This function is outbound-only:
+// request-domain tokens are not in the outbound field registry.
 //
 // Enforcing the correspondence here means the drift cannot survive a host
 // start, rather than being caught by whoever notices the behaviour.
@@ -829,11 +870,6 @@ func validateBoundSignaturePairing() error {
 			}
 		}
 	}
-	type bindingKey struct {
-		msg   protoreflect.FullName
-		field string
-	}
-	claimed := map[bindingKey]bool{}
 
 	for _, b := range signatureBindings {
 		if b.Domain != SignatureDomainOutbound {
@@ -855,30 +891,6 @@ func validateBoundSignaturePairing() error {
 				"unconditionally host-owned policy would reject the SDK's own output",
 				b.Message, b.SignatureField, p.kind)
 		}
-		// One token, one scope. Deleting from the tracking map is idempotent,
-		// so a second binding for the same field used to pass silently and give
-		// that token two different definitions of what it covers — a verifier
-		// iterating the exported bindings would have no unique contract to
-		// implement.
-		key := bindingKey{b.Message, b.SignatureField}
-		if claimed[key] {
-			return fmt.Errorf("signature binding %s.%s is declared more than once: "+
-				"a token must have exactly one definition of the content it covers",
-				b.Message, b.SignatureField)
-		}
-		claimed[key] = true
-
-		// Duplicate content refs within one binding are redundant at best and
-		// contradictory at worst, and make a verifier's scope ambiguous.
-		seenRef := map[SignatureContentRef]bool{}
-		for _, c := range b.Content {
-			if seenRef[c] {
-				return fmt.Errorf("signature binding %s.%s lists content ref %s.%s (scope %v) twice",
-					b.Message, b.SignatureField, c.Message, c.Field, c.Scope)
-			}
-			seenRef[c] = true
-		}
-
 		delete(bound[b.Message], b.SignatureField)
 	}
 	for msg, fields := range bound {

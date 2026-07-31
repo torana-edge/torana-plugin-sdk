@@ -248,6 +248,47 @@ func TestValidateRejectsDuplicateContentRef(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsDuplicateRequestBinding(t *testing.T) {
+	original := signatureBindings
+	t.Cleanup(func() { signatureBindings = original })
+
+	conflicting := SignatureBinding{
+		Domain:         SignatureDomainRequest,
+		Message:        "torana.v2.Message",
+		SignatureField: "thinking_signature",
+		Content: []SignatureContentRef{
+			{Scope: SignatureScopeSameMessage, Field: "thinking"},
+		},
+	}
+	signatureBindings = append(append([]SignatureBinding{}, original...), conflicting)
+
+	err := Validate()
+	if err == nil {
+		t.Fatal("a duplicate request-domain binding was accepted; one token would have two scopes")
+	}
+	if !strings.Contains(err.Error(), "Message.thinking_signature") {
+		t.Fatalf("error does not name the offending field: %v", err)
+	}
+}
+
+func TestValidateRejectsDuplicateRequestContentRef(t *testing.T) {
+	original := signatureBindings
+	t.Cleanup(func() { signatureBindings = original })
+
+	dup := make([]SignatureBinding, len(original))
+	copy(dup, original)
+	for i := range dup {
+		if dup[i].Domain == SignatureDomainRequest && dup[i].SignatureField == "thinking_signature" {
+			dup[i].Content = append(append([]SignatureContentRef{}, dup[i].Content...), dup[i].Content[0])
+		}
+	}
+	signatureBindings = dup
+
+	if err := Validate(); err == nil {
+		t.Fatal("a duplicated request-domain content ref was accepted; the signed scope is ambiguous")
+	}
+}
+
 // The fixtures are only worth exporting if a WRONG verifier fails them. The
 // previous set could be reproduced by any implementation, because the answer
 // was handed over as fixture input. These are the specific mistakes named in
