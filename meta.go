@@ -16,8 +16,8 @@ import (
 // a cache rather than plugin state: callers who do not intend sharing must
 // namespace the key themselves. For durable per-plugin storage use State*.
 //
-// All four return (value, *HostError, error). The HostError is the host
-// refusing — most often a missing permission — and is distinct from the error,
+// Reads return (value, *HostError, error); writes return (*HostError, error).
+// The HostError is the host refusing — most often a missing permission — and is distinct from the error,
 // which means the call itself could not be made. v1 collapsed these, so ~30
 // `if err != nil` checks across the official plugins were dead code and a
 // refusal was indistinguishable from an empty value.

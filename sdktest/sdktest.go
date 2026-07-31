@@ -152,7 +152,7 @@ func (h *Harness) with(fn func()) {
 	sdk.WithTestHost(h.host, fn)
 }
 
-// Run executes fn with this harness installed as the host.
+// Run executes fn synchronously with this harness installed as the host.
 //
 // Hook dispatch already does this, so Run is for the code AROUND a hook: real
 // plugins factor logic into helpers that call MetaGet, CacheSet and friends,
@@ -160,6 +160,15 @@ func (h *Harness) with(fn func()) {
 // to reach them. Without it, a host call made outside a dispatch reaches no
 // host at all and fails with an empty reply, which reads like a broken SDK
 // rather than a missing harness.
+//
+// Do NOT call BeforeRequest, AfterResponse or any other dispatch method from
+// inside fn. Those install the host themselves, and installing it twice
+// re-acquires the same global dispatch mutex — the test deadlocks rather than
+// failing, which is markedly harder to diagnose. Call dispatch methods
+// directly; use Run only for code that is not already inside one.
+//
+// fn runs on the calling goroutine. The host is uninstalled when it returns,
+// so a goroutine started inside fn that outlives it will not find a host.
 func (h *Harness) Run(fn func()) {
 	h.t.Helper()
 	h.with(fn)

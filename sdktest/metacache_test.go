@@ -1,6 +1,7 @@
 package sdktest_test
 
 import (
+	"errors"
 	"testing"
 
 	sdk "github.com/torana-edge/torana-plugin-sdk"
@@ -140,6 +141,15 @@ func TestCommandNamesAndArgumentsAreExact(t *testing.T) {
 		if _, err := sdk.CacheSet("ck", "cv"); err != nil {
 			t.Fatal(err)
 		}
+		// The getters need distinct keys of their own. Asserting only the
+		// setters would not prove a getter forwards its CALLER'S key rather
+		// than a constant or the wrong field.
+		if _, _, err := sdk.MetaGet("mget"); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := sdk.CacheGet("cget"); err != nil {
+			t.Fatal(err)
+		}
 	})
 
 	seen := map[string]bool{}
@@ -162,9 +172,25 @@ func TestCommandNamesAndArgumentsAreExact(t *testing.T) {
 			if a.Key != "ck" || a.Value != "cv" {
 				t.Fatalf("env.cache_set args = %+v, want key=ck value=cv", &a)
 			}
+		case "env.meta_get":
+			var a pbv2.MetaGetArgs
+			if err := proto.Unmarshal([]byte(c.Args), &a); err != nil {
+				t.Fatalf("env.meta_get args do not decode as MetaGetArgs: %v", err)
+			}
+			if a.Key != "mget" {
+				t.Fatalf("env.meta_get args = %+v, want key=mget", &a)
+			}
+		case "env.cache_get":
+			var a pbv2.CacheGetArgs
+			if err := proto.Unmarshal([]byte(c.Args), &a); err != nil {
+				t.Fatalf("env.cache_get args do not decode as CacheGetArgs: %v", err)
+			}
+			if a.Key != "cget" {
+				t.Fatalf("env.cache_get args = %+v, want key=cget", &a)
+			}
 		}
 	}
-	for _, cmd := range []string{"env.meta_set", "env.cache_set"} {
+	for _, cmd := range []string{"env.meta_set", "env.cache_set", "env.meta_get", "env.cache_get"} {
 		if !seen[cmd] {
 			t.Errorf("%s was never called", cmd)
 		}
@@ -187,6 +213,50 @@ func TestMetaAndCacheAreSeparateStores(t *testing.T) {
 		got, _, _ := sdk.MetaGet("same")
 		if got != "from-meta" {
 			t.Fatalf("a cache write overwrote meta: MetaGet = %q", got)
+		}
+	})
+}
+
+// A transport failure must reach the caller as an error, not be flattened into
+// NOT_FOUND or an empty success. Those wrappers each collapse three channels
+// into fewer, and a plugin that reads a transport fault as a cache miss will
+// happily recompute and carry on while the boundary is broken.
+func TestTransportFailureIsNotAMiss(t *testing.T) {
+	h := sdktest.New(t)
+	h.StubHostCall("env.meta_get", func(string) (string, error) {
+		return "", errors.New("guest/host boundary failed")
+	})
+	h.Run(func() {
+		v, herr, err := sdk.MetaGet("k")
+		if err == nil {
+			t.Fatal("a transport failure was not reported as an error")
+		}
+		if sdk.IsNotFound(herr) {
+			t.Fatal("a transport failure was classified as NOT_FOUND")
+		}
+		if v != "" {
+			t.Fatalf("a failed read returned a value: %q", v)
+		}
+	})
+}
+
+// A reply that is not a valid HostCallResult is a protocol fault and must not
+// be mistaken for either a miss or a successfully read value.
+func TestMalformedReplyIsNotAValue(t *testing.T) {
+	h := sdktest.New(t)
+	h.StubHostCall("env.cache_get", func(string) (string, error) {
+		return "\xff\xfe not a HostCallResult", nil
+	})
+	h.Run(func() {
+		v, herr, err := sdk.CacheGet("k")
+		if err == nil {
+			t.Fatal("a malformed reply was accepted")
+		}
+		if sdk.IsNotFound(herr) {
+			t.Fatal("a malformed reply was classified as NOT_FOUND")
+		}
+		if v != "" {
+			t.Fatalf("a malformed reply produced a value: %q", v)
 		}
 	})
 }

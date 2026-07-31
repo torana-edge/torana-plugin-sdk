@@ -263,12 +263,19 @@ case sdk.IsNotFound(herr):
     // The key does not exist. Ordinary: nothing was stored yet.
     v = defaultDraft
 case herr != nil:
-    // Some other refusal — most often a permission you did not declare.
-    sdk.Log("meta_get refused: "+herr.Message, sdk.LogLevelWarn)
-    return sdk.PassRequest(), nil
+    // Any OTHER refusal is a bug, not a condition to absorb. Approval is
+    // all-or-nothing, so a permission denial means you called a capability you
+    // did not declare, or the manifest and host disagree. Returning an error
+    // lets your failure_mode decide; swallowing it silently disables the thing
+    // your plugin exists to do, and a security plugin would fail open.
+    return sdk.PassRequest(), fmt.Errorf("meta_get refused: %s", herr.Message)
 }
 // v is the stored value, which may legitimately be "".
 ```
+
+A plugin that genuinely wants to continue without a capability should say so
+explicitly at that call site, as a deliberate choice with a comment — it is not
+the default.
 
 **Absence is not emptiness.** A key that was never written returns a
 `NOT_FOUND` `HostError`; a key holding `""` returns success with an empty
