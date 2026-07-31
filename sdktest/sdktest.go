@@ -36,6 +36,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -330,8 +331,19 @@ func typedHostReply(cmd string) bool {
 		"env.meta_get", "env.meta_set", "env.cache_get", "env.cache_set":
 		return true
 	default:
-		return false
+		// Extension commands (torana_*, verify_virtual_key) also speak the v2
+		// result envelope — only their ARGUMENT body is opaque. Framing them
+		// as legacy JSON would make HostCallExtension unusable here, which is
+		// how the typed meta/cache helpers were unusable before.
+		return isExtensionCommand(cmd)
 	}
+}
+
+// isExtensionCommand reports whether cmd is a host-feature call rather than a
+// core ABI operation. Core commands are the env.* namespace; everything else
+// reaching the harness is an extension.
+func isExtensionCommand(cmd string) bool {
+	return cmd != "" && !strings.HasPrefix(cmd, "env.")
 }
 
 func hostCallResultValue(value []byte) []byte {
@@ -470,6 +482,15 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 		}
 		h.cache[a.Key] = a.Value
 		return hostCallResultValue(nil), nil
+	}
+	if isExtensionCommand(cmd) {
+		// The harness cannot emulate a host feature, so an extension command
+		// answers NOT_CONFIGURED unless the test stubs it. That is the honest
+		// answer -- a harness with no compaction backend really does not have
+		// one -- and it is framed, so a plugin's degrade path is exercised
+		// rather than a decode failure.
+		return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
+			"extension command "+cmd+" is not configured in sdktest; StubHostCall it"), nil
 	}
 	return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_FOUND, "unknown typed command"), nil
 }
@@ -619,4 +640,21 @@ func CheckManifest(t testing.TB, dir string) {
 				"the host skips undeclared hooks, so this handler would never be called", name)
 		}
 	}
+}
+
+// HostResultValue frames a successful host reply for StubHostCall.
+//
+// Typed and extension commands speak HostCallResult, so a stub returning a
+// bare payload produces a decode failure rather than the value it meant. There
+// was no public way to build one, which made StubHostCall unusable for exactly
+// the commands most worth stubbing — an extension backend a plugin degrades
+// without.
+func HostResultValue(value []byte) string {
+	return string(hostCallResultValue(value))
+}
+
+// HostResultError frames a classified refusal for StubHostCall, so a plugin's
+// degrade path can be tested with the code it will really see.
+func HostResultError(code pbv2.ErrorCode, msg string) string {
+	return string(hostCallResultError(code, msg))
 }

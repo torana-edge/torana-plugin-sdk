@@ -101,15 +101,23 @@ func GetCachePricing(provider, model string) (CachePricing, error) {
 	if err != nil {
 		return CachePricing{}, err
 	}
-	res, err := hostCallString("torana_cache_pricing", string(payload))
+	res, herr, err := HostCallExtension("torana_cache_pricing", payload)
 	if err != nil {
 		return CachePricing{}, err
 	}
-	if res == "" || isPermissionDenied(res) {
-		return CachePricing{Status: "unavailable", Reason: "permission_denied"}, nil
+	if herr != nil {
+		// A refusal is now a framed error arm rather than a JSON string the
+		// caller had to pattern-match. Reported through the existing
+		// unavailable/reason shape so callers do not change: pricing is
+		// advisory, and a plugin without the grant should degrade rather than
+		// fail.
+		return CachePricing{Status: "unavailable", Reason: hostErrorReason(herr)}, nil
+	}
+	if len(res) == 0 {
+		return CachePricing{Status: "unavailable", Reason: "no_result"}, nil
 	}
 	var out CachePricing
-	if err := json.Unmarshal([]byte(res), &out); err != nil {
+	if err := json.Unmarshal(res, &out); err != nil {
 		return CachePricing{}, fmt.Errorf("torana: decode cache pricing: %w", err)
 	}
 	return out, nil

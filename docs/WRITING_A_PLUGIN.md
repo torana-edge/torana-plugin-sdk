@@ -288,6 +288,32 @@ Do **not** reach these through `sdk.HostCall` directly. The typed helpers
 validate the key before crossing the boundary, so a mistake fails at the call
 instead of silently storing nothing.
 
+**Host feature calls (`env.host_call.*`)**
+
+`torana_offload_completion`, `torana_plugin_counter`, `torana_cache_pricing` and
+the rest are *host features*, not ABI operations. Their payloads are defined by
+the feature, so they take an opaque body:
+
+```go
+payload, _ := json.Marshal(map[string]any{"counter": "decisions", "delta": 1})
+v, herr, err := sdk.HostCallExtension("torana_plugin_counter", payload)
+```
+
+Pass the **canonical command token** (`torana_plugin_counter`), not the
+permission string (`env.host_call.torana_plugin_counter`). `HostCallExtension`
+refuses `env.`-prefixed commands: core operations have typed arguments and go
+through `HostCall`, and routing them here would bypass the typed contract.
+
+The result envelope is *not* opaque — a refusal is a framed `HostError`
+(`PERMISSION_DENIED`, `NOT_CONFIGURED`, `UNAVAILABLE`, `INVALID_ARGUMENT`) and a
+Go `error` means the call could not be made. v1's `{"status":"error"}` reply
+convention is gone; a `status` field now only appears where status is real data,
+such as a pricing decision.
+
+Where the SDK already has a typed helper — `sdk.SendRequest`,
+`sdk.GetCachePricing` — use it. They call this primitive internally and handle
+the degrade paths for you.
+
 **Acting outside a request**
 
 | Capability | SDK | Description |
