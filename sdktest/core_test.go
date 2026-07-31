@@ -1,6 +1,7 @@
 package sdktest_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -84,8 +85,28 @@ func TestUnconfiguredStateIsDistinctFromAbsence(t *testing.T) {
 		if sdk.IsNotFound(herr) {
 			t.Fatal("an unconfigured store was reported as a missing key")
 		}
-		if _, err := sdk.StateSet("k", "v"); err != nil {
-			t.Fatalf("transport error: %v", err)
+
+		// Assert BOTH channels. An earlier version of this test checked only
+		// err, so it passed when the write was refused — the exact
+		// false-success it claims to prevent.
+		setHerr, setErr := sdk.StateSet("k", "v")
+		if setErr != nil {
+			t.Fatalf("transport error: %v", setErr)
+		}
+		if setHerr == nil {
+			t.Fatal("a write to an unconfigured store reported success")
+		}
+		if setHerr.Code != pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED {
+			t.Fatalf("write refused with %v, want NOT_CONFIGURED", setHerr.Code)
+		}
+	})
+
+	// And prove nothing was stored: a refused write that silently mutated
+	// would make the refusal cosmetic.
+	h.StateConfigured = true
+	h.Run(func() {
+		if _, herr, _ := sdk.StateGet("k"); !sdk.IsNotFound(herr) {
+			t.Fatal("a refused write mutated the store")
 		}
 	})
 }
@@ -211,9 +232,8 @@ func TestPluginConfigRefusalFallsBackToEmptyObject(t *testing.T) {
 	})
 }
 
-func TestOriginalsReadFramedValues(t *testing.T) {
-	h := sdktest.New(t)
-	h.Run(func() {
+func TestOriginalsAbsentReportNotOK(t *testing.T) {
+	sdktest.New(t).Run(func() {
 		if _, ok := sdk.OriginalRequest(); ok {
 			t.Fatal("an uncaptured original request reported ok")
 		}
@@ -221,4 +241,136 @@ func TestOriginalsReadFramedValues(t *testing.T) {
 			t.Fatal("an uncaptured original response reported ok")
 		}
 	})
+}
+
+// A captured but EMPTY original is present, not absent.
+//
+// An all-default ChatRequest marshals to zero bytes and unmarshals cleanly, and
+// an upstream body can legitimately be empty. Deciding presence by length would
+// report a real capture as missing, which is the absence-versus-emptiness
+// confusion the envelope exists to prevent.
+func TestCapturedEmptyOriginalsArePresent(t *testing.T) {
+	h := sdktest.New(t)
+	h.SetOriginalRequest(&pbv2.ChatRequest{})
+	h.SetOriginalResponse(nil)
+	h.Run(func() {
+		req, ok := sdk.OriginalRequest()
+		if !ok {
+			t.Fatal("a captured all-default request reported absent")
+		}
+		if req == nil {
+			t.Fatal("ok=true with a nil request")
+		}
+		body, ok := sdk.OriginalResponse()
+		if !ok {
+			t.Fatal("a captured empty response body reported absent")
+		}
+		if len(body) != 0 {
+			t.Fatalf("body = %q, want empty", body)
+		}
+	})
+}
+
+func TestNonEmptyOriginalsRoundTrip(t *testing.T) {
+	h := sdktest.New(t)
+	h.SetOriginalRequest(&pbv2.ChatRequest{Model: "claude-opus-5"})
+	h.SetOriginalResponse([]byte("pristine-upstream"))
+	h.Run(func() {
+		req, ok := sdk.OriginalRequest()
+		if !ok || req.Model != "claude-opus-5" {
+			t.Fatalf("request round trip: ok=%v req=%+v", ok, req)
+		}
+		body, ok := sdk.OriginalResponse()
+		if !ok || string(body) != "pristine-upstream" {
+			t.Fatalf("response round trip: ok=%v body=%q", ok, body)
+		}
+	})
+}
+
+// A value that is not a ChatRequest must report ok=false rather than a
+// half-decoded request.
+func TestMalformedOriginalRequestReportsNotOK(t *testing.T) {
+	h := sdktest.New(t)
+	h.StubHostCall("env.original_request", func(string) (string, error) {
+		return sdktest.HostResultValue([]byte{0xff, 0xff, 0xff, 0xff}), nil
+	})
+	h.Run(func() {
+		if _, ok := sdk.OriginalRequest(); ok {
+			t.Fatal("a malformed original request decoded as ok")
+		}
+	})
+}
+
+// A key stored with an empty value is PRESENT. Reporting it as absent would
+// contradict the state contract and StateGetJSON's own documentation; empty
+// bytes are not valid JSON, so the truthful answer is a decode error.
+func TestStateGetJSONOnAStoredEmptyValue(t *testing.T) {
+	sdktest.New(t).Run(func() {
+		if _, err := sdk.StateSet("raw-empty", ""); err != nil {
+			t.Fatal(err)
+		}
+		var v map[string]any
+		found, err := sdk.StateGetJSON("raw-empty", &v)
+		if found {
+			t.Fatal("an empty stored value decoded as a document")
+		}
+		if err == nil {
+			t.Fatal("a stored empty value was reported as absent; " +
+				"it is present and simply not JSON")
+		}
+	})
+}
+
+// The sentinel is documented for the JSON convenience helpers, so errors.Is
+// must work on both the read and write paths.
+func TestStateJSONHelpersWrapErrStateUnavailable(t *testing.T) {
+	h := sdktest.New(t)
+	h.StateConfigured = false
+	h.Run(func() {
+		var v map[string]any
+		if _, err := sdk.StateGetJSON("k", &v); !errors.Is(err, sdk.ErrStateUnavailable) {
+			t.Fatalf("StateGetJSON: errors.Is(ErrStateUnavailable) is false: %v", err)
+		}
+		if err := sdk.StateSetJSON("k", map[string]any{}); !errors.Is(err, sdk.ErrStateUnavailable) {
+			t.Fatalf("StateSetJSON: errors.Is(ErrStateUnavailable) is false: %v", err)
+		}
+	})
+}
+
+// An empty key must fail locally, before costing a boundary crossing.
+func TestStateHelpersRejectAnEmptyKeyLocally(t *testing.T) {
+	h := sdktest.New(t)
+	h.Run(func() {
+		if _, _, err := sdk.StateGet(""); err == nil {
+			t.Error("StateGet(\"\") was accepted")
+		}
+		if _, err := sdk.StateSet("", "v"); err == nil {
+			t.Error("StateSet(\"\", …) was accepted")
+		}
+		if _, err := sdk.StateDelete(""); err == nil {
+			t.Error("StateDelete(\"\") was accepted")
+		}
+	})
+	for _, c := range h.Calls() {
+		t.Fatalf("a rejected state call reached the host: %+v", c)
+	}
+}
+
+// Deletion is authorised by env.state_set, not a fourth capability. The
+// constants exist so the host and the linter special-map it rather than
+// deriving a permission that does not exist.
+func TestStateDeleteUsesTheStateSetPermission(t *testing.T) {
+	if pbv2.StateDeleteCommand != "env.state_delete" {
+		t.Fatalf("command = %q", pbv2.StateDeleteCommand)
+	}
+	if pbv2.StateDeletePermission != "env.state_set" {
+		t.Fatalf("permission = %q, want env.state_set", pbv2.StateDeletePermission)
+	}
+	if sdk.IsPermission(pbv2.StateDeleteCommand) {
+		t.Fatal("env.state_delete is in the operator capability vocabulary; " +
+			"it must not be — it is a command governed by env.state_set")
+	}
+	if !sdk.IsPermission(pbv2.StateDeletePermission) {
+		t.Fatal("env.state_set is not a known permission")
+	}
 }

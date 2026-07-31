@@ -34,6 +34,11 @@ import (
 // ErrStateUnavailable is returned when the host has no durable state
 // configured. Plugins must tolerate this rather than assuming persistence — a
 // proxy without a data directory has nowhere to put it.
+//
+// It is wrapped by the JSON convenience helpers (StateGetJSON, StateSetJSON),
+// so errors.Is works there. The raw typed helpers (StateGet, StateSet,
+// StateDelete, StateKeys) return a *HostError instead and let the caller
+// classify — check for ErrorCode_ERROR_CODE_NOT_CONFIGURED.
 var ErrStateUnavailable = errors.New("torana: durable plugin state is not available")
 
 // StateGet reads one of this plugin's durable keys.
@@ -71,10 +76,15 @@ func StateSet(key, value string) (*pbv2.HostError, error) {
 // it does not care about.
 //
 // This is a distinct command rather than StateSet(key, "") so deletion is not a
-// magic value. MIGRATION B: the host must implement env.state_delete; until it
-// does, this is refused like any unimplemented command.
+// magic value. It is authorised by the EXISTING env.state_set grant — deletion
+// mutates a namespace the plugin can already overwrite, so a fourth durable-
+// state capability would add approval ceremony without drawing a new line.
+//
+// MIGRATION B: the host must implement the command and map it to
+// pbv2.StateDeletePermission; deriving the permission from the command string
+// would look for a capability that does not exist.
 func StateDelete(key string) (*pbv2.HostError, error) {
-	_, herr, err := HostCall("env.state_delete", &pbv2.StateDeleteArgs{Key: key})
+	_, herr, err := HostCall(pbv2.StateDeleteCommand, &pbv2.StateDeleteArgs{Key: key})
 	return herr, err
 }
 
@@ -113,15 +123,34 @@ func StateGetJSON(key string, v any) (found bool, err error) {
 		return false, nil
 	}
 	if herr != nil {
-		return false, fmt.Errorf("torana: state %q: %s: %s", key, hostErrorReason(herr), herr.Message)
+		return false, stateError(key, herr)
 	}
-	if raw == "" {
-		return false, nil
-	}
+	// No value-based absence check. A key stored with StateSet(key, "") is
+	// PRESENT, and reporting it as absent would contradict both the state
+	// contract and this function's own documentation. Empty bytes are not
+	// valid JSON, so that case falls through to a decode error — which is the
+	// truth: something is stored and it is not a JSON document.
 	if err := json.Unmarshal([]byte(raw), v); err != nil {
 		return false, fmt.Errorf("torana: decode state %q: %w", key, err)
 	}
 	return true, nil
+}
+
+// stateError converts a classified refusal into an error for the JSON
+// convenience helpers.
+//
+// NOT_CONFIGURED wraps ErrStateUnavailable so errors.Is keeps working, as that
+// sentinel's documentation has always promised. The raw typed helpers return
+// *HostError and let the caller classify; these wrappers exist to be
+// convenient, and a convenience that drops the classification is not.
+func stateError(key string, herr *pbv2.HostError) error {
+	if herr == nil {
+		return nil
+	}
+	if herr.Code == pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED {
+		return fmt.Errorf("torana: state %q: %w: %s", key, ErrStateUnavailable, herr.Message)
+	}
+	return fmt.Errorf("torana: state %q: %s: %s", key, hostErrorReason(herr), herr.Message)
 }
 
 // StateSetJSON encodes v and stores it.
@@ -134,10 +163,7 @@ func StateSetJSON(key string, v any) error {
 	if err != nil {
 		return err
 	}
-	if herr != nil {
-		return fmt.Errorf("torana: state %q: %s: %s", key, hostErrorReason(herr), herr.Message)
-	}
-	return nil
+	return stateError(key, herr)
 }
 
 // Now returns the host's wall-clock time in Unix milliseconds.

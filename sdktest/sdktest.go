@@ -75,18 +75,24 @@ type Harness struct {
 	t    testing.TB
 	host *sdk.TestHost
 
-	mu       sync.Mutex
-	meta     map[string]string
-	cache    map[string]string
-	state    map[string]string
-	config   string
-	stubs    map[string]func(args string) (string, error)
-	logs     []LogEntry
-	metrics  []MetricEntry
-	calls    []HostCallEntry
-	now      func() int64
-	original []byte
-	origResp []byte
+	mu      sync.Mutex
+	meta    map[string]string
+	cache   map[string]string
+	state   map[string]string
+	config  string
+	stubs   map[string]func(args string) (string, error)
+	logs    []LogEntry
+	metrics []MetricEntry
+	calls   []HostCallEntry
+	now     func() int64
+	// Presence is tracked separately from the byte slices. An all-default
+	// ChatRequest marshals to zero bytes and an upstream body can legitimately
+	// be empty, so length is not presence — a harness that conflated them
+	// could not test the contract it exists to pin.
+	original    []byte
+	originSet   bool
+	origResp    []byte
+	origRespSet bool
 
 	// StateConfigured mirrors a host with no durable state store: when false,
 	// env.state_* answers exactly as the real host does with StateSetFunc nil.
@@ -226,6 +232,7 @@ func (h *Harness) SetOriginalRequest(req *pbv2.ChatRequest) *Harness {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.original = raw
+	h.originSet = true
 	return h
 }
 
@@ -235,6 +242,7 @@ func (h *Harness) SetOriginalResponse(body []byte) *Harness {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.origResp = body
+	h.origRespSet = true
 	return h
 }
 
@@ -557,14 +565,14 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 		return hostCallResultValue([]byte(h.config)), nil
 
 	case "env.original_request":
-		if len(h.original) == 0 {
+		if !h.originSet {
 			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_FOUND,
 				"no original request captured"), nil
 		}
 		return hostCallResultValue(h.original), nil
 
 	case "env.original_response":
-		if len(h.origResp) == 0 {
+		if !h.origRespSet {
 			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_FOUND,
 				"no original response captured"), nil
 		}

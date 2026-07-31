@@ -687,11 +687,21 @@ message SetIdentityArgs {
 // learned the rule for two stores would have been wrong about the third.
 // env.state_delete exists so the three agree and deletion is not a magic value.
 //
-//   env.state_get / env.state_set / env.state_delete / env.state_keys
-//   permission: the matching env.state_* capability
+//   env.state_get     permission: env.state_get
+//   env.state_set     permission: env.state_set
+//   env.state_keys    permission: env.state_keys
+//   env.state_delete  permission: env.state_set  (dispatcher special-case —
+//                     do NOT derive it from the command string;
+//                     "env.state_delete" is not an operator-facing capability,
+//                     exactly as with env.meta_append)
 //
-// MIGRATION B: the host must implement env.state_delete. Until it does,
-// StateDelete is refused like any unimplemented command.
+// Deletion shares env.state_set because it mutates a namespace the plugin can
+// already overwrite; a fourth durable-state capability would add manifest and
+// approval ceremony without drawing a new security line.
+//
+// MIGRATION B: the host must implement env.state_delete and special-map its
+// permission, and `torana plugin lint` must do the same. Until then StateDelete
+// is refused like any unimplemented command.
 
 // StateGetArgs is the argument body for host command env.state_get.
 message StateGetArgs {

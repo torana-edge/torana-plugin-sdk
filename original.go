@@ -18,8 +18,14 @@ func OriginalRequest() (*pbv2.ChatRequest, bool) {
 	// classified error would be ceremony. The framed path still matters — the
 	// byte-exact permission-denied string it used to compare against was a
 	// wire constant that silently broke if the host ever reworded it.
+	//
+	// Absence comes from the ERROR arm only, never from the value's length. An
+	// all-default ChatRequest marshals to zero bytes and unmarshals cleanly, so
+	// treating an empty value as absence would report a real captured request
+	// as missing — the same absence-versus-emptiness confusion the envelope
+	// exists to prevent.
 	raw, herr, err := HostCall("env.original_request", nil)
-	if err != nil || herr != nil || len(raw) == 0 {
+	if err != nil || herr != nil {
 		return nil, false
 	}
 	var req pbv2.ChatRequest
@@ -37,8 +43,12 @@ func OriginalRequest() (*pbv2.ChatRequest, bool) {
 // Requires the env.original_response permission grant. Returns ok=false when
 // unavailable.
 func OriginalResponse() ([]byte, bool) {
+	// As with OriginalRequest, absence is the error arm. An upstream body can
+	// legitimately be empty (a 204, or a provider that returns nothing), and
+	// reporting that as "no original captured" would send a plugin looking for
+	// a missing grant.
 	raw, herr, err := HostCall("env.original_response", nil)
-	if err != nil || herr != nil || len(raw) == 0 {
+	if err != nil || herr != nil {
 		return nil, false
 	}
 	return raw, true
