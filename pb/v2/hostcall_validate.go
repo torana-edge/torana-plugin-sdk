@@ -136,3 +136,56 @@ func (x *MetaAppendArgs) Validate() error {
 	}
 	return nil
 }
+
+// Validation for the metadata and cache argument bodies.
+//
+// A key is required in all four. An empty key is never a meaningful address:
+// on the meta side the host namespaces it per plugin, so an empty key names
+// the namespace itself rather than a value in it, and on the cache side it
+// names a slot every plugin would collide on. Refusing it here means the guest
+// learns at the call rather than reading back a value that silently was not
+// stored.
+//
+// Values are deliberately NOT required. Empty is a legitimate value, and
+// treating it as a delete is what made v1 unable to distinguish "store an
+// empty string" from "remove this key".
+
+func (x *MetaGetArgs) Validate() error {
+	if x == nil {
+		return fmt.Errorf("meta get args are nil")
+	}
+	if x.Key == "" {
+		return fmt.Errorf("meta get args have no key")
+	}
+	return nil
+}
+
+func (x *MetaSetArgs) Validate() error {
+	if x == nil {
+		return fmt.Errorf("meta set args are nil")
+	}
+	if x.Key == "" {
+		return fmt.Errorf("meta set args have no key")
+	}
+	return nil
+}
+
+func (x *CacheGetArgs) Validate() error {
+	if x == nil {
+		return fmt.Errorf("cache get args are nil")
+	}
+	if x.Key == "" {
+		return fmt.Errorf("cache get args have no key")
+	}
+	return nil
+}
+
+func (x *CacheSetArgs) Validate() error {
+	if x == nil {
+		return fmt.Errorf("cache set args are nil")
+	}
+	if x.Key == "" {
+		return fmt.Errorf("cache set args have no key")
+	}
+	return nil
+}

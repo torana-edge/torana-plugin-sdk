@@ -651,6 +651,80 @@ message SetIdentityArgs {
   string identity = 1;
 }
 
+// Typed argument bodies for the request-scoped metadata and shared cache
+// commands.
+//
+// v2 requires every host call to carry a proto message. Before these existed
+// there was no public way to reach these four commands at all: HostCall takes a
+// proto.Message, typed Args existed only for the verdict commands, and the
+// string-argument path is unexported. Migrating torana-edge's fixtures found
+// it, and 42 call sites across the official plugins hit the same wall.
+//
+// They also close a silent failure. The host previously parsed these as loose
+// JSON and ignored a decode error, so a malformed argument meant the plugin's
+// write simply did not happen — no error, no log, nothing to debug. A typed
+// body makes the shape checkable, so the host can refuse it as a HostError.
+//
+//   env.meta_get / env.meta_set   permission: env.meta_get / env.meta_set
+//   env.cache_get / env.cache_set permission: env.cache_get / env.cache_set
+//
+// Meta is request-scoped and private to the calling plugin (the host namespaces
+// the key). Cache is shared across requests and NOT namespaced — two plugins
+// naming the same key see each other's value, which is what makes it a cache
+// rather than plugin state.
+
+// MetaGetArgs is the argument body for host command env.meta_get.
+//
+// Absence and emptiness are DIFFERENT results, and the host must keep them so:
+//
+//   - key absent            -> HostCallResult.error{code: NOT_FOUND}
+//   - key present, value "" -> HostCallResult.value arm, empty bytes
+//   - key present, value v  -> HostCallResult.value arm, v
+//
+// Collapsing them recreates the v1 ambiguity this ABI removes: a plugin could
+// not tell "nothing stored" from "I stored nothing", so a cached or buffered
+// empty string was unusable.
+//
+// MIGRATION B DEPENDENCY: torana-edge main deletes the key when metaSet is
+// called with "", and ignores the presence boolean on cache reads. The v2
+// dispatcher must preserve an explicitly empty value and return NOT_FOUND only
+// when presence is false. Do not let the typed branch inherit the v1 helpers'
+// semantics.
+message MetaGetArgs {
+  // Key within this plugin's request-scoped namespace. Must be non-empty.
+  string key = 1;
+}
+
+// MetaSetArgs is the argument body for host command env.meta_set.
+message MetaSetArgs {
+  // Key within this plugin's request-scoped namespace. Must be non-empty.
+  string key = 1;
+  // Value to store. Empty is a legitimate value, not a delete — v1 conflated
+  // the two because it could not tell an absent JSON field from an empty one.
+  // After setting "", a get must succeed with an empty value rather than
+  // reporting NOT_FOUND.
+  string value = 2;
+}
+
+// CacheGetArgs is the argument body for host command env.cache_get.
+//
+// Same absence/emptiness contract as MetaGetArgs: a miss is
+// error{code: NOT_FOUND}, and a stored empty string is a successful empty
+// value arm.
+message CacheGetArgs {
+  // Cache key. Shared across plugins and requests, so callers should namespace
+  // it themselves when they do not intend sharing. Must be non-empty.
+  string key = 1;
+}
+
+// CacheSetArgs is the argument body for host command env.cache_set.
+message CacheSetArgs {
+  // Cache key. See CacheGetArgs. Must be non-empty.
+  string key = 1;
+  // Value to store. Empty is a legitimate value.
+  string value = 2;
+}
+
 // MetaAppendArgs is the argument body for host command env.meta_append.
 //
 // Contract (normative; pinned by pb/v2 MetaAppend* constants and tests):
