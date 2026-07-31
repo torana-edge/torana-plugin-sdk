@@ -115,11 +115,18 @@ func SendRequest(req *pbv2.ChatRequest, opts SendRequestOptions) (EgressResult, 
 		return EgressResult{}, err
 	}
 
-	res, err := hostCallString("torana_send_request", string(payload))
+	res, herr, err := HostCallExtension("torana_send_request", payload)
 	if err != nil {
 		return EgressResult{}, err
 	}
-	if res == "" || isPermissionDenied(res) {
+	if herr != nil {
+		// Egress is all-or-nothing for the caller, so every refusal maps to
+		// the existing sentinel. The code is wrapped in so the reason is not
+		// lost: a missing grant and an unconfigured backend read identically
+		// otherwise, and they need different fixes.
+		return EgressResult{}, fmt.Errorf("%w (%s)", ErrEgressUnavailable, hostErrorReason(herr))
+	}
+	if len(res) == 0 {
 		return EgressResult{}, ErrEgressUnavailable
 	}
 
@@ -127,7 +134,7 @@ func SendRequest(req *pbv2.ChatRequest, opts SendRequestOptions) (EgressResult, 
 		EgressResult
 		Body string `json:"body,omitempty"`
 	}
-	if err := json.Unmarshal([]byte(res), &envelope); err != nil {
+	if err := json.Unmarshal(res, &envelope); err != nil {
 		return EgressResult{}, fmt.Errorf("torana: decode egress response: %w", err)
 	}
 	out := envelope.EgressResult

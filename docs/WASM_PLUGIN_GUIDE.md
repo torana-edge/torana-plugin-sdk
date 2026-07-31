@@ -249,6 +249,18 @@ Command `env.meta_append` is authorised by permission `env.meta_set`; non-empty
 fragments ack with an empty success value, empty fragment reads back the
 complete buffer (`MetaAppendSuccessValue`).
 
+**Two host-call paths, disjoint on purpose.** `HostCall(cmd, proto.Message)`
+takes CORE `env.*` operations — verdicts, metadata, cache, state — whose shapes
+are ABI surface. `HostCallExtension(cmd string, args []byte)` takes host FEATURE
+commands (`torana_*`, `verify_virtual_key`) whose payloads are defined by the
+feature, not the ABI; the body is opaque, the `HostCallResult` envelope is not.
+Each rejects the other's namespace, so there is one route per operation. Pass
+the canonical token (`torana_plugin_counter`), never the permission string
+(`env.host_call.torana_plugin_counter`). The supported extension set is closed
+in this SDK version and the host gates every call on the exact
+`env.host_call.<command>` grant. Prefer the typed wrappers where they exist —
+`SendRequest`, `GetCachePricing`.
+
 Metadata and cache reads/writes are also typed: `MetaGetArgs`, `MetaSetArgs`,
 `CacheGetArgs`, `CacheSetArgs`, reached through `sdk.MetaGet` / `sdk.MetaSet` /
 `sdk.CacheGet` / `sdk.CacheSet`. **A key is required; an empty value is not an
