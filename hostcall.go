@@ -75,8 +75,11 @@ func hostCallRaw(cmd string, args []byte) ([]byte, error) {
 	return hostCallRawImpl(cmd, args)
 }
 
-// hostCallString is the transitional JSON/string host-call path used by
-// cache/state/meta helpers that still speak the v1 argument shapes.
+// hostCallString is the transitional JSON/string host-call path.
+//
+// Only the env.state_* helpers still use it. Meta and cache moved to typed
+// argument messages (MetaGetArgs, MetaSetArgs, CacheGetArgs, CacheSetArgs);
+// state is the remaining v1 argument shape.
 func hostCallString(cmd, args string) (string, error) {
 	raw, err := hostCallRaw(cmd, []byte(args))
 	if err != nil {

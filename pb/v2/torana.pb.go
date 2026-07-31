@@ -2813,8 +2813,22 @@ func (x *SetIdentityArgs) GetIdentity() string {
 }
 
 // MetaGetArgs is the argument body for host command env.meta_get.
-// A key that was never set reads back as empty, not as an error: absence is an
-// ordinary state for request-scoped metadata.
+//
+// Absence and emptiness are DIFFERENT results, and the host must keep them so:
+//
+//   - key absent            -> HostCallResult.error{code: NOT_FOUND}
+//   - key present, value "" -> HostCallResult.value arm, empty bytes
+//   - key present, value v  -> HostCallResult.value arm, v
+//
+// Collapsing them recreates the v1 ambiguity this ABI removes: a plugin could
+// not tell "nothing stored" from "I stored nothing", so a cached or buffered
+// empty string was unusable.
+//
+// MIGRATION B DEPENDENCY: torana-edge main deletes the key when metaSet is
+// called with "", and ignores the presence boolean on cache reads. The v2
+// dispatcher must preserve an explicitly empty value and return NOT_FOUND only
+// when presence is false. Do not let the typed branch inherit the v1 helpers'
+// semantics.
 type MetaGetArgs struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Key within this plugin's request-scoped namespace. Must be non-empty.
@@ -2867,6 +2881,8 @@ type MetaSetArgs struct {
 	Key string `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
 	// Value to store. Empty is a legitimate value, not a delete — v1 conflated
 	// the two because it could not tell an absent JSON field from an empty one.
+	// After setting "", a get must succeed with an empty value rather than
+	// reporting NOT_FOUND.
 	Value         string `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2917,6 +2933,10 @@ func (x *MetaSetArgs) GetValue() string {
 }
 
 // CacheGetArgs is the argument body for host command env.cache_get.
+//
+// Same absence/emptiness contract as MetaGetArgs: a miss is
+// error{code: NOT_FOUND}, and a stored empty string is a successful empty
+// value arm.
 type CacheGetArgs struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Cache key. Shared across plugins and requests, so callers should namespace

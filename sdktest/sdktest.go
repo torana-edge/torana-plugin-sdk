@@ -152,6 +152,19 @@ func (h *Harness) with(fn func()) {
 	sdk.WithTestHost(h.host, fn)
 }
 
+// Run executes fn with this harness installed as the host.
+//
+// Hook dispatch already does this, so Run is for the code AROUND a hook: real
+// plugins factor logic into helpers that call MetaGet, CacheSet and friends,
+// and testing those directly should not require building a hook and a request
+// to reach them. Without it, a host call made outside a dispatch reaches no
+// host at all and fails with an empty reply, which reads like a broken SDK
+// rather than a missing harness.
+func (h *Harness) Run(fn func()) {
+	h.t.Helper()
+	h.with(fn)
+}
+
 // SetConfig sets what env.plugin_config returns — the raw JSON an operator
 // would have saved for this plugin.
 func (h *Harness) SetConfig(raw string) *Harness {
@@ -304,7 +317,8 @@ func (h *Harness) hostCallBytes(cmd string, args []byte) ([]byte, error) {
 func typedHostReply(cmd string) bool {
 	switch cmd {
 	case "env.block_request", "env.respond_request", "env.route_request",
-		"env.set_identity", pbv2.MetaAppendCommand:
+		"env.set_identity", pbv2.MetaAppendCommand,
+		"env.meta_get", "env.meta_set", "env.cache_get", "env.cache_set":
 		return true
 	default:
 		return false
@@ -392,6 +406,61 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 		}
 		val := pbv2.MetaAppendSuccessValue(a.Fragment, []byte(existing), present)
 		return hostCallResultValue(val), nil
+	case "env.meta_get":
+		var a pbv2.MetaGetArgs
+		if err := proto.Unmarshal(args, &a); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid MetaGetArgs"), nil
+		}
+		if err := a.Validate(); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+		}
+		// Presence, not emptiness. Returning "" for a missing key would make
+		// the harness disagree with the contract in the one place an author
+		// would trust it.
+		v, present := h.meta[a.Key]
+		if !present {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_FOUND, "meta key not found"), nil
+		}
+		return hostCallResultValue([]byte(v)), nil
+
+	case "env.meta_set":
+		var a pbv2.MetaSetArgs
+		if err := proto.Unmarshal(args, &a); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid MetaSetArgs"), nil
+		}
+		if err := a.Validate(); err != nil {
+			// Rejected arguments must not mutate. A harness that stored the
+			// value anyway would hide the failure from the test asserting it.
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+		}
+		// An empty value STORES an empty value; it is not a delete.
+		h.meta[a.Key] = a.Value
+		return hostCallResultValue(nil), nil
+
+	case "env.cache_get":
+		var a pbv2.CacheGetArgs
+		if err := proto.Unmarshal(args, &a); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid CacheGetArgs"), nil
+		}
+		if err := a.Validate(); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+		}
+		v, present := h.cache[a.Key]
+		if !present {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_FOUND, "cache key not found"), nil
+		}
+		return hostCallResultValue([]byte(v)), nil
+
+	case "env.cache_set":
+		var a pbv2.CacheSetArgs
+		if err := proto.Unmarshal(args, &a); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid CacheSetArgs"), nil
+		}
+		if err := a.Validate(); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+		}
+		h.cache[a.Key] = a.Value
+		return hostCallResultValue(nil), nil
 	}
 	return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_FOUND, "unknown typed command"), nil
 }

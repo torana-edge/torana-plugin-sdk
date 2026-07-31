@@ -244,10 +244,41 @@ in package `outboundpolicy` (not for WASM guests).
 
 | Capability | SDK | Scope |
 | --- | --- | --- |
-| `env.meta_get` / `env.meta_set` | `sdk.HostCall` | One request, private to your plugin. Gone when the request ends. |
+| `env.meta_get` / `env.meta_set` | `sdk.MetaGet`, `sdk.MetaSet` | One request, private to your plugin (the host namespaces your keys). Gone when the request ends. |
 | `env.meta_append` (permission `env.meta_set`) | v2 `MetaAppendArgs` | Atomic append by block index. Non-empty fragment → empty success value (ack). Empty fragment → complete buffer read (absent → empty bytes). Dispatcher maps the command onto `env.meta_set` — there is no separate grant. |
-| `env.cache_get` / `env.cache_set` | `sdk.HostCall` | Across requests, TTL'd, **shared with every other plugin**. Prefix your keys. |
+| `env.cache_get` / `env.cache_set` | `sdk.CacheGet`, `sdk.CacheSet` | Across requests, TTL'd, **shared with every other plugin** — one flat namespace, so an unprefixed key is one another plugin can overwrite. Use `sdk.ContentAddressedCacheKey` or prefix with your plugin name. |
 | `env.state_get` / `env.state_set` / `env.state_keys` | `sdk.StateGet`, `sdk.StateSet`, `sdk.StateKeys` | Across requests **and restarts**, private, never expires. You must delete your own keys. |
+
+**Reading meta and cache: three outcomes, not two**
+
+All four helpers return `(value, *HostError, error)`. Branch on the middle one:
+
+```go
+v, herr, err := sdk.MetaGet("draft")
+switch {
+case err != nil:
+    // The call could not be made at all — a transport or protocol fault.
+    return sdk.PassRequest(), err
+case sdk.IsNotFound(herr):
+    // The key does not exist. Ordinary: nothing was stored yet.
+    v = defaultDraft
+case herr != nil:
+    // Some other refusal — most often a permission you did not declare.
+    sdk.Log("meta_get refused: "+herr.Message, sdk.LogLevelWarn)
+    return sdk.PassRequest(), nil
+}
+// v is the stored value, which may legitimately be "".
+```
+
+**Absence is not emptiness.** A key that was never written returns a
+`NOT_FOUND` `HostError`; a key holding `""` returns success with an empty
+value. `MetaSet(k, "")` stores an empty string — it does not delete `k`.
+Collapsing the two is the v1 ambiguity v2 exists to remove, so do not test
+`v == ""` to decide whether something was stored.
+
+Do **not** reach these through `sdk.HostCall` directly. The typed helpers
+validate the key before crossing the boundary, so a mistake fails at the call
+instead of silently storing nothing.
 
 **Acting outside a request**
 

@@ -249,10 +249,23 @@ Command `env.meta_append` is authorised by permission `env.meta_set`; non-empty
 fragments ack with an empty success value, empty fragment reads back the
 complete buffer (`MetaAppendSuccessValue`).
 
+Metadata and cache reads/writes are also typed: `MetaGetArgs`, `MetaSetArgs`,
+`CacheGetArgs`, `CacheSetArgs`, reached through `sdk.MetaGet` / `sdk.MetaSet` /
+`sdk.CacheGet` / `sdk.CacheSet`. **A key is required; an empty value is not an
+error.** Absence and emptiness are different results and the host must keep them
+apart: an absent key answers `error{code: NOT_FOUND}`, a key holding `""`
+answers the `value` arm with empty bytes. Guests branch with `sdk.IsNotFound`.
+Meta is request-scoped and namespaced per plugin; cache is one flat namespace
+shared by every plugin, so an unprefixed cache key is one another plugin can
+overwrite (`sdk.ContentAddressedCacheKey`).
+
 Go authors use typed results (`PassRequest` / `ReplaceRequest` / …), handler
 `(Result, error)` signatures (errors trap), fire-and-forget verdict helpers that
-panic on local/protocol failure, `HostCall(cmd, proto.Message)`, and
+panic on local/protocol failure, `HostCall(cmd, proto.Message)`,
+`MetaGet`/`MetaSet`/`CacheGet`/`CacheSet` (never raw `HostCall`) and
 `StreamHandler` / `StreamAssembler` for host-backed stream assembly.
+`sdktest.Harness.Run(fn)` runs helper code that makes host calls outside a hook
+dispatch.
 ## 7. Summary Checklist for AI Agents
 1. Did I use a real allocator (not a bump allocator)?
 2. Did I implement both `alloc` and `dealloc`?
@@ -268,7 +281,10 @@ panic on local/protocol failure, `HostCall(cmd, proto.Message)`, and
 8. Did I avoid forging host-owned response facts (usage, model-that-answered,
    signatures, provider extension blobs), and avoid leaving stale signatures on
    mutated signed content? (`ReplaceToolArguments` clears `ToolCallRef.signature`.)
-9. If I implemented a tick on **v1**: set `handled = true` on any intentional
+9. If I read meta or cache, did I branch on `sdk.IsNotFound(herr)` rather than
+   testing whether the value is `""`? A stored empty string is a real value,
+   and a permission denial is not a cache miss.
+10. If I implemented a tick on **v1**: set `handled = true` on any intentional
    result. On **v2 Go**: use `TickIdle` / `TickDid`. `env.meta_*` works on the
    synthetic tick scope in both ABIs, but original request/response and caller
    credentials still do not.
