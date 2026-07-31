@@ -364,7 +364,7 @@ func TestChatResponseCarriesResponseFacts(t *testing.T) {
 	resp := &v2.ChatResponse{
 		Model:          "claude-sonnet-4",
 		Id:             "msg_01",
-		Message:        &v2.Message{Role: "assistant", Content: "done"},
+		Message:        &v2.ResponseMessage{Content: proto.String("done")},
 		FinishReason:   "end_turn",
 		Usage:          &v2.Usage{InputTokens: 10, OutputTokens: 3},
 		UpstreamStatus: 200,

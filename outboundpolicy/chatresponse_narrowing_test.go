@@ -4,50 +4,63 @@ import (
 	"testing"
 
 	plugin_sdk "github.com/torana-edge/torana-plugin-sdk"
-	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 func TestChatResponseNarrowedPolicyContract(t *testing.T) {
-	content, _ := OutboundFieldPolicy("torana.v2.Message", "content")
+	if err := Validate(); err != nil {
+		t.Fatal(err)
+	}
+
+	content, ok := OutboundFieldPolicy("torana.v2.ResponseMessage", "content")
+	if !ok {
+		t.Fatal("ResponseMessage.content missing from inventory")
+	}
 	sec, ok := content.Section()
 	if content.Kind() != PolicySection || !ok || sec != plugin_sdk.SectionMessagesAssistant {
-		t.Fatal("Message.content must remain assistant-writable")
+		t.Fatal("ResponseMessage.content must be assistant section (value writable when present)")
 	}
+
 	name, _ := OutboundFieldPolicy("torana.v2.ToolCall", "name")
-	if name.Kind() != PolicySection {
-		t.Fatal("ToolCall.name must remain assistant-writable")
+	nsec, ok := name.Section()
+	if name.Kind() != PolicySection || !ok || nsec != plugin_sdk.SectionMessagesAssistant {
+		t.Fatal("ToolCall.name must map to SectionMessagesAssistant")
 	}
 	args, _ := OutboundFieldPolicy("torana.v2.ToolCall", "arguments_json")
-	if args.Kind() != PolicySection {
-		t.Fatal("ToolCall.arguments_json must remain assistant-writable")
+	asec, ok := args.Section()
+	if args.Kind() != PolicySection || !ok || asec != plugin_sdk.SectionMessagesAssistant {
+		t.Fatal("ToolCall.arguments_json must map to SectionMessagesAssistant")
 	}
 
-	toolCalls, _ := OutboundFieldPolicy("torana.v2.Message", "tool_calls")
-	if !toolCalls.IsContainer() {
-		t.Fatal("Message.tool_calls must be PolicyContainer for fixed cardinality/order")
+	toolCalls, ok := OutboundFieldPolicy("torana.v2.ResponseMessage", "tool_calls")
+	if !ok || !toolCalls.IsFixedContainer() {
+		t.Fatal("ResponseMessage.tool_calls must be PolicyFixedContainer")
+	}
+	if toolCalls.IsContainer() {
+		t.Fatal("PolicyFixedContainer must not report as ordinary PolicyContainer")
 	}
 
-	hostOwned := []struct{ msg, field string }{
-		{"torana.v2.ChatResponse", "finish_reason"},
-		{"torana.v2.Message", "content_parts_json"},
-		{"torana.v2.Message", "thinking"},
-		{"torana.v2.Message", "redacted_thinking"},
-		{"torana.v2.Message", "tool_call_id"},
-		{"torana.v2.Message", "tool_name"},
-		{"torana.v2.Message", "cache_control_json"},
-		{"torana.v2.ToolCall", "id"},
+	finish, _ := OutboundFieldPolicy("torana.v2.ChatResponse", "finish_reason")
+	if !finish.IsHostOwned() {
+		t.Fatal("ChatResponse.finish_reason must be host-owned")
 	}
-	for _, tc := range hostOwned {
-		p, ok := OutboundFieldPolicy(protoreflect.FullName(tc.msg), tc.field)
-		if !ok || !p.IsHostOwned() {
-			t.Errorf("%s.%s must be host-owned under narrowed contract", tc.msg, tc.field)
+	id, _ := OutboundFieldPolicy("torana.v2.ToolCall", "id")
+	if !id.IsHostOwned() {
+		t.Fatal("ToolCall.id must be host-owned")
+	}
+
+	// Request-shaped Message fields must not appear on the response inventory.
+	for _, field := range []string{
+		"role", "content_parts_json", "thinking", "thinking_signature",
+		"redacted_thinking", "tool_call_id", "tool_name", "cache_control_json",
+	} {
+		if _, ok := OutboundFieldPolicy("torana.v2.ResponseMessage", field); ok {
+			t.Errorf("ResponseMessage must not expose dead field %q", field)
+		}
+		if _, ok := OutboundFieldPolicy("torana.v2.Message", field); ok {
+			t.Errorf("request Message must not remain in outbound inventory (found %q)", field)
 		}
 	}
 
-	thinkingSig, _ := OutboundFieldPolicy("torana.v2.Message", "thinking_signature")
-	if !thinkingSig.IsBoundSignature() {
-		t.Fatal("Message.thinking_signature must remain PolicyBoundSignature")
-	}
 	toolSig, _ := OutboundFieldPolicy("torana.v2.ToolCall", "signature")
 	if !toolSig.IsBoundSignature() {
 		t.Fatal("ToolCall.signature must remain PolicyBoundSignature")

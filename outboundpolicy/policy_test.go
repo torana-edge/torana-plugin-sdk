@@ -93,7 +93,6 @@ func TestObservedResponseFactsAreHostOwned(t *testing.T) {
 	// prescribed response to changing the content they cover. They carry
 	// PolicyBoundSignature and are asserted separately below.
 	mustBoundSignature := []struct{ msg, field string }{
-		{"torana.v2.Message", "thinking_signature"},
 		{"torana.v2.ToolCall", "signature"},
 		{"torana.v2.ToolCallRef", "signature"},
 		{"torana.v2.StreamEvent", "signature_delta"},
@@ -110,7 +109,7 @@ func TestObservedResponseFactsAreHostOwned(t *testing.T) {
 	}
 
 	mustHost := []struct{ msg, field string }{
-		{"torana.v2.Message", "role"},
+		{"torana.v2.ChatResponse", "finish_reason"},
 		{"torana.v2.MessageStart", "model"},
 		{"torana.v2.StreamEvent", "usage"},
 		{"torana.v2.StreamEvent", "error"},
@@ -190,6 +189,8 @@ func TestFieldPolicyRejectsInvalidStates(t *testing.T) {
 		{"topology with delegate", FieldPolicy{kind: PolicyTopology, section: plugin_sdk.SectionStreamWrite, delegate: DelegateResponse}},
 		{"container with section", FieldPolicy{kind: PolicyContainer, section: plugin_sdk.SectionMessagesAssistant}},
 		{"container with delegate", FieldPolicy{kind: PolicyContainer, delegate: DelegateStream}},
+		{"fixed container with section", FieldPolicy{kind: PolicyFixedContainer, section: plugin_sdk.SectionMessagesAssistant}},
+		{"fixed container with delegate", FieldPolicy{kind: PolicyFixedContainer, delegate: DelegateStream}},
 	}
 	for _, tc := range cases {
 		if err := tc.p.validate(); err == nil {
@@ -202,6 +203,7 @@ func TestFieldPolicyRejectsInvalidStates(t *testing.T) {
 		topologyPolicy(),
 		delegatePolicy(DelegateStream),
 		containerPolicy(),
+		fixedContainerPolicy(),
 	} {
 		if err := p.validate(); err != nil {
 			t.Fatalf("valid policy rejected: %v", err)
@@ -314,17 +316,17 @@ func TestSignatureBindingsPinned(t *testing.T) {
 
 func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 	bad := []SignatureBinding{
-		{Message: "torana.v2.Message", SignatureField: "thinking_signature"},
+		{Message: "torana.v2.ToolCall", SignatureField: "signature"},
 		{
-			Message: "torana.v2.Message", SignatureField: "thinking_signature",
-			Content: []SignatureContentRef{{Scope: SignatureScopeUnspecified, Field: "thinking"}},
+			Message: "torana.v2.ToolCall", SignatureField: "signature",
+			Content: []SignatureContentRef{{Scope: SignatureScopeUnspecified, Field: "name"}},
 		},
 		{
-			Message: "torana.v2.Message", SignatureField: "thinking_signature",
-			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Message: "torana.v2.ToolCall", Field: "id"}},
+			Message: "torana.v2.ToolCall", SignatureField: "signature",
+			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Message: "torana.v2.ToolCallRef", Field: "id"}},
 		},
 		{
-			Message: "torana.v2.Message", SignatureField: "thinking_signature",
+			Message: "torana.v2.ToolCall", SignatureField: "signature",
 			Content: []SignatureContentRef{{Scope: SignatureScopeToolCallBlockByIndex, Message: "torana.v2.ToolCallDelta", Field: "arguments_delta"}},
 		},
 		{
@@ -363,6 +365,38 @@ func TestPolicyContainerRejectedOnScalar(t *testing.T) {
 	defer func() { outboundMessageFieldPolicies["torana.v2.ChatResponse"] = old }()
 	if err := Validate(); err == nil {
 		t.Fatal("expected PolicyContainer-on-scalar to fail Validate")
+	}
+}
+
+func TestPolicyFixedContainerRejectedOnSingularMessage(t *testing.T) {
+	old := outboundMessageFieldPolicies["torana.v2.ChatResponse"]
+	bad := map[string]FieldPolicy{}
+	for k, v := range old {
+		bad[k] = v
+	}
+	bad["message"] = fixedContainerPolicy()
+	outboundMessageFieldPolicies["torana.v2.ChatResponse"] = bad
+	defer func() { outboundMessageFieldPolicies["torana.v2.ChatResponse"] = old }()
+	err := Validate()
+	if err == nil {
+		t.Fatal("expected PolicyFixedContainer on singular message to fail Validate")
+	}
+	if !strings.Contains(err.Error(), "repeated") {
+		t.Fatalf("error should mention repeated, got %v", err)
+	}
+}
+
+func TestPolicyFixedContainerRejectedOnScalar(t *testing.T) {
+	old := outboundMessageFieldPolicies["torana.v2.ChatResponse"]
+	bad := map[string]FieldPolicy{}
+	for k, v := range old {
+		bad[k] = v
+	}
+	bad["model"] = fixedContainerPolicy()
+	outboundMessageFieldPolicies["torana.v2.ChatResponse"] = bad
+	defer func() { outboundMessageFieldPolicies["torana.v2.ChatResponse"] = old }()
+	if err := Validate(); err == nil {
+		t.Fatal("expected PolicyFixedContainer-on-scalar to fail Validate")
 	}
 }
 

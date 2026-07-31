@@ -60,14 +60,23 @@ import (
 //   - PolicyContainer: never charge the parent; always recurse. Presence or
 //     oneof-selection change of the container is expressed by treating nested
 //     fields as added/removed, plus topology when the enclosing stream
-//     kind/cardinality/boundaries change.
+//     kind/cardinality/boundaries change. Element count of a repeated
+//     container is NOT constrained — use PolicyFixedContainer when it is.
+//   - PolicyFixedContainer: like PolicyContainer (never charge the parent;
+//     always recurse into children) AND requires equal element count with
+//     positional correspondence: output element N is a mutation of accepted
+//     element N. Adding, removing, or reordering elements rejects. Valid only
+//     on repeated message fields. For elements with no stable provider ID,
+//     positional identity is all the wire can prove.
 //   - PolicySection / PolicyTopology on a message-valued field: if the same
 //     message/oneof variant is present on both sides, recurse and do not
 //     charge the parent; if presence or oneof selection changes, charge the
 //     parent and recursively account for added/removed nested fields.
 //   - PolicyHostOwned on a message: the whole subtree is immutable; any
 //     nested change/remove/add rejects.
-//   - Scalar fields apply their own policy directly.
+//   - Scalar fields apply their own policy directly. Optional scalars with
+//     PolicySection (e.g. ResponseMessage.content): presence is host-owned /
+//     fixed; the value is section-writable only when present on both sides.
 //
 // Registries are package-private. Constructors are package-private. Public
 // accessors return values/clones so importers cannot mutate the authority
@@ -113,8 +122,12 @@ const (
 	PolicyTopology
 	// PolicyContainer marks a message-valued field that never contributes a
 	// grant itself. Migration B always recurses into nested field policies
-	// (see package comment nesting rules).
+	// (see package comment nesting rules). Repeated containers under this
+	// kind may change cardinality; use PolicyFixedContainer when they must not.
 	PolicyContainer
+	// PolicyFixedContainer is PolicyContainer plus fixed repeated cardinality
+	// and positional order. See package comment nesting rules.
+	PolicyFixedContainer
 )
 
 // DelegateKind names the verifier a PolicyDelegate hands off to.
@@ -304,6 +317,10 @@ func containerPolicy() FieldPolicy {
 	return FieldPolicy{kind: PolicyContainer}
 }
 
+func fixedContainerPolicy() FieldPolicy {
+	return FieldPolicy{kind: PolicyFixedContainer}
+}
+
 func (p FieldPolicy) Kind() PolicyKind { return p.kind }
 
 func (p FieldPolicy) IsHostOwned() bool { return p.kind == PolicyHostOwned }
@@ -314,6 +331,10 @@ func (p FieldPolicy) IsHostOwned() bool { return p.kind == PolicyHostOwned }
 func (p FieldPolicy) IsBoundSignature() bool { return p.kind == PolicyBoundSignature }
 
 func (p FieldPolicy) IsContainer() bool { return p.kind == PolicyContainer }
+
+// IsFixedContainer reports whether the field recurses into children under a
+// fixed repeated cardinality and positional-order contract.
+func (p FieldPolicy) IsFixedContainer() bool { return p.kind == PolicyFixedContainer }
 
 // Section returns the content or topology section when Kind is PolicySection
 // or PolicyTopology.
@@ -369,9 +390,9 @@ func (p FieldPolicy) validate() error {
 		if p.delegate != DelegateUnspecified {
 			return fmt.Errorf("PolicyTopology must not set Delegate")
 		}
-	case PolicyContainer:
+	case PolicyContainer, PolicyFixedContainer:
 		if p.section != "" || p.delegate != DelegateUnspecified {
-			return fmt.Errorf("PolicyContainer must not set Section or Delegate")
+			return fmt.Errorf("%v must not set Section or Delegate", p.kind)
 		}
 	default:
 		return fmt.Errorf("unknown PolicyKind %d", p.kind)
@@ -442,14 +463,6 @@ func (b SignatureBinding) validateShape() error {
 
 var signatureBindings = []SignatureBinding{
 	{
-		Message:        "torana.v2.Message",
-		SignatureField: "thinking_signature",
-		Content: []SignatureContentRef{
-			{Scope: SignatureScopeSameMessage, Field: "thinking"},
-			{Scope: SignatureScopeSameMessage, Field: "redacted_thinking"},
-		},
-	},
-	{
 		Message:        "torana.v2.ToolCall",
 		SignatureField: "signature",
 		Content: []SignatureContentRef{
@@ -505,18 +518,12 @@ var chatResponseFieldPolicies = map[string]FieldPolicy{
 }
 
 var responseMessageFieldPolicies = map[string]FieldPolicy{
-	"role":               hostOwnedPolicy(),
-	"content":            sectionPolicy(plugin_sdk.SectionMessagesAssistant),
-	"content_parts_json": hostOwnedPolicy(),
-	"thinking":           hostOwnedPolicy(),
-	"thinking_signature": boundSignaturePolicy(),
-	"redacted_thinking":  hostOwnedPolicy(),
-	// Fixed cardinality/order container: recurse into ToolCall children for
-	// in-place name/arguments edits; count/order/IDs are host-owned.
-	"tool_calls":         containerPolicy(),
-	"tool_call_id":       hostOwnedPolicy(),
-	"tool_name":          hostOwnedPolicy(),
-	"cache_control_json": hostOwnedPolicy(),
+	// Presence is host-owned/fixed; value is assistant-writable when present
+	// on both sides (see package comment optional-scalar rule).
+	"content": sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	// Fixed cardinality/order: recurse into ToolCall children for in-place
+	// name/arguments edits. Positional identity for anonymous (empty-ID) calls.
+	"tool_calls": fixedContainerPolicy(),
 }
 
 var responseToolCallFieldPolicies = map[string]FieldPolicy{
@@ -603,7 +610,7 @@ var hookResultActionPolicies = map[string]FieldPolicy{
 
 var outboundMessageFieldPolicies = map[protoreflect.FullName]map[string]FieldPolicy{
 	"torana.v2.ChatResponse":      chatResponseFieldPolicies,
-	"torana.v2.Message":           responseMessageFieldPolicies,
+	"torana.v2.ResponseMessage":   responseMessageFieldPolicies,
 	"torana.v2.ToolCall":          responseToolCallFieldPolicies,
 	"torana.v2.Usage":             usageFieldPolicies,
 	"torana.v2.StreamEvent":       streamEventVariantPolicies,
@@ -692,6 +699,7 @@ func init() {
 //     registered; every DelegateKind has a target entry and every named target
 //     has a registry;
 //   - PolicyContainer / PolicyDelegate only on message-valued fields;
+//   - PolicyFixedContainer only on repeated message-valued fields;
 //   - signature bindings validate against proto + host-owned signature fields.
 func Validate() error {
 	descs := outboundDescriptors()
@@ -863,6 +871,13 @@ func validateMessageCompleteness(
 			if fd.Kind() != protoreflect.MessageKind {
 				return fmt.Errorf("%s.%s: %v requires a message field, got %v", name, fname, p.Kind(), fd.Kind())
 			}
+		case PolicyFixedContainer:
+			if fd.Kind() != protoreflect.MessageKind {
+				return fmt.Errorf("%s.%s: PolicyFixedContainer requires a message field, got %v", name, fname, fd.Kind())
+			}
+			if !fd.IsList() {
+				return fmt.Errorf("%s.%s: PolicyFixedContainer requires a repeated message field", name, fname)
+			}
 		}
 
 		if p.Kind() == PolicyDelegate {
@@ -914,7 +929,7 @@ func outboundDescriptors() map[protoreflect.FullName]protoreflect.MessageDescrip
 		&pbv2.StreamEvents{},
 		&pbv2.HookResult{},
 		&pbv2.Suppress{},
-		&pbv2.Message{},
+		&pbv2.ResponseMessage{},
 		&pbv2.ToolCall{},
 		&pbv2.ToolCallDelta{},
 		&pbv2.ToolCallRef{},

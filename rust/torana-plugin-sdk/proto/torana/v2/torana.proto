@@ -124,6 +124,28 @@ message ChatRequest {
   bytes torana_meta_json = 11;
 }
 
+// The assistant's reply on the non-streaming response path.
+//
+// Deliberately narrower than Message. Request-only and currently-unobserved
+// fields (role, thinking, content_parts, cache control, tool-result fields)
+// are omitted so the authoring API cannot autocomplete silent no-ops. When the
+// host later observes and can write those back, add them as additive fields
+// with deliberate policies — do not reuse Message here.
+message ResponseMessage {
+  // Present only when the host has a writable text slot on the provider body.
+  // Absence means "no text part exists", which is distinct from the empty
+  // string. Presence itself is host-owned (fixed across accepted→output);
+  // the string value is governed by ir.messages.write.assistant when present
+  // on both sides.
+  optional string content = 1;
+  // Fixed cardinality and positional order: output element N mutates accepted
+  // element N. Nested ToolCall.id is host-owned; name and arguments_json are
+  // assistant-writable in place. For calls with no stable provider ID,
+  // positional identity is all the wire can prove — a semantic swap of two
+  // wholly writable anonymous calls is indistinguishable from rewriting both.
+  repeated ToolCall tool_calls = 2;
+}
+
 // Canonical representation of a completed, non-streamed response.
 //
 // v1 had no such message. The response hook received a ChatRequest carrying,
@@ -138,10 +160,10 @@ message ChatResponse {
   // Provider's response id, empty when it reported none.
   // Host-owned: forging it breaks correlation.
   string id = 2;
-  // The assistant's turn. Content governed by ir.messages.write.assistant;
-  // role and opaque signatures inside Message are host-owned.
-  Message message = 3;
-  // Governed by ir.messages.write.assistant (assistant-turn metadata).
+  // The assistant's turn. See ResponseMessage for the writable surface.
+  ResponseMessage message = 3;
+  // Host-owned: observed provider stop reason. Not ir.messages.write.assistant —
+  // the first-cut host applies content and in-place tool name/arguments only.
   string finish_reason = 4;
   // Host-owned: forging usage forges the bill / observability.
   Usage usage = 5;
