@@ -127,3 +127,53 @@ func TestExtensionBodyNeedNotBeJSON(t *testing.T) {
 		}
 	})
 }
+
+// The boundary must reject in BOTH directions, and reject before crossing.
+//
+// It rejected env.* on the extension path but accepted anything on the core
+// path, so one operation had two ways to be invoked and only one was the
+// contract.
+func TestCorePathRejectsExtensionCommands(t *testing.T) {
+	h := sdktest.New(t)
+	h.Run(func() {
+		for _, cmd := range []string{
+			"torana_plugin_counter", "torana_offload_completion", "verify_virtual_key",
+		} {
+			_, _, err := sdk.HostCall(cmd, &pbv2.MetaGetArgs{Key: "k"})
+			if err == nil {
+				t.Errorf("HostCall(%q) was accepted; it is a host-feature command", cmd)
+				continue
+			}
+			if !strings.Contains(err.Error(), "HostCallExtension") {
+				t.Errorf("HostCall(%q) did not name the alternative: %v", cmd, err)
+			}
+		}
+	})
+	for _, c := range h.Calls() {
+		if !strings.HasPrefix(c.Command, "env.") {
+			t.Fatalf("a rejected core call still reached the host: %+v", c)
+		}
+	}
+}
+
+// The extension set is closed in this SDK version, so an unknown token is a
+// typo or an unsupported command. Failing at the call site beats discovering it
+// at host dispatch in production.
+func TestExtensionPathRejectsUnknownAndMalformedTokens(t *testing.T) {
+	h := sdktest.New(t)
+	h.Run(func() {
+		for _, cmd := range []string{
+			"torana_typo",                         // not in the allowlist
+			"torana plugin counter",               // whitespace
+			"env.host_call.torana_plugin_counter", // the permission, not the token
+			"TORANA_PLUGIN_COUNTER",               // wrong case
+		} {
+			if _, _, err := sdk.HostCallExtension(cmd, []byte(`{}`)); err == nil {
+				t.Errorf("HostCallExtension(%q) was accepted", cmd)
+			}
+		}
+	})
+	if len(h.Calls()) != 0 {
+		t.Fatalf("a rejected extension call reached the host: %+v", h.Calls())
+	}
+}
