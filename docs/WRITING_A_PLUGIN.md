@@ -251,7 +251,8 @@ in package `outboundpolicy` (not for WASM guests).
 
 **Reading meta and cache: three outcomes, not two**
 
-All four helpers return `(value, *HostError, error)`. Branch on the middle one:
+Reads return `(value, *HostError, error)`; writes return `(*HostError, error)`.
+The read pattern is where the three channels matter — branch on the middle one:
 
 ```go
 v, herr, err := sdk.MetaGet("draft")

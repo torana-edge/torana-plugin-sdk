@@ -17,10 +17,14 @@ import (
 // namespace the key themselves. For durable per-plugin storage use State*.
 //
 // Reads return (value, *HostError, error); writes return (*HostError, error).
-// The HostError is the host refusing — most often a missing permission — and is distinct from the error,
-// which means the call itself could not be made. v1 collapsed these, so ~30
-// `if err != nil` checks across the official plugins were dead code and a
-// refusal was indistinguishable from an empty value.
+//
+// HostError is a classified host-side non-success: NOT_FOUND is ordinary
+// absence for reads, while other codes report a refusal — most often a missing
+// permission — or a host failure. error means the call itself could not be
+// made, or its reply was invalid.
+//
+// v1 collapsed these, so ~30 `if err != nil` checks across the official plugins
+// were dead code and a refusal was indistinguishable from an empty value.
 //
 // ABSENCE IS NOT EMPTINESS. A key that does not exist returns a HostError with
 // code NOT_FOUND; a key holding an empty string returns success with an empty
