@@ -52,12 +52,17 @@ func hostCallRawImpl(cmd string, args []byte) ([]byte, error) {
 	return h.HostCall(cmd, args)
 }
 
+// PluginConfig mirrors the wasip1 implementation: framed reply, "{}" when the
+// config is unset or denied. Duplicated rather than shared because the two
+// builds have different host-call plumbing, so a divergence here is a real
+// risk — sdktest exercises this copy, and a plugin's tests would pass against
+// semantics its wasm build does not have.
 func PluginConfig() string {
-	res, err := hostCallString("env.plugin_config", "")
-	if err != nil || res == "" || isPermissionDenied(res) {
+	raw, herr, err := HostCall("env.plugin_config", nil)
+	if err != nil || herr != nil || len(raw) == 0 {
 		return "{}"
 	}
-	return res
+	return string(raw)
 }
 
 // DispatchHook runs the registered handler for in and returns the framed

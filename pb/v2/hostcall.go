@@ -15,6 +15,22 @@ const MetaAppendCommand = "env.meta_append"
 // MetaAppendCommand. There is no separate env.meta_append permission.
 const MetaAppendPermission = "env.meta_set"
 
+// StateDeleteCommand is the host-call command for releasing one durable key.
+//
+// The dispatcher MUST map this command to StateDeletePermission. Deriving the
+// permission from the command string would look for "env.state_delete", which
+// is not an operator-facing capability.
+const StateDeleteCommand = "env.state_delete"
+
+// StateDeletePermission is the operator-facing capability that authorises
+// StateDeleteCommand. There is no separate env.state_delete permission.
+//
+// Deletion is a mutation of the same plugin-private namespace a plugin can
+// already overwrite, so a fourth durable-state capability would add manifest
+// and approval ceremony without drawing a new security line. v1's StateDelete
+// was env.state_set for the same reason: it was a set with an empty value.
+const StateDeletePermission = "env.state_set"
+
 // MetaAppendSuccessValue returns the HostCallResult.value bytes for a
 // successful env.meta_append.
 //

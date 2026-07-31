@@ -75,18 +75,24 @@ type Harness struct {
 	t    testing.TB
 	host *sdk.TestHost
 
-	mu       sync.Mutex
-	meta     map[string]string
-	cache    map[string]string
-	state    map[string]string
-	config   string
-	stubs    map[string]func(args string) (string, error)
-	logs     []LogEntry
-	metrics  []MetricEntry
-	calls    []HostCallEntry
-	now      func() int64
-	original []byte
-	origResp []byte
+	mu      sync.Mutex
+	meta    map[string]string
+	cache   map[string]string
+	state   map[string]string
+	config  string
+	stubs   map[string]func(args string) (string, error)
+	logs    []LogEntry
+	metrics []MetricEntry
+	calls   []HostCallEntry
+	now     func() int64
+	// Presence is tracked separately from the byte slices. An all-default
+	// ChatRequest marshals to zero bytes and an upstream body can legitimately
+	// be empty, so length is not presence — a harness that conflated them
+	// could not test the contract it exists to pin.
+	original    []byte
+	originSet   bool
+	origResp    []byte
+	origRespSet bool
 
 	// StateConfigured mirrors a host with no durable state store: when false,
 	// env.state_* answers exactly as the real host does with StateSetFunc nil.
@@ -226,6 +232,7 @@ func (h *Harness) SetOriginalRequest(req *pbv2.ChatRequest) *Harness {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.original = raw
+	h.originSet = true
 	return h
 }
 
@@ -235,6 +242,7 @@ func (h *Harness) SetOriginalResponse(body []byte) *Harness {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.origResp = body
+	h.origRespSet = true
 	return h
 }
 
@@ -328,7 +336,10 @@ func typedHostReply(cmd string) bool {
 	switch cmd {
 	case "env.block_request", "env.respond_request", "env.route_request",
 		"env.set_identity", pbv2.MetaAppendCommand,
-		"env.meta_get", "env.meta_set", "env.cache_get", "env.cache_set":
+		"env.meta_get", "env.meta_set", "env.cache_get", "env.cache_set",
+		"env.state_get", "env.state_set", "env.state_delete", "env.state_keys",
+		"env.now", "env.plugin_config",
+		"env.original_request", "env.original_response":
 		return true
 	default:
 		// Extension commands (torana_*, verify_virtual_key) also speak the v2
@@ -482,6 +493,90 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 		}
 		h.cache[a.Key] = a.Value
 		return hostCallResultValue(nil), nil
+
+	case "env.state_get":
+		var a pbv2.StateGetArgs
+		if err := proto.Unmarshal(args, &a); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid StateGetArgs"), nil
+		}
+		if err := a.Validate(); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+		}
+		if !h.StateConfigured {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
+				"durable plugin state is not configured"), nil
+		}
+		v, present := h.state[a.Key]
+		if !present {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_FOUND, "state key not found"), nil
+		}
+		return hostCallResultValue([]byte(v)), nil
+
+	case "env.state_set":
+		var a pbv2.StateSetArgs
+		if err := proto.Unmarshal(args, &a); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid StateSetArgs"), nil
+		}
+		if err := a.Validate(); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+		}
+		if !h.StateConfigured {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
+				"durable plugin state is not configured"), nil
+		}
+		// An empty value STORES an empty value. v1 deleted the key here, which
+		// is exactly why state now has a separate delete command.
+		h.state[a.Key] = a.Value
+		return hostCallResultValue(nil), nil
+
+	case "env.state_delete":
+		var a pbv2.StateDeleteArgs
+		if err := proto.Unmarshal(args, &a); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid StateDeleteArgs"), nil
+		}
+		if err := a.Validate(); err != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+		}
+		if !h.StateConfigured {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
+				"durable plugin state is not configured"), nil
+		}
+		// Deleting an absent key succeeds: the caller wants it gone.
+		delete(h.state, a.Key)
+		return hostCallResultValue(nil), nil
+
+	case "env.state_keys":
+		if !h.StateConfigured {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
+				"durable plugin state is not configured"), nil
+		}
+		keys := make([]string, 0, len(h.state))
+		for k := range h.state {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		b, _ := json.Marshal(keys)
+		return hostCallResultValue(b), nil
+
+	case "env.now":
+		return hostCallResultValue([]byte(strconv.FormatInt(h.now(), 10))), nil
+
+	case "env.plugin_config":
+		return hostCallResultValue([]byte(h.config)), nil
+
+	case "env.original_request":
+		if !h.originSet {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_FOUND,
+				"no original request captured"), nil
+		}
+		return hostCallResultValue(h.original), nil
+
+	case "env.original_response":
+		if !h.origRespSet {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_FOUND,
+				"no original response captured"), nil
+		}
+		return hostCallResultValue(h.origResp), nil
 	}
 	if isExtensionCommand(cmd) {
 		// The harness cannot emulate a host feature, so an extension command

@@ -261,6 +261,16 @@ in this SDK version and the host gates every call on the exact
 `env.host_call.<command>` grant. Prefer the typed wrappers where they exist —
 `SendRequest`, `GetCachePricing`.
 
+Durable state is typed too: `StateGetArgs`, `StateSetArgs`, `StateDeleteArgs`
+(`env.state_keys`, `env.now`, `env.plugin_config` and the originals take no
+body — pass `nil`). **Deletion is `env.state_delete`, not a set with an empty
+value**: v1 used the empty value, which made storing an empty string
+impossible and contradicted the other two stores. Command
+`env.state_delete` is authorised by permission `env.state_set`
+(`pbv2.StateDeleteCommand` / `StateDeletePermission`) — a dispatcher
+special-case exactly like `env.meta_append`; do NOT derive the permission from
+the command string.
+
 Metadata and cache reads/writes are also typed: `MetaGetArgs`, `MetaSetArgs`,
 `CacheGetArgs`, `CacheSetArgs`, reached through `sdk.MetaGet` / `sdk.MetaSet` /
 `sdk.CacheGet` / `sdk.CacheSet`. **A key is required; an empty value is not an

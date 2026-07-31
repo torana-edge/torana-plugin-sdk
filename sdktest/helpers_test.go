@@ -192,3 +192,37 @@ func TestHostResultErrorRejectsAnUnclassifiedCode(t *testing.T) {
 		})
 	}
 }
+
+// Round 2 covered empty and malformed values for pricing but not egress. The
+// implementations were already correct; this is the missing coverage.
+func TestSendRequestEmptyValueStaysUnavailable(t *testing.T) {
+	h := sdktest.New(t)
+	h.StubHostCall("torana_send_request", func(string) (string, error) {
+		return sdktest.HostResultValue(nil), nil
+	})
+	h.Run(func() {
+		_, err := sdk.SendRequest(&pbv2.ChatRequest{Model: "m"},
+			sdk.SendRequestOptions{Provider: "anthropic", Path: "/v1/messages"})
+		if !errors.Is(err, sdk.ErrEgressUnavailable) {
+			t.Fatalf("an empty framed value did not stay ErrEgressUnavailable: %v", err)
+		}
+	})
+}
+
+func TestSendRequestMalformedValueIsADecodeError(t *testing.T) {
+	h := sdktest.New(t)
+	h.StubHostCall("torana_send_request", func(string) (string, error) {
+		return sdktest.HostResultValue([]byte("not json")), nil
+	})
+	h.Run(func() {
+		_, err := sdk.SendRequest(&pbv2.ChatRequest{Model: "m"},
+			sdk.SendRequestOptions{Provider: "anthropic", Path: "/v1/messages"})
+		if err == nil {
+			t.Fatal("a malformed egress body was accepted")
+		}
+		if errors.Is(err, sdk.ErrEgressUnavailable) {
+			t.Fatal("a malformed body was reported as unavailable; " +
+				"a caller would retry a different provider instead of fixing the host")
+		}
+	})
+}

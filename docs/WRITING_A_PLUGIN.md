@@ -247,12 +247,14 @@ in package `outboundpolicy` (not for WASM guests).
 | `env.meta_get` / `env.meta_set` | `sdk.MetaGet`, `sdk.MetaSet` | One request, private to your plugin (the host namespaces your keys). Gone when the request ends. |
 | `env.meta_append` (permission `env.meta_set`) | v2 `MetaAppendArgs` | Atomic append by block index. Non-empty fragment → empty success value (ack). Empty fragment → complete buffer read (absent → empty bytes). Dispatcher maps the command onto `env.meta_set` — there is no separate grant. |
 | `env.cache_get` / `env.cache_set` | `sdk.CacheGet`, `sdk.CacheSet` | Across requests, TTL'd, **shared with every other plugin** — one flat namespace, so an unprefixed key is one another plugin can overwrite. Use `sdk.ContentAddressedCacheKey` or prefix with your plugin name. |
-| `env.state_get` / `env.state_set` / `env.state_keys` | `sdk.StateGet`, `sdk.StateSet`, `sdk.StateKeys` | Across requests **and restarts**, private, never expires. You must delete your own keys. |
+| `env.state_get` / `env.state_set` / `env.state_delete` / `env.state_keys` | `sdk.StateGet`, `sdk.StateSet`, `sdk.StateDelete`, `sdk.StateKeys` | Across requests **and restarts**, private, never expires. You must delete your own keys — with `StateDelete`, not by setting an empty value. `env.state_delete` is authorised by the **`env.state_set`** grant; there is no fourth capability. |
 
 **Reading meta and cache: three outcomes, not two**
 
 Reads return `(value, *HostError, error)`; writes return `(*HostError, error)`.
-The read pattern is where the three channels matter — branch on the middle one:
+The same shape applies to `StateGet` / `StateSet`, and the same
+absence-vs-emptiness rule applies to all three stores. The read pattern is where
+the three channels matter — branch on the middle one:
 
 ```go
 v, herr, err := sdk.MetaGet("draft")

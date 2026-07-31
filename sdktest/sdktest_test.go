@@ -201,13 +201,18 @@ func TestPluginConfigAndDeny(t *testing.T) {
 	}
 }
 
-func TestHostCallStringPathStillWorks(t *testing.T) {
+func TestStateRoundTripsThroughTheFramedPath(t *testing.T) {
 	sdktest.Reset()
 	t.Cleanup(sdktest.Reset)
 
 	sdk.OnBeforeRequest(func(context.Context, *pbv2.ChatRequest) (sdk.RequestResult, error) {
-		_ = sdk.StateSet("k", "v")
-		v, _ := sdk.StateGet("k")
+		if herr, err := sdk.StateSet("k", "v"); err != nil || herr != nil {
+			t.Errorf("state set: err=%v herr=%v", err, herr)
+		}
+		v, herr, err := sdk.StateGet("k")
+		if err != nil || herr != nil {
+			t.Errorf("state get: err=%v herr=%v", err, herr)
+		}
 		if v != "v" {
 			t.Errorf("state get %q", v)
 		}

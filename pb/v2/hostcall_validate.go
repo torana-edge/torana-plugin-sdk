@@ -189,3 +189,38 @@ func (x *CacheSetArgs) Validate() error {
 	}
 	return nil
 }
+
+// Durable-state argument bodies. A key is required for the same reason as meta
+// and cache: an empty key names the plugin's namespace rather than a value in
+// it. Values are not required — empty is a value, and env.state_delete is how a
+// key is released.
+
+func (x *StateGetArgs) Validate() error {
+	if x == nil {
+		return fmt.Errorf("state get args are nil")
+	}
+	if x.Key == "" {
+		return fmt.Errorf("state get args have no key")
+	}
+	return nil
+}
+
+func (x *StateSetArgs) Validate() error {
+	if x == nil {
+		return fmt.Errorf("state set args are nil")
+	}
+	if x.Key == "" {
+		return fmt.Errorf("state set args have no key")
+	}
+	return nil
+}
+
+func (x *StateDeleteArgs) Validate() error {
+	if x == nil {
+		return fmt.Errorf("state delete args are nil")
+	}
+	if x.Key == "" {
+		return fmt.Errorf("state delete args have no key")
+	}
+	return nil
+}

@@ -221,13 +221,17 @@ func hostCallRawImpl(cmd string, args []byte) ([]byte, error) {
 	return res, nil
 }
 
-// PluginConfig returns this plugin's config JSON blob, or "{}" when unset /
-// denied. Uses the transitional string host-call path until env.plugin_config
-// returns HostCallResult on Migration B.
+// PluginConfig returns this plugin's config JSON blob, or "{}" when unset or
+// denied.
+//
+// "{}" rather than an error because every caller unmarshals the result, and an
+// absent config genuinely means "no operator settings" — the plugin should run
+// on its defaults. Returning an error would make every plugin write the same
+// fallback.
 func PluginConfig() string {
-	res, err := hostCallString("env.plugin_config", "")
-	if err != nil || res == "" || isPermissionDenied(res) {
+	raw, herr, err := HostCall("env.plugin_config", nil)
+	if err != nil || herr != nil || len(raw) == 0 {
 		return "{}"
 	}
-	return res
+	return string(raw)
 }
