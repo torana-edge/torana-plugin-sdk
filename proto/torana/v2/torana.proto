@@ -673,6 +673,51 @@ message SetIdentityArgs {
 // naming the same key see each other's value, which is what makes it a cache
 // rather than plugin state.
 
+// Typed argument bodies for durable plugin state.
+//
+// State is per-plugin and survives restarts, unlike request-scoped metadata and
+// the shared cache. Absence follows the same contract as those:
+//
+//   key absent            -> HostCallResult.error{code: NOT_FOUND}
+//   key present, value "" -> HostCallResult.value arm, empty bytes
+//
+// DELETION IS AN EXPLICIT COMMAND. v1 deleted a key by setting it to the empty
+// string, which made "store an empty value" unexpressible and contradicted the
+// meta and cache stores where empty is an ordinary value. A plugin author who
+// learned the rule for two stores would have been wrong about the third.
+// env.state_delete exists so the three agree and deletion is not a magic value.
+//
+//   env.state_get / env.state_set / env.state_delete / env.state_keys
+//   permission: the matching env.state_* capability
+//
+// MIGRATION B: the host must implement env.state_delete. Until it does,
+// StateDelete is refused like any unimplemented command.
+
+// StateGetArgs is the argument body for host command env.state_get.
+message StateGetArgs {
+  // Key within this plugin's durable namespace. Must be non-empty.
+  string key = 1;
+}
+
+// StateSetArgs is the argument body for host command env.state_set.
+message StateSetArgs {
+  // Key within this plugin's durable namespace. Must be non-empty.
+  string key = 1;
+  // Value to store. Empty stores an empty value; it does NOT delete. Use
+  // env.state_delete to release a key.
+  string value = 2;
+}
+
+// StateDeleteArgs is the argument body for host command env.state_delete.
+//
+// Deleting a key that does not exist succeeds: the caller's intent is that the
+// key is gone afterwards, and reporting NOT_FOUND would make every cleanup path
+// branch on a condition it does not care about.
+message StateDeleteArgs {
+  // Key within this plugin's durable namespace. Must be non-empty.
+  string key = 1;
+}
+
 // MetaGetArgs is the argument body for host command env.meta_get.
 //
 // Absence and emptiness are DIFFERENT results, and the host must keep them so:

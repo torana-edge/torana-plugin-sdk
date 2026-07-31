@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+
+	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
 
 // Durable plugin state
@@ -34,76 +36,87 @@ import (
 // proxy without a data directory has nowhere to put it.
 var ErrStateUnavailable = errors.New("torana: durable plugin state is not available")
 
-// StateGet reads one of this plugin's durable keys. A missing key returns "".
-func StateGet(key string) (string, error) {
-	if key == "" {
-		return "", fmt.Errorf("torana: state key is required")
+// StateGet reads one of this plugin's durable keys.
+//
+// A key that was never written returns a NOT_FOUND HostError; a key holding an
+// empty string returns "" with no HostError. Branch with IsNotFound rather than
+// testing the value — the same rule as MetaGet and CacheGet.
+//
+// v1 could not express this. The reply shared a namespace with the stored value,
+// so a JSON object with a "status" field was ambiguous between a host error and
+// the plugin's own data, and the heuristic that guessed between them is gone.
+func StateGet(key string) (string, *pbv2.HostError, error) {
+	raw, herr, err := HostCall("env.state_get", &pbv2.StateGetArgs{Key: key})
+	if err != nil || herr != nil {
+		return "", herr, err
 	}
-	res, err := hostCallString("env.state_get", key)
-	if err != nil {
-		return "", err
-	}
-	// stateStatus, not just isPermissionDenied. A denial is only one of the
-	// errors the host can report here; checking for it alone meant any OTHER
-	// error envelope — a store that is unavailable, a key that is too large —
-	// was returned to the plugin AS THE STORED VALUE, and StateGetJSON then
-	// decoded it into the caller's struct.
-	if err := stateStatus(res); err != nil {
-		return "", err
-	}
-	return res, nil
+	return string(raw), nil, nil
 }
 
-// StateSet writes one of this plugin's durable keys. An empty value deletes it.
-func StateSet(key, value string) error {
-	if key == "" {
-		return fmt.Errorf("torana: state key is required")
-	}
-	payload, err := json.Marshal(map[string]any{"key": key, "value": value})
-	if err != nil {
-		return err
-	}
-	res, err := hostCallString("env.state_set", string(payload))
-	if err != nil {
-		return err
-	}
-	return stateStatus(res)
+// StateSet writes one of this plugin's durable keys.
+//
+// An empty value STORES an empty value. It does not delete — that was the v1
+// behaviour, and it made storing an empty string unexpressible while
+// contradicting the meta and cache stores where empty is ordinary data. An
+// author who learned the rule for those two would have been wrong here.
+func StateSet(key, value string) (*pbv2.HostError, error) {
+	_, herr, err := HostCall("env.state_set", &pbv2.StateSetArgs{Key: key, Value: value})
+	return herr, err
 }
 
-// StateDelete releases one durable key. It uses env.state_set with an empty
-// value, so it is ABI-compatible with existing v1 hosts and requires the same
-// env.state_set grant.
-func StateDelete(key string) error {
-	return StateSet(key, "")
+// StateDelete releases one durable key.
+//
+// Deleting a key that does not exist succeeds: the caller wants the key gone,
+// and reporting NOT_FOUND would make every cleanup path branch on a condition
+// it does not care about.
+//
+// This is a distinct command rather than StateSet(key, "") so deletion is not a
+// magic value. MIGRATION B: the host must implement env.state_delete; until it
+// does, this is refused like any unimplemented command.
+func StateDelete(key string) (*pbv2.HostError, error) {
+	_, herr, err := HostCall("env.state_delete", &pbv2.StateDeleteArgs{Key: key})
+	return herr, err
 }
 
 // StateKeys lists this plugin's durable keys, sorted. Useful when a plugin
 // stores one key per conversation and must enumerate them on a tick.
-func StateKeys() ([]string, error) {
-	res, err := hostCallString("env.state_keys", "")
-	if err != nil {
-		return nil, err
+func StateKeys() ([]string, *pbv2.HostError, error) {
+	raw, herr, err := HostCall("env.state_keys", nil)
+	if err != nil || herr != nil {
+		return nil, herr, err
 	}
-	if err := stateStatus(res); err != nil {
-		return nil, err
-	}
-	if res == "" {
-		return nil, nil
+	if len(raw) == 0 {
+		return nil, nil, nil
 	}
 	var keys []string
-	if err := json.Unmarshal([]byte(res), &keys); err != nil {
-		return nil, fmt.Errorf("torana: decode state keys: %w", err)
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		return nil, nil, fmt.Errorf("torana: decode state keys: %w", err)
 	}
-	return keys, nil
+	return keys, nil, nil
 }
 
-// StateGetJSON reads a key and decodes it into v. A missing key leaves v
-// untouched and reports found=false, so callers can distinguish "absent" from
-// "present but zero".
+// StateGetJSON reads a key and decodes it into v.
+//
+// found is false when the key does not exist, and v is left untouched. This is
+// now answered by NOT_FOUND rather than by the value being empty, so a stored
+// empty JSON document is no longer mistaken for absence.
+//
+// Any refusal other than absence is returned as an error: a plugin that treats
+// a denied capability as "not stored yet" will quietly rewrite state it could
+// not read.
 func StateGetJSON(key string, v any) (found bool, err error) {
-	raw, err := StateGet(key)
-	if err != nil || raw == "" {
+	raw, herr, err := StateGet(key)
+	if err != nil {
 		return false, err
+	}
+	if IsNotFound(herr) {
+		return false, nil
+	}
+	if herr != nil {
+		return false, fmt.Errorf("torana: state %q: %s: %s", key, hostErrorReason(herr), herr.Message)
+	}
+	if raw == "" {
+		return false, nil
 	}
 	if err := json.Unmarshal([]byte(raw), v); err != nil {
 		return false, fmt.Errorf("torana: decode state %q: %w", key, err)
@@ -117,70 +130,14 @@ func StateSetJSON(key string, v any) error {
 	if err != nil {
 		return fmt.Errorf("torana: encode state %q: %w", key, err)
 	}
-	return StateSet(key, string(b))
-}
-
-// stateStatus turns the host's JSON envelope into an error.
-func stateStatus(res string) error {
-	if res == "" {
-		return nil
+	herr, err := StateSet(key, string(b))
+	if err != nil {
+		return err
 	}
-	// A response is an error envelope only when it really is one: a JSON OBJECT
-	// carrying a "status" field. A bare value the host returned as a legitimate
-	// result — a stored string, a number — must not be probed for error fields.
-	//
-	// One decode, one matching rule. Probing the map and then re-decoding into
-	// a struct used TWO rules: map lookup is case-sensitive, encoding/json
-	// struct matching is not, so {"Status":"error"} was an envelope to one half
-	// and data to the other. JSON is case-sensitive and the host emits
-	// lowercase, so lowercase-only is the rule, applied once.
-	//
-	// The residual ambiguity is narrow and worth stating precisely: only an
-	// object whose "status" is the STRING "error" is indistinguishable from a
-	// host error. A non-string status is data, and any other string status is
-	// success. The envelope sharing a namespace with user data is the real
-	// flaw; changing that is an ABI break.
-	var probe map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(res), &probe); err != nil {
-		return nil // not an object; a bare value is a legitimate result
+	if herr != nil {
+		return fmt.Errorf("torana: state %q: %s: %s", key, hostErrorReason(herr), herr.Message)
 	}
-	rawStatus, hasStatus := probe["status"]
-	if !hasStatus {
-		return nil // an object, but not an envelope
-	}
-
-	var status string
-	if err := json.Unmarshal(rawStatus, &status); err != nil {
-		// "status" is present but not a string, so this is NOT an envelope —
-		// the host's status is always a string. An HTTP-cache-shaped entry
-		// ({"status":200,"body":…}) is an ordinary thing for a plugin to
-		// store, and rejecting it would hand back an error instead of the
-		// caller's own data.
-		return nil
-	}
-	if status != "error" {
-		return nil
-	}
-
-	var message string
-	if raw, ok := probe["message"]; ok {
-		// Best effort: a non-string message is still an error, just an
-		// undescribed one, and the raw envelope below says more than a decode
-		// failure would.
-		_ = json.Unmarshal(raw, &message)
-	}
-	switch message {
-	case "permission denied":
-		return ErrStateUnavailable
-	case "":
-		return fmt.Errorf("torana: host reported an error with no message: %s", res)
-	default:
-		return fmt.Errorf("torana: %s", message)
-	}
-}
-
-func isPermissionDenied(res string) bool {
-	return res == `{"status":"error","message":"permission denied"}`
+	return nil
 }
 
 // Now returns the host's wall-clock time in Unix milliseconds.
@@ -199,14 +156,18 @@ func isPermissionDenied(res string) bool {
 // multiplies the operator's token spend. Torana's determinism test exists to
 // catch exactly this. Use it to decide *whether* to act, never as content.
 func Now() (int64, error) {
-	res, err := hostCallString("env.now", "")
+	raw, herr, err := HostCall("env.now", nil)
 	if err != nil {
 		return 0, err
 	}
-	if res == "" || isPermissionDenied(res) {
-		return 0, errors.New("torana: clock is unavailable (requires env.now permission)")
+	if herr != nil {
+		return 0, fmt.Errorf("torana: clock is unavailable (%s): %s",
+			hostErrorReason(herr), herr.Message)
 	}
-	ms, err := strconv.ParseInt(res, 10, 64)
+	if len(raw) == 0 {
+		return 0, errors.New("torana: clock returned no reading")
+	}
+	ms, err := strconv.ParseInt(string(raw), 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("torana: invalid clock reading: %w", err)
 	}

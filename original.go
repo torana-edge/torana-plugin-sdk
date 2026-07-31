@@ -13,12 +13,17 @@ import (
 // Requires the env.original_request permission grant. Returns ok=false when
 // the grant is missing, the call runs outside a request, or decoding fails.
 func OriginalRequest() (*pbv2.ChatRequest, bool) {
-	res, err := hostCallString("env.original_request", "")
-	if err != nil || res == "" || res == `{"status":"error","message":"permission denied"}` {
+	// ok=false covers every unavailable case deliberately: the caller's only
+	// sensible response to "no original" is to skip whatever needed it, so a
+	// classified error would be ceremony. The framed path still matters — the
+	// byte-exact permission-denied string it used to compare against was a
+	// wire constant that silently broke if the host ever reworded it.
+	raw, herr, err := HostCall("env.original_request", nil)
+	if err != nil || herr != nil || len(raw) == 0 {
 		return nil, false
 	}
 	var req pbv2.ChatRequest
-	if proto.Unmarshal([]byte(res), &req) != nil {
+	if proto.Unmarshal(raw, &req) != nil {
 		return nil, false
 	}
 	return &req, true
@@ -32,9 +37,9 @@ func OriginalRequest() (*pbv2.ChatRequest, bool) {
 // Requires the env.original_response permission grant. Returns ok=false when
 // unavailable.
 func OriginalResponse() ([]byte, bool) {
-	res, err := hostCallString("env.original_response", "")
-	if err != nil || res == "" || res == `{"status":"error","message":"permission denied"}` {
+	raw, herr, err := HostCall("env.original_response", nil)
+	if err != nil || herr != nil || len(raw) == 0 {
 		return nil, false
 	}
-	return []byte(res), true
+	return raw, true
 }
