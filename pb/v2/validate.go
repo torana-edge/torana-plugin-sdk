@@ -201,12 +201,14 @@ func (x *ToolCall) Validate() error {
 	return nil
 }
 
-// validateToolArgumentsJSON requires arguments_json to be either empty (treated
-// as an empty object) or a JSON object. Arrays, scalars, and malformed JSON
-// are refused — the host converts arguments to map[string]any.
+// validateToolArgumentsJSON requires arguments_json to be a non-empty JSON
+// object. Zero-length bytes are not valid JSON and are not an unambiguous
+// empty object — hosts extract absent provider arguments as "{}". Arrays,
+// scalars, and malformed JSON are refused. Keep arguments as raw bytes through
+// host comparison/writeback; do not round-trip through map[string]any.
 func validateToolArgumentsJSON(raw []byte) error {
 	if len(raw) == 0 {
-		return nil
+		return fmt.Errorf("tool call arguments_json must be a non-empty JSON object (use {})")
 	}
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {

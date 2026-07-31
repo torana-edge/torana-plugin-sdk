@@ -242,6 +242,13 @@ func TestReplaceResponseValidatesNestedToolCalls(t *testing.T) {
 			want: "empty name",
 		},
 		{
+			name: "empty arguments json",
+			resp: &v2.ChatResponse{Message: &v2.ResponseMessage{
+				ToolCalls: []*v2.ToolCall{{Id: "c1", Name: "read", ArgumentsJson: nil}},
+			}},
+			want: "non-empty JSON object",
+		},
+		{
 			name: "invalid arguments json",
 			resp: &v2.ChatResponse{Message: &v2.ResponseMessage{
 				ToolCalls: []*v2.ToolCall{{Id: "c1", Name: "read", ArgumentsJson: []byte(`{`)}},

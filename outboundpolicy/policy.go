@@ -412,13 +412,44 @@ type SignatureContentRef struct {
 // Migration B must either reject mutation of signed content while the
 // signature is present, or have the host clear the signature when that
 // content changes. A plugin cannot manufacture a valid provider signature.
+//
+// Domain separates binding reachability from response-field reachability:
+// request-side Message.thinking_signature remains normative after
+// ResponseMessage dropped thinking from the response shape.
 type SignatureBinding struct {
+	Domain         SignatureDomain
 	Message        protoreflect.FullName
 	SignatureField string
 	Content        []SignatureContentRef
 }
 
+// SignatureDomain says which path a binding governs and which inventory
+// Validate uses to check it.
+type SignatureDomain int
+
+const (
+	SignatureDomainUnspecified SignatureDomain = iota
+	// SignatureDomainOutbound pairs with PolicyBoundSignature entries in the
+	// response/stream field registries in this package.
+	SignatureDomainOutbound
+	// SignatureDomainRequest covers ChatRequest Message fields that are not
+	// reachable from ChatResponse after ResponseMessage. Validated against
+	// the request proto, not the outbound field registry.
+	SignatureDomainRequest
+)
+
+func (d SignatureDomain) valid() bool {
+	switch d {
+	case SignatureDomainOutbound, SignatureDomainRequest:
+		return true
+	}
+	return false
+}
+
 func (b SignatureBinding) validateShape() error {
+	if !b.Domain.valid() {
+		return fmt.Errorf("SignatureBinding requires Domain (request or outbound)")
+	}
 	if b.Message == "" || b.SignatureField == "" {
 		return fmt.Errorf("SignatureBinding requires Message and SignatureField")
 	}
@@ -463,6 +494,20 @@ func (b SignatureBinding) validateShape() error {
 
 var signatureBindings = []SignatureBinding{
 	{
+		// Request-side only: ChatRequest.messages still use Message. An
+		// assistant-writing plugin may rewrite historical thinking; the
+		// provider token must clear or the mutation must reject. Not on
+		// ResponseMessage — that shape deliberately omits thinking.
+		Domain:         SignatureDomainRequest,
+		Message:        "torana.v2.Message",
+		SignatureField: "thinking_signature",
+		Content: []SignatureContentRef{
+			{Scope: SignatureScopeSameMessage, Field: "thinking"},
+			{Scope: SignatureScopeSameMessage, Field: "redacted_thinking"},
+		},
+	},
+	{
+		Domain:         SignatureDomainOutbound,
 		Message:        "torana.v2.ToolCall",
 		SignatureField: "signature",
 		Content: []SignatureContentRef{
@@ -474,6 +519,7 @@ var signatureBindings = []SignatureBinding{
 	{
 		// ContentBlockStart{ToolCallRef{id,name,signature}} then
 		// ToolCallDelta{index, arguments_delta...} sharing that block index.
+		Domain:         SignatureDomainOutbound,
 		Message:        "torana.v2.ToolCallRef",
 		SignatureField: "signature",
 		Content: []SignatureContentRef{
@@ -487,6 +533,7 @@ var signatureBindings = []SignatureBinding{
 		// CurrentContentBlock: signature on the same provider part as text/thinking.
 		// TrailingStandalone: Code Assist final thoughtSignature-only part
 		// (see torana-edge gemini stream standalone branch + codeassist-stream-text.sse).
+		Domain:         SignatureDomainOutbound,
 		Message:        "torana.v2.StreamEvent",
 		SignatureField: "signature_delta",
 		Content: []SignatureContentRef{
@@ -739,8 +786,15 @@ func Validate() error {
 		if err := b.validateShape(); err != nil {
 			return err
 		}
-		if err := validateSignatureBindingAgainstProto(b, descs); err != nil {
-			return err
+		switch b.Domain {
+		case SignatureDomainOutbound:
+			if err := validateOutboundSignatureBindingAgainstProto(b, descs); err != nil {
+				return err
+			}
+		case SignatureDomainRequest:
+			if err := validateRequestSignatureBindingAgainstProto(b, descs); err != nil {
+				return err
+			}
 		}
 	}
 	if err := validateBoundSignaturePairing(); err != nil {
@@ -782,6 +836,9 @@ func validateBoundSignaturePairing() error {
 	claimed := map[bindingKey]bool{}
 
 	for _, b := range signatureBindings {
+		if b.Domain != SignatureDomainOutbound {
+			continue
+		}
 		fields, ok := outboundMessageFieldPolicies[b.Message]
 		if !ok {
 			return fmt.Errorf("signature binding %s.%s: message has no field registry",
@@ -929,6 +986,8 @@ func outboundDescriptors() map[protoreflect.FullName]protoreflect.MessageDescrip
 		&pbv2.StreamEvents{},
 		&pbv2.HookResult{},
 		&pbv2.Suppress{},
+		&pbv2.ChatRequest{},
+		&pbv2.Message{},
 		&pbv2.ResponseMessage{},
 		&pbv2.ToolCall{},
 		&pbv2.ToolCallDelta{},
@@ -964,7 +1023,7 @@ func outboundDescriptors() map[protoreflect.FullName]protoreflect.MessageDescrip
 	return out
 }
 
-func validateSignatureBindingAgainstProto(b SignatureBinding, descs map[protoreflect.FullName]protoreflect.MessageDescriptor) error {
+func validateOutboundSignatureBindingAgainstProto(b SignatureBinding, descs map[protoreflect.FullName]protoreflect.MessageDescriptor) error {
 	sigDesc, ok := descs[b.Message]
 	if !ok {
 		return fmt.Errorf("signature message %s unknown to proto inventory", b.Message)
@@ -991,6 +1050,41 @@ func validateSignatureBindingAgainstProto(b SignatureBinding, descs map[protoref
 		if _, ok := outboundMessageFieldPolicies[msgName][c.Field]; !ok {
 			return fmt.Errorf("%s.%s content[%d]: %s.%s missing from field policy registry",
 				b.Message, b.SignatureField, i, msgName, c.Field)
+		}
+	}
+	return nil
+}
+
+// validateRequestSignatureBindingAgainstProto checks request-domain bindings
+// against ChatRequest Message descriptors only. They must not require an
+// outbound field registry — ResponseMessage deliberately dropped those fields.
+func validateRequestSignatureBindingAgainstProto(b SignatureBinding, descs map[protoreflect.FullName]protoreflect.MessageDescriptor) error {
+	if b.Domain != SignatureDomainRequest {
+		return fmt.Errorf("validateRequestSignatureBindingAgainstProto called for domain %v", b.Domain)
+	}
+	sigDesc, ok := descs[b.Message]
+	if !ok {
+		return fmt.Errorf("request signature message %s unknown to proto inventory", b.Message)
+	}
+	if sigDesc.Fields().ByName(protoreflect.Name(b.SignatureField)) == nil {
+		return fmt.Errorf("%s has no field %s", b.Message, b.SignatureField)
+	}
+	if _, ok := outboundMessageFieldPolicies[b.Message]; ok {
+		return fmt.Errorf("request signature binding %s.%s: message must not be in the outbound "+
+			"field registry (response shape must stay free of request-only fields)",
+			b.Message, b.SignatureField)
+	}
+	for i, c := range b.Content {
+		msgName := c.Message
+		if msgName == "" || c.Scope == SignatureScopeSameMessage {
+			msgName = b.Message
+		}
+		desc, ok := descs[msgName]
+		if !ok {
+			return fmt.Errorf("%s.%s content[%d]: message %s unknown", b.Message, b.SignatureField, i, msgName)
+		}
+		if desc.Fields().ByName(protoreflect.Name(c.Field)) == nil {
+			return fmt.Errorf("%s.%s content[%d]: %s has no field %s", b.Message, b.SignatureField, i, msgName, c.Field)
 		}
 	}
 	return nil
@@ -1045,11 +1139,14 @@ func OutboundDelegateTargets(d DelegateKind) ([]protoreflect.FullName, bool) {
 	return out, true
 }
 
-// AllSignatureBindings returns a deep copy of the opaque-signature inventory.
+// AllSignatureBindings returns a deep copy of the opaque-signature inventory
+// across request and outbound domains. Hosts must consume this complete set —
+// response-shape narrowing must not drop request-side bindings.
 func AllSignatureBindings() []SignatureBinding {
 	out := make([]SignatureBinding, len(signatureBindings))
 	for i, b := range signatureBindings {
 		out[i] = SignatureBinding{
+			Domain:         b.Domain,
 			Message:        b.Message,
 			SignatureField: b.SignatureField,
 			Content:        append([]SignatureContentRef(nil), b.Content...),

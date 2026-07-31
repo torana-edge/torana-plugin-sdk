@@ -265,6 +265,26 @@ func TestSignatureBindingsPinned(t *testing.T) {
 		t.Fatalf("Validate: %v", err)
 	}
 
+	msg := byMsg["torana.v2.Message"]
+	if msg.Domain != SignatureDomainRequest || msg.SignatureField != "thinking_signature" {
+		t.Fatal("Message.thinking_signature must remain a request-domain binding")
+	}
+	var sawThinking, sawRedacted bool
+	for _, c := range msg.Content {
+		if c.Field == "thinking" {
+			sawThinking = true
+		}
+		if c.Field == "redacted_thinking" {
+			sawRedacted = true
+		}
+	}
+	if !sawThinking || !sawRedacted {
+		t.Fatal("thinking_signature must cover thinking and redacted_thinking")
+	}
+	if _, ok := OutboundFieldPolicy("torana.v2.Message", "thinking_signature"); ok {
+		t.Fatal("request Message must not re-enter the outbound field registry")
+	}
+
 	ref := byMsg["torana.v2.ToolCallRef"]
 	var sawSameID, sawArgs bool
 	for _, c := range ref.Content {
@@ -314,24 +334,59 @@ func TestSignatureBindingsPinned(t *testing.T) {
 	}
 }
 
+func TestRequestThinkingSignatureMutationClassifies(t *testing.T) {
+	var binding SignatureBinding
+	found := false
+	for _, b := range AllSignatureBindings() {
+		if b.Message == "torana.v2.Message" && b.SignatureField == "thinking_signature" {
+			binding = b
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("response-shape narrowing must not drop Message.thinking_signature binding")
+	}
+	if binding.Domain != SignatureDomainRequest {
+		t.Fatalf("thinking_signature domain = %v, want request", binding.Domain)
+	}
+
+	// Request plugin rewrites assistant thinking but keeps the provider token.
+	if got := ClassifySignatureMutation("tok", "tok", true); got != SignatureStale || got.Allowed() {
+		t.Fatalf("intact token over mutated thinking: got %v allowed=%v", got, got.Allowed())
+	}
+	// Clearing when covered content changed is the prescribed response.
+	if got := ClassifySignatureMutation("tok", "", true); got != SignatureCleared || !got.Allowed() {
+		t.Fatalf("clear after thinking mutation: got %v allowed=%v", got, got.Allowed())
+	}
+	// Dropping the token without changing thinking remains forbidden.
+	if got := ClassifySignatureMutation("tok", "", false); got != SignatureDropped || got.Allowed() {
+		t.Fatalf("drop without content change: got %v allowed=%v", got, got.Allowed())
+	}
+}
+
 func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 	bad := []SignatureBinding{
-		{Message: "torana.v2.ToolCall", SignatureField: "signature"},
+		{Domain: SignatureDomainOutbound, Message: "torana.v2.ToolCall", SignatureField: "signature"},
 		{
-			Message: "torana.v2.ToolCall", SignatureField: "signature",
+			Domain: SignatureDomainOutbound, Message: "torana.v2.ToolCall", SignatureField: "signature",
 			Content: []SignatureContentRef{{Scope: SignatureScopeUnspecified, Field: "name"}},
 		},
 		{
-			Message: "torana.v2.ToolCall", SignatureField: "signature",
+			Domain: SignatureDomainOutbound, Message: "torana.v2.ToolCall", SignatureField: "signature",
 			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Message: "torana.v2.ToolCallRef", Field: "id"}},
 		},
 		{
-			Message: "torana.v2.ToolCall", SignatureField: "signature",
+			Domain: SignatureDomainOutbound, Message: "torana.v2.ToolCall", SignatureField: "signature",
 			Content: []SignatureContentRef{{Scope: SignatureScopeToolCallBlockByIndex, Message: "torana.v2.ToolCallDelta", Field: "arguments_delta"}},
 		},
 		{
-			Message: "torana.v2.StreamEvent", SignatureField: "signature_delta",
+			Domain: SignatureDomainOutbound, Message: "torana.v2.StreamEvent", SignatureField: "signature_delta",
 			Content: []SignatureContentRef{{Scope: SignatureScopeCurrentContentBlock, Field: "text_delta"}},
+		},
+		{ // missing Domain
+			Message: "torana.v2.Message", SignatureField: "thinking_signature",
+			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "thinking"}},
 		},
 	}
 	for i, b := range bad {

@@ -212,6 +212,7 @@ func TestValidateRejectsDuplicateBinding(t *testing.T) {
 
 	// A conflicting duplicate: same field, different signed content.
 	conflicting := SignatureBinding{
+		Domain:         SignatureDomainOutbound,
 		Message:        "torana.v2.ToolCallRef",
 		SignatureField: "signature",
 		Content: []SignatureContentRef{
