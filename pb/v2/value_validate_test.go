@@ -212,3 +212,82 @@ func TestRemainingTypedNilStreamAndBlockVariants(t *testing.T) {
 		})
 	}
 }
+
+func TestReplaceResponseValidatesNestedToolCalls(t *testing.T) {
+	okContent := "hi"
+	ok := &v2.HookResult{Action: &v2.HookResult_ReplaceResponse{
+		ReplaceResponse: &v2.ChatResponse{
+			Message: &v2.ResponseMessage{
+				Content: &okContent,
+				ToolCalls: []*v2.ToolCall{{
+					Id: "c1", Name: "read", ArgumentsJson: []byte(`{"p":1}`),
+				}},
+			},
+		},
+	}}
+	if err := ok.ValidateFor(v2.Hook_HOOK_AFTER_RESPONSE); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		resp *v2.ChatResponse
+		want string
+	}{
+		{
+			name: "empty tool name",
+			resp: &v2.ChatResponse{Message: &v2.ResponseMessage{
+				ToolCalls: []*v2.ToolCall{{Id: "c1", Name: "", ArgumentsJson: []byte(`{}`)}},
+			}},
+			want: "empty name",
+		},
+		{
+			name: "empty arguments json",
+			resp: &v2.ChatResponse{Message: &v2.ResponseMessage{
+				ToolCalls: []*v2.ToolCall{{Id: "c1", Name: "read", ArgumentsJson: nil}},
+			}},
+			want: "non-empty JSON object",
+		},
+		{
+			name: "invalid arguments json",
+			resp: &v2.ChatResponse{Message: &v2.ResponseMessage{
+				ToolCalls: []*v2.ToolCall{{Id: "c1", Name: "read", ArgumentsJson: []byte(`{`)}},
+			}},
+			want: "valid JSON",
+		},
+		{
+			name: "arguments not object",
+			resp: &v2.ChatResponse{Message: &v2.ResponseMessage{
+				ToolCalls: []*v2.ToolCall{{Id: "c1", Name: "read", ArgumentsJson: []byte(`[1]`)}},
+			}},
+			want: "JSON object",
+		},
+		{
+			name: "nil tool call element",
+			resp: &v2.ChatResponse{Message: &v2.ResponseMessage{
+				ToolCalls: []*v2.ToolCall{nil},
+			}},
+			want: "nil",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &v2.HookResult{Action: &v2.HookResult_ReplaceResponse{ReplaceResponse: tc.resp}}
+			err := r.ValidateFor(v2.Hook_HOOK_AFTER_RESPONSE)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestResponseMessageContentPresence(t *testing.T) {
+	empty := ""
+	msg := &v2.ResponseMessage{Content: &empty}
+	if !msg.HasContent() {
+		t.Fatal("empty string with presence must report HasContent")
+	}
+	if (&v2.ResponseMessage{}).HasContent() {
+		t.Fatal("absent content must not report HasContent")
+	}
+}

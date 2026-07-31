@@ -93,7 +93,6 @@ func TestObservedResponseFactsAreHostOwned(t *testing.T) {
 	// prescribed response to changing the content they cover. They carry
 	// PolicyBoundSignature and are asserted separately below.
 	mustBoundSignature := []struct{ msg, field string }{
-		{"torana.v2.Message", "thinking_signature"},
 		{"torana.v2.ToolCall", "signature"},
 		{"torana.v2.ToolCallRef", "signature"},
 		{"torana.v2.StreamEvent", "signature_delta"},
@@ -110,7 +109,7 @@ func TestObservedResponseFactsAreHostOwned(t *testing.T) {
 	}
 
 	mustHost := []struct{ msg, field string }{
-		{"torana.v2.Message", "role"},
+		{"torana.v2.ChatResponse", "finish_reason"},
 		{"torana.v2.MessageStart", "model"},
 		{"torana.v2.StreamEvent", "usage"},
 		{"torana.v2.StreamEvent", "error"},
@@ -190,6 +189,8 @@ func TestFieldPolicyRejectsInvalidStates(t *testing.T) {
 		{"topology with delegate", FieldPolicy{kind: PolicyTopology, section: plugin_sdk.SectionStreamWrite, delegate: DelegateResponse}},
 		{"container with section", FieldPolicy{kind: PolicyContainer, section: plugin_sdk.SectionMessagesAssistant}},
 		{"container with delegate", FieldPolicy{kind: PolicyContainer, delegate: DelegateStream}},
+		{"fixed container with section", FieldPolicy{kind: PolicyFixedContainer, section: plugin_sdk.SectionMessagesAssistant}},
+		{"fixed container with delegate", FieldPolicy{kind: PolicyFixedContainer, delegate: DelegateStream}},
 	}
 	for _, tc := range cases {
 		if err := tc.p.validate(); err == nil {
@@ -202,6 +203,7 @@ func TestFieldPolicyRejectsInvalidStates(t *testing.T) {
 		topologyPolicy(),
 		delegatePolicy(DelegateStream),
 		containerPolicy(),
+		fixedContainerPolicy(),
 	} {
 		if err := p.validate(); err != nil {
 			t.Fatalf("valid policy rejected: %v", err)
@@ -263,6 +265,26 @@ func TestSignatureBindingsPinned(t *testing.T) {
 		t.Fatalf("Validate: %v", err)
 	}
 
+	msg := byMsg["torana.v2.Message"]
+	if msg.Domain != SignatureDomainRequest || msg.SignatureField != "thinking_signature" {
+		t.Fatal("Message.thinking_signature must remain a request-domain binding")
+	}
+	var sawThinking, sawRedacted bool
+	for _, c := range msg.Content {
+		if c.Field == "thinking" {
+			sawThinking = true
+		}
+		if c.Field == "redacted_thinking" {
+			sawRedacted = true
+		}
+	}
+	if !sawThinking || !sawRedacted {
+		t.Fatal("thinking_signature must cover thinking and redacted_thinking")
+	}
+	if _, ok := OutboundFieldPolicy("torana.v2.Message", "thinking_signature"); ok {
+		t.Fatal("request Message must not re-enter the outbound field registry")
+	}
+
 	ref := byMsg["torana.v2.ToolCallRef"]
 	var sawSameID, sawArgs bool
 	for _, c := range ref.Content {
@@ -312,24 +334,59 @@ func TestSignatureBindingsPinned(t *testing.T) {
 	}
 }
 
+func TestRequestThinkingSignatureMutationClassifies(t *testing.T) {
+	var binding SignatureBinding
+	found := false
+	for _, b := range AllSignatureBindings() {
+		if b.Message == "torana.v2.Message" && b.SignatureField == "thinking_signature" {
+			binding = b
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("response-shape narrowing must not drop Message.thinking_signature binding")
+	}
+	if binding.Domain != SignatureDomainRequest {
+		t.Fatalf("thinking_signature domain = %v, want request", binding.Domain)
+	}
+
+	// Request plugin rewrites assistant thinking but keeps the provider token.
+	if got := ClassifySignatureMutation("tok", "tok", true); got != SignatureStale || got.Allowed() {
+		t.Fatalf("intact token over mutated thinking: got %v allowed=%v", got, got.Allowed())
+	}
+	// Clearing when covered content changed is the prescribed response.
+	if got := ClassifySignatureMutation("tok", "", true); got != SignatureCleared || !got.Allowed() {
+		t.Fatalf("clear after thinking mutation: got %v allowed=%v", got, got.Allowed())
+	}
+	// Dropping the token without changing thinking remains forbidden.
+	if got := ClassifySignatureMutation("tok", "", false); got != SignatureDropped || got.Allowed() {
+		t.Fatalf("drop without content change: got %v allowed=%v", got, got.Allowed())
+	}
+}
+
 func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 	bad := []SignatureBinding{
-		{Message: "torana.v2.Message", SignatureField: "thinking_signature"},
+		{Domain: SignatureDomainOutbound, Message: "torana.v2.ToolCall", SignatureField: "signature"},
 		{
-			Message: "torana.v2.Message", SignatureField: "thinking_signature",
-			Content: []SignatureContentRef{{Scope: SignatureScopeUnspecified, Field: "thinking"}},
+			Domain: SignatureDomainOutbound, Message: "torana.v2.ToolCall", SignatureField: "signature",
+			Content: []SignatureContentRef{{Scope: SignatureScopeUnspecified, Field: "name"}},
 		},
 		{
-			Message: "torana.v2.Message", SignatureField: "thinking_signature",
-			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Message: "torana.v2.ToolCall", Field: "id"}},
+			Domain: SignatureDomainOutbound, Message: "torana.v2.ToolCall", SignatureField: "signature",
+			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Message: "torana.v2.ToolCallRef", Field: "id"}},
 		},
 		{
-			Message: "torana.v2.Message", SignatureField: "thinking_signature",
+			Domain: SignatureDomainOutbound, Message: "torana.v2.ToolCall", SignatureField: "signature",
 			Content: []SignatureContentRef{{Scope: SignatureScopeToolCallBlockByIndex, Message: "torana.v2.ToolCallDelta", Field: "arguments_delta"}},
 		},
 		{
-			Message: "torana.v2.StreamEvent", SignatureField: "signature_delta",
+			Domain: SignatureDomainOutbound, Message: "torana.v2.StreamEvent", SignatureField: "signature_delta",
 			Content: []SignatureContentRef{{Scope: SignatureScopeCurrentContentBlock, Field: "text_delta"}},
+		},
+		{ // missing Domain
+			Message: "torana.v2.Message", SignatureField: "thinking_signature",
+			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "thinking"}},
 		},
 	}
 	for i, b := range bad {
@@ -363,6 +420,38 @@ func TestPolicyContainerRejectedOnScalar(t *testing.T) {
 	defer func() { outboundMessageFieldPolicies["torana.v2.ChatResponse"] = old }()
 	if err := Validate(); err == nil {
 		t.Fatal("expected PolicyContainer-on-scalar to fail Validate")
+	}
+}
+
+func TestPolicyFixedContainerRejectedOnSingularMessage(t *testing.T) {
+	old := outboundMessageFieldPolicies["torana.v2.ChatResponse"]
+	bad := map[string]FieldPolicy{}
+	for k, v := range old {
+		bad[k] = v
+	}
+	bad["message"] = fixedContainerPolicy()
+	outboundMessageFieldPolicies["torana.v2.ChatResponse"] = bad
+	defer func() { outboundMessageFieldPolicies["torana.v2.ChatResponse"] = old }()
+	err := Validate()
+	if err == nil {
+		t.Fatal("expected PolicyFixedContainer on singular message to fail Validate")
+	}
+	if !strings.Contains(err.Error(), "repeated") {
+		t.Fatalf("error should mention repeated, got %v", err)
+	}
+}
+
+func TestPolicyFixedContainerRejectedOnScalar(t *testing.T) {
+	old := outboundMessageFieldPolicies["torana.v2.ChatResponse"]
+	bad := map[string]FieldPolicy{}
+	for k, v := range old {
+		bad[k] = v
+	}
+	bad["model"] = fixedContainerPolicy()
+	outboundMessageFieldPolicies["torana.v2.ChatResponse"] = bad
+	defer func() { outboundMessageFieldPolicies["torana.v2.ChatResponse"] = old }()
+	if err := Validate(); err == nil {
+		t.Fatal("expected PolicyFixedContainer-on-scalar to fail Validate")
 	}
 }
 

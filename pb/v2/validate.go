@@ -1,6 +1,9 @@
 package v2
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // Validation for the v2 hook envelopes.
 //
@@ -177,6 +180,82 @@ func (x *ToolCallDelta) Validate() error {
 	}
 	if x.Index < 0 {
 		return fmt.Errorf("tool call delta index %d is negative", x.Index)
+	}
+	return nil
+}
+
+// Validate reports whether a non-streaming tool call is applicable as a
+// replace_response mutation. Empty names and invalid arguments are refused
+// here so the host can apply every accepted writable value without treating
+// "" as "silently ignore."
+func (x *ToolCall) Validate() error {
+	if x == nil {
+		return fmt.Errorf("tool call is nil")
+	}
+	if x.Name == "" {
+		return fmt.Errorf("tool call has an empty name")
+	}
+	if err := validateToolArgumentsJSON(x.ArgumentsJson); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateToolArgumentsJSON requires arguments_json to be a non-empty JSON
+// object. Zero-length bytes are not valid JSON and are not an unambiguous
+// empty object — hosts extract absent provider arguments as "{}". Arrays,
+// scalars, and malformed JSON are refused. Keep arguments as raw bytes through
+// host comparison/writeback; do not round-trip through map[string]any.
+func validateToolArgumentsJSON(raw []byte) error {
+	if len(raw) == 0 {
+		return fmt.Errorf("tool call arguments_json must be a non-empty JSON object (use {})")
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return fmt.Errorf("tool call arguments_json is not valid JSON: %w", err)
+	}
+	if _, ok := v.(map[string]any); !ok {
+		return fmt.Errorf("tool call arguments_json must be a JSON object")
+	}
+	return nil
+}
+
+// HasContent reports whether content presence is set. Absence means the host
+// has no writable text slot; the empty string with presence means an empty
+// writable text part.
+func (x *ResponseMessage) HasContent() bool {
+	return x != nil && x.Content != nil
+}
+
+// Validate reports whether a response message is structurally applicable.
+// Content presence comparisons against an accepted response belong to the
+// host verifier (Migration B); this checks only absolute well-formedness.
+func (x *ResponseMessage) Validate() error {
+	if x == nil {
+		return fmt.Errorf("response message is nil")
+	}
+	for i, tc := range x.ToolCalls {
+		if tc == nil {
+			return fmt.Errorf("response message tool_calls[%d] is nil", i)
+		}
+		if err := tc.Validate(); err != nil {
+			return fmt.Errorf("response message tool_calls[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
+// Validate reports whether a ChatResponse replacement is structurally
+// applicable. Nested ResponseMessage / ToolCall rules apply when message is
+// present; a nil message is allowed (e.g. upstream error with no body).
+func (x *ChatResponse) Validate() error {
+	if x == nil {
+		return fmt.Errorf("chat response is nil")
+	}
+	if x.Message != nil {
+		if err := x.Message.Validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -436,6 +515,11 @@ func (x *HookResult) ValidateFor(hook Hook) error {
 	}
 	if tick, ok := x.Action.(*HookResult_TickOutcome); ok {
 		if err := tick.TickOutcome.Validate(); err != nil {
+			return fmt.Errorf("hook result: %w", err)
+		}
+	}
+	if resp, ok := x.Action.(*HookResult_ReplaceResponse); ok {
+		if err := resp.ReplaceResponse.Validate(); err != nil {
 			return fmt.Errorf("hook result: %w", err)
 		}
 	}

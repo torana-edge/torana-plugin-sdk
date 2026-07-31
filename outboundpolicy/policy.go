@@ -60,14 +60,23 @@ import (
 //   - PolicyContainer: never charge the parent; always recurse. Presence or
 //     oneof-selection change of the container is expressed by treating nested
 //     fields as added/removed, plus topology when the enclosing stream
-//     kind/cardinality/boundaries change.
+//     kind/cardinality/boundaries change. Element count of a repeated
+//     container is NOT constrained — use PolicyFixedContainer when it is.
+//   - PolicyFixedContainer: like PolicyContainer (never charge the parent;
+//     always recurse into children) AND requires equal element count with
+//     positional correspondence: output element N is a mutation of accepted
+//     element N. Adding, removing, or reordering elements rejects. Valid only
+//     on repeated message fields. For elements with no stable provider ID,
+//     positional identity is all the wire can prove.
 //   - PolicySection / PolicyTopology on a message-valued field: if the same
 //     message/oneof variant is present on both sides, recurse and do not
 //     charge the parent; if presence or oneof selection changes, charge the
 //     parent and recursively account for added/removed nested fields.
 //   - PolicyHostOwned on a message: the whole subtree is immutable; any
 //     nested change/remove/add rejects.
-//   - Scalar fields apply their own policy directly.
+//   - Scalar fields apply their own policy directly. Optional scalars with
+//     PolicySection (e.g. ResponseMessage.content): presence is host-owned /
+//     fixed; the value is section-writable only when present on both sides.
 //
 // Registries are package-private. Constructors are package-private. Public
 // accessors return values/clones so importers cannot mutate the authority
@@ -113,8 +122,12 @@ const (
 	PolicyTopology
 	// PolicyContainer marks a message-valued field that never contributes a
 	// grant itself. Migration B always recurses into nested field policies
-	// (see package comment nesting rules).
+	// (see package comment nesting rules). Repeated containers under this
+	// kind may change cardinality; use PolicyFixedContainer when they must not.
 	PolicyContainer
+	// PolicyFixedContainer is PolicyContainer plus fixed repeated cardinality
+	// and positional order. See package comment nesting rules.
+	PolicyFixedContainer
 )
 
 // DelegateKind names the verifier a PolicyDelegate hands off to.
@@ -304,6 +317,10 @@ func containerPolicy() FieldPolicy {
 	return FieldPolicy{kind: PolicyContainer}
 }
 
+func fixedContainerPolicy() FieldPolicy {
+	return FieldPolicy{kind: PolicyFixedContainer}
+}
+
 func (p FieldPolicy) Kind() PolicyKind { return p.kind }
 
 func (p FieldPolicy) IsHostOwned() bool { return p.kind == PolicyHostOwned }
@@ -314,6 +331,10 @@ func (p FieldPolicy) IsHostOwned() bool { return p.kind == PolicyHostOwned }
 func (p FieldPolicy) IsBoundSignature() bool { return p.kind == PolicyBoundSignature }
 
 func (p FieldPolicy) IsContainer() bool { return p.kind == PolicyContainer }
+
+// IsFixedContainer reports whether the field recurses into children under a
+// fixed repeated cardinality and positional-order contract.
+func (p FieldPolicy) IsFixedContainer() bool { return p.kind == PolicyFixedContainer }
 
 // Section returns the content or topology section when Kind is PolicySection
 // or PolicyTopology.
@@ -369,9 +390,9 @@ func (p FieldPolicy) validate() error {
 		if p.delegate != DelegateUnspecified {
 			return fmt.Errorf("PolicyTopology must not set Delegate")
 		}
-	case PolicyContainer:
+	case PolicyContainer, PolicyFixedContainer:
 		if p.section != "" || p.delegate != DelegateUnspecified {
-			return fmt.Errorf("PolicyContainer must not set Section or Delegate")
+			return fmt.Errorf("%v must not set Section or Delegate", p.kind)
 		}
 	default:
 		return fmt.Errorf("unknown PolicyKind %d", p.kind)
@@ -391,13 +412,44 @@ type SignatureContentRef struct {
 // Migration B must either reject mutation of signed content while the
 // signature is present, or have the host clear the signature when that
 // content changes. A plugin cannot manufacture a valid provider signature.
+//
+// Domain separates binding reachability from response-field reachability:
+// request-side Message.thinking_signature remains normative after
+// ResponseMessage dropped thinking from the response shape.
 type SignatureBinding struct {
+	Domain         SignatureDomain
 	Message        protoreflect.FullName
 	SignatureField string
 	Content        []SignatureContentRef
 }
 
+// SignatureDomain says which path a binding governs and which inventory
+// Validate uses to check it.
+type SignatureDomain int
+
+const (
+	SignatureDomainUnspecified SignatureDomain = iota
+	// SignatureDomainOutbound pairs with PolicyBoundSignature entries in the
+	// response/stream field registries in this package.
+	SignatureDomainOutbound
+	// SignatureDomainRequest covers ChatRequest Message fields that are not
+	// reachable from ChatResponse after ResponseMessage. Validated against
+	// the request proto, not the outbound field registry.
+	SignatureDomainRequest
+)
+
+func (d SignatureDomain) valid() bool {
+	switch d {
+	case SignatureDomainOutbound, SignatureDomainRequest:
+		return true
+	}
+	return false
+}
+
 func (b SignatureBinding) validateShape() error {
+	if !b.Domain.valid() {
+		return fmt.Errorf("SignatureBinding requires Domain (request or outbound)")
+	}
 	if b.Message == "" || b.SignatureField == "" {
 		return fmt.Errorf("SignatureBinding requires Message and SignatureField")
 	}
@@ -442,6 +494,11 @@ func (b SignatureBinding) validateShape() error {
 
 var signatureBindings = []SignatureBinding{
 	{
+		// Request-side only: ChatRequest.messages still use Message. An
+		// assistant-writing plugin may rewrite historical thinking; the
+		// provider token must clear or the mutation must reject. Not on
+		// ResponseMessage — that shape deliberately omits thinking.
+		Domain:         SignatureDomainRequest,
 		Message:        "torana.v2.Message",
 		SignatureField: "thinking_signature",
 		Content: []SignatureContentRef{
@@ -450,6 +507,7 @@ var signatureBindings = []SignatureBinding{
 		},
 	},
 	{
+		Domain:         SignatureDomainOutbound,
 		Message:        "torana.v2.ToolCall",
 		SignatureField: "signature",
 		Content: []SignatureContentRef{
@@ -461,6 +519,7 @@ var signatureBindings = []SignatureBinding{
 	{
 		// ContentBlockStart{ToolCallRef{id,name,signature}} then
 		// ToolCallDelta{index, arguments_delta...} sharing that block index.
+		Domain:         SignatureDomainOutbound,
 		Message:        "torana.v2.ToolCallRef",
 		SignatureField: "signature",
 		Content: []SignatureContentRef{
@@ -474,6 +533,7 @@ var signatureBindings = []SignatureBinding{
 		// CurrentContentBlock: signature on the same provider part as text/thinking.
 		// TrailingStandalone: Code Assist final thoughtSignature-only part
 		// (see torana-edge gemini stream standalone branch + codeassist-stream-text.sse).
+		Domain:         SignatureDomainOutbound,
 		Message:        "torana.v2.StreamEvent",
 		SignatureField: "signature_delta",
 		Content: []SignatureContentRef{
@@ -497,7 +557,7 @@ var chatResponseFieldPolicies = map[string]FieldPolicy{
 	"model":                    hostOwnedPolicy(),
 	"id":                       hostOwnedPolicy(),
 	"message":                  containerPolicy(), // recurse; do not auto-charge assistant
-	"finish_reason":            sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	"finish_reason":            hostOwnedPolicy(),
 	"usage":                    hostOwnedPolicy(),
 	"upstream_status":          hostOwnedPolicy(),
 	"duration_ms":              hostOwnedPolicy(),
@@ -505,20 +565,16 @@ var chatResponseFieldPolicies = map[string]FieldPolicy{
 }
 
 var responseMessageFieldPolicies = map[string]FieldPolicy{
-	"role":               hostOwnedPolicy(),
-	"content":            sectionPolicy(plugin_sdk.SectionMessagesAssistant),
-	"content_parts_json": sectionPolicy(plugin_sdk.SectionMessagesAssistant),
-	"thinking":           sectionPolicy(plugin_sdk.SectionMessagesAssistant),
-	"thinking_signature": boundSignaturePolicy(),
-	"redacted_thinking":  sectionPolicy(plugin_sdk.SectionMessagesAssistant),
-	"tool_calls":         sectionPolicy(plugin_sdk.SectionMessagesAssistant),
-	"tool_call_id":       sectionPolicy(plugin_sdk.SectionMessagesAssistant),
-	"tool_name":          sectionPolicy(plugin_sdk.SectionMessagesAssistant),
-	"cache_control_json": sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	// Presence is host-owned/fixed; value is assistant-writable when present
+	// on both sides (see package comment optional-scalar rule).
+	"content": sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	// Fixed cardinality/order: recurse into ToolCall children for in-place
+	// name/arguments edits. Positional identity for anonymous (empty-ID) calls.
+	"tool_calls": fixedContainerPolicy(),
 }
 
 var responseToolCallFieldPolicies = map[string]FieldPolicy{
-	"id":             sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	"id":             hostOwnedPolicy(),
 	"name":           sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 	"arguments_json": sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 	"signature":      boundSignaturePolicy(),
@@ -601,7 +657,7 @@ var hookResultActionPolicies = map[string]FieldPolicy{
 
 var outboundMessageFieldPolicies = map[protoreflect.FullName]map[string]FieldPolicy{
 	"torana.v2.ChatResponse":      chatResponseFieldPolicies,
-	"torana.v2.Message":           responseMessageFieldPolicies,
+	"torana.v2.ResponseMessage":   responseMessageFieldPolicies,
 	"torana.v2.ToolCall":          responseToolCallFieldPolicies,
 	"torana.v2.Usage":             usageFieldPolicies,
 	"torana.v2.StreamEvent":       streamEventVariantPolicies,
@@ -690,6 +746,7 @@ func init() {
 //     registered; every DelegateKind has a target entry and every named target
 //     has a registry;
 //   - PolicyContainer / PolicyDelegate only on message-valued fields;
+//   - PolicyFixedContainer only on repeated message-valued fields;
 //   - signature bindings validate against proto + host-owned signature fields.
 func Validate() error {
 	descs := outboundDescriptors()
@@ -729,9 +786,19 @@ func Validate() error {
 		if err := b.validateShape(); err != nil {
 			return err
 		}
-		if err := validateSignatureBindingAgainstProto(b, descs); err != nil {
-			return err
+		switch b.Domain {
+		case SignatureDomainOutbound:
+			if err := validateOutboundSignatureBindingAgainstProto(b, descs); err != nil {
+				return err
+			}
+		case SignatureDomainRequest:
+			if err := validateRequestSignatureBindingAgainstProto(b, descs); err != nil {
+				return err
+			}
 		}
+	}
+	if err := validateSignatureBindingUniqueness(); err != nil {
+		return err
 	}
 	if err := validateBoundSignaturePairing(); err != nil {
 		return err
@@ -739,8 +806,42 @@ func Validate() error {
 	return nil
 }
 
-// validateBoundSignaturePairing checks that the field registry and the
-// signature-binding table describe the same set of tokens.
+// validateSignatureBindingUniqueness enforces one-token/one-scope across every
+// domain. Keyed by (Domain, Message, SignatureField): the same proto field may
+// appear in different domains only if those are deliberately separate
+// contracts (today Message.thinking_signature is request-only). Duplicate
+// bindings within one key, or duplicate content refs within one binding, leave
+// Migration B without a unique enforcement contract.
+func validateSignatureBindingUniqueness() error {
+	type bindingKey struct {
+		domain SignatureDomain
+		msg    protoreflect.FullName
+		field  string
+	}
+	claimed := map[bindingKey]bool{}
+	for _, b := range signatureBindings {
+		key := bindingKey{b.Domain, b.Message, b.SignatureField}
+		if claimed[key] {
+			return fmt.Errorf("signature binding %s.%s (domain %v) is declared more than once: "+
+				"a token must have exactly one definition of the content it covers",
+				b.Message, b.SignatureField, b.Domain)
+		}
+		claimed[key] = true
+
+		seenRef := map[SignatureContentRef]bool{}
+		for _, c := range b.Content {
+			if seenRef[c] {
+				return fmt.Errorf("signature binding %s.%s lists content ref %s.%s (scope %v) twice",
+					b.Message, b.SignatureField, c.Message, c.Field, c.Scope)
+			}
+			seenRef[c] = true
+		}
+	}
+	return nil
+}
+
+// validateBoundSignaturePairing checks that the outbound field registry and the
+// outbound-domain signature-binding table describe the same set of tokens.
 //
 // The two are separate structures saying related things: the registry says
 // "this field is a bound signature", the binding says "this is the content it
@@ -750,6 +851,10 @@ func Validate() error {
 // field the registry still calls unconditionally host-owned is precisely the
 // contradiction this pairing exists to prevent — the SDK clears the token and
 // a faithful verifier rejects it.
+//
+// Uniqueness of bindings (including request-domain) is
+// validateSignatureBindingUniqueness. This function is outbound-only:
+// request-domain tokens are not in the outbound field registry.
 //
 // Enforcing the correspondence here means the drift cannot survive a host
 // start, rather than being caught by whoever notices the behaviour.
@@ -765,13 +870,11 @@ func validateBoundSignaturePairing() error {
 			}
 		}
 	}
-	type bindingKey struct {
-		msg   protoreflect.FullName
-		field string
-	}
-	claimed := map[bindingKey]bool{}
 
 	for _, b := range signatureBindings {
+		if b.Domain != SignatureDomainOutbound {
+			continue
+		}
 		fields, ok := outboundMessageFieldPolicies[b.Message]
 		if !ok {
 			return fmt.Errorf("signature binding %s.%s: message has no field registry",
@@ -788,30 +891,6 @@ func validateBoundSignaturePairing() error {
 				"unconditionally host-owned policy would reject the SDK's own output",
 				b.Message, b.SignatureField, p.kind)
 		}
-		// One token, one scope. Deleting from the tracking map is idempotent,
-		// so a second binding for the same field used to pass silently and give
-		// that token two different definitions of what it covers — a verifier
-		// iterating the exported bindings would have no unique contract to
-		// implement.
-		key := bindingKey{b.Message, b.SignatureField}
-		if claimed[key] {
-			return fmt.Errorf("signature binding %s.%s is declared more than once: "+
-				"a token must have exactly one definition of the content it covers",
-				b.Message, b.SignatureField)
-		}
-		claimed[key] = true
-
-		// Duplicate content refs within one binding are redundant at best and
-		// contradictory at worst, and make a verifier's scope ambiguous.
-		seenRef := map[SignatureContentRef]bool{}
-		for _, c := range b.Content {
-			if seenRef[c] {
-				return fmt.Errorf("signature binding %s.%s lists content ref %s.%s (scope %v) twice",
-					b.Message, b.SignatureField, c.Message, c.Field, c.Scope)
-			}
-			seenRef[c] = true
-		}
-
 		delete(bound[b.Message], b.SignatureField)
 	}
 	for msg, fields := range bound {
@@ -860,6 +939,13 @@ func validateMessageCompleteness(
 		case PolicyContainer, PolicyDelegate:
 			if fd.Kind() != protoreflect.MessageKind {
 				return fmt.Errorf("%s.%s: %v requires a message field, got %v", name, fname, p.Kind(), fd.Kind())
+			}
+		case PolicyFixedContainer:
+			if fd.Kind() != protoreflect.MessageKind {
+				return fmt.Errorf("%s.%s: PolicyFixedContainer requires a message field, got %v", name, fname, fd.Kind())
+			}
+			if !fd.IsList() {
+				return fmt.Errorf("%s.%s: PolicyFixedContainer requires a repeated message field", name, fname)
 			}
 		}
 
@@ -912,7 +998,9 @@ func outboundDescriptors() map[protoreflect.FullName]protoreflect.MessageDescrip
 		&pbv2.StreamEvents{},
 		&pbv2.HookResult{},
 		&pbv2.Suppress{},
+		&pbv2.ChatRequest{},
 		&pbv2.Message{},
+		&pbv2.ResponseMessage{},
 		&pbv2.ToolCall{},
 		&pbv2.ToolCallDelta{},
 		&pbv2.ToolCallRef{},
@@ -947,7 +1035,7 @@ func outboundDescriptors() map[protoreflect.FullName]protoreflect.MessageDescrip
 	return out
 }
 
-func validateSignatureBindingAgainstProto(b SignatureBinding, descs map[protoreflect.FullName]protoreflect.MessageDescriptor) error {
+func validateOutboundSignatureBindingAgainstProto(b SignatureBinding, descs map[protoreflect.FullName]protoreflect.MessageDescriptor) error {
 	sigDesc, ok := descs[b.Message]
 	if !ok {
 		return fmt.Errorf("signature message %s unknown to proto inventory", b.Message)
@@ -974,6 +1062,41 @@ func validateSignatureBindingAgainstProto(b SignatureBinding, descs map[protoref
 		if _, ok := outboundMessageFieldPolicies[msgName][c.Field]; !ok {
 			return fmt.Errorf("%s.%s content[%d]: %s.%s missing from field policy registry",
 				b.Message, b.SignatureField, i, msgName, c.Field)
+		}
+	}
+	return nil
+}
+
+// validateRequestSignatureBindingAgainstProto checks request-domain bindings
+// against ChatRequest Message descriptors only. They must not require an
+// outbound field registry — ResponseMessage deliberately dropped those fields.
+func validateRequestSignatureBindingAgainstProto(b SignatureBinding, descs map[protoreflect.FullName]protoreflect.MessageDescriptor) error {
+	if b.Domain != SignatureDomainRequest {
+		return fmt.Errorf("validateRequestSignatureBindingAgainstProto called for domain %v", b.Domain)
+	}
+	sigDesc, ok := descs[b.Message]
+	if !ok {
+		return fmt.Errorf("request signature message %s unknown to proto inventory", b.Message)
+	}
+	if sigDesc.Fields().ByName(protoreflect.Name(b.SignatureField)) == nil {
+		return fmt.Errorf("%s has no field %s", b.Message, b.SignatureField)
+	}
+	if _, ok := outboundMessageFieldPolicies[b.Message]; ok {
+		return fmt.Errorf("request signature binding %s.%s: message must not be in the outbound "+
+			"field registry (response shape must stay free of request-only fields)",
+			b.Message, b.SignatureField)
+	}
+	for i, c := range b.Content {
+		msgName := c.Message
+		if msgName == "" || c.Scope == SignatureScopeSameMessage {
+			msgName = b.Message
+		}
+		desc, ok := descs[msgName]
+		if !ok {
+			return fmt.Errorf("%s.%s content[%d]: message %s unknown", b.Message, b.SignatureField, i, msgName)
+		}
+		if desc.Fields().ByName(protoreflect.Name(c.Field)) == nil {
+			return fmt.Errorf("%s.%s content[%d]: %s has no field %s", b.Message, b.SignatureField, i, msgName, c.Field)
 		}
 	}
 	return nil
@@ -1028,11 +1151,14 @@ func OutboundDelegateTargets(d DelegateKind) ([]protoreflect.FullName, bool) {
 	return out, true
 }
 
-// AllSignatureBindings returns a deep copy of the opaque-signature inventory.
+// AllSignatureBindings returns a deep copy of the opaque-signature inventory
+// across request and outbound domains. Hosts must consume this complete set —
+// response-shape narrowing must not drop request-side bindings.
 func AllSignatureBindings() []SignatureBinding {
 	out := make([]SignatureBinding, len(signatureBindings))
 	for i, b := range signatureBindings {
 		out[i] = SignatureBinding{
+			Domain:         b.Domain,
 			Message:        b.Message,
 			SignatureField: b.SignatureField,
 			Content:        append([]SignatureContentRef(nil), b.Content...),
