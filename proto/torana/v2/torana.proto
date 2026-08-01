@@ -68,6 +68,14 @@ message Message {
   // The host must clear it when the covered content changes, or reject the
   // mutation. Empty when the provider sent no trailing signature.
   string trailing_signature = 11;
+  // Provider signature carried ON an ordinary text part (Gemini/Code Assist
+  // thoughtSignature beside non-thought text), covering that part's content.
+  // SignatureScopeSameMessage: binds this message's content field. Distinct
+  // from thinking_signature (thinking blocks) and trailing_signature
+  // (standalone final part). The host must clear it when the covered content
+  // changes, or reject the mutation. Empty when the provider sent no
+  // content-bound signature.
+  string content_signature = 12;
 }
 
 // An assistant's request to invoke a tool.

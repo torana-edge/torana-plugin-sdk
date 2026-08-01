@@ -446,6 +446,83 @@ func (d SignatureDomain) valid() bool {
 	return false
 }
 
+// requestSignatureContracts pins the COMPLETE request-domain binding shapes:
+// token field, its scope, and the exact set of same-message content fields it
+// covers. edge treats Validate() as its startup proof that the policy table is
+// coherent, so a new request token requires deliberately extending this table
+// — never silently widening what a scope name means. Content sets are compared
+// as sets, so declaration order is irrelevant.
+var requestSignatureContracts = []struct {
+	field   string
+	scope   SignatureScope
+	content []string
+}{
+	{field: "thinking_signature", scope: SignatureScopeSameMessage, content: []string{"thinking", "redacted_thinking"}},
+	{field: "content_signature", scope: SignatureScopeSameMessage, content: []string{"content"}},
+	{field: "trailing_signature", scope: SignatureScopeTrailingStandalone, content: []string{"thinking", "content"}},
+}
+
+// validateRequestBindingShape enforces the complete request-domain contract for
+// a torana.v2.Message binding: the token must be one of the pinned fields with
+// its pinned scope, and the content refs must be EXACTLY the pinned set — no
+// missing, extra, duplicated, swapped, wrong-scope, or cross-message refs. A
+// corrupted table must not be able to rebind a token to different content and
+// still pass the host's startup check.
+func validateRequestBindingShape(b SignatureBinding) error {
+	if b.Message != "torana.v2.Message" {
+		return fmt.Errorf("%s.%s: request-domain signatures are pinned to torana.v2.Message",
+			b.Message, b.SignatureField)
+	}
+	var contract *struct {
+		field   string
+		scope   SignatureScope
+		content []string
+	}
+	for i := range requestSignatureContracts {
+		if requestSignatureContracts[i].field == b.SignatureField {
+			contract = &requestSignatureContracts[i]
+			break
+		}
+	}
+	if contract == nil {
+		return fmt.Errorf("%s.%s: request-domain signature field is not pinned", b.Message, b.SignatureField)
+	}
+	got := make([]string, 0, len(b.Content))
+	for i, c := range b.Content {
+		if c.Scope != contract.scope {
+			return fmt.Errorf("%s.%s content[%d]: scope %v does not match the pinned %v",
+				b.Message, b.SignatureField, i, c.Scope, contract.scope)
+		}
+		if c.Message != "" {
+			return fmt.Errorf("%s.%s content[%d]: request-domain refs must stay on the same message",
+				b.Message, b.SignatureField, i)
+		}
+		got = append(got, c.Field)
+	}
+	for i, f := range got {
+		for j := range i {
+			if got[j] == f {
+				return fmt.Errorf("%s.%s content[%d]: duplicate content ref %q", b.Message, b.SignatureField, i, f)
+			}
+		}
+	}
+	if len(got) != len(contract.content) {
+		return fmt.Errorf("%s.%s: signed content set %v does not match the pinned set %v",
+			b.Message, b.SignatureField, got, contract.content)
+	}
+	wanted := make(map[string]bool, len(contract.content))
+	for _, f := range contract.content {
+		wanted[f] = true
+	}
+	for _, f := range got {
+		if !wanted[f] {
+			return fmt.Errorf("%s.%s: signed content set %v does not match the pinned set %v",
+				b.Message, b.SignatureField, got, contract.content)
+		}
+	}
+	return nil
+}
+
 func (b SignatureBinding) validateShape() error {
 	if !b.Domain.valid() {
 		return fmt.Errorf("SignatureBinding requires Domain (request or outbound)")
@@ -469,17 +546,10 @@ func (b SignatureBinding) validateShape() error {
 				return fmt.Errorf("%s.%s content[%d]: SameMessage must not name a different message",
 					b.Message, b.SignatureField, i)
 			}
-			// Request-domain SameMessage is pinned to exactly
-			// torana.v2.Message.thinking_signature (same-message refs), the
-			// mirror of the TrailingStandalone pin: both request-domain tokens
-			// must be proven by the same startup Validate() rather than only a
-			// pinned expectation test. Outbound bindings keep the generic
-			// SameMessage shape (ToolCall.signature, ToolCallRef.signature).
-			if b.Domain == SignatureDomainRequest &&
-				(b.Message != "torana.v2.Message" || b.SignatureField != "thinking_signature") {
-				return fmt.Errorf("%s.%s: request-domain SameMessage only valid on Message.thinking_signature",
-					b.Message, b.SignatureField)
-			}
+			// Outbound bindings keep the generic SameMessage shape
+			// (ToolCall.signature, ToolCallRef.signature). Request-domain
+			// Message bindings are pinned holistically after the loop by
+			// validateRequestBindingShape.
 		case SignatureScopeToolCallBlockByIndex:
 			if b.Message != "torana.v2.ToolCallRef" {
 				return fmt.Errorf("%s.%s: ToolCallBlockByIndex only valid on ToolCallRef.signature",
@@ -500,12 +570,7 @@ func (b SignatureBinding) validateShape() error {
 			}
 		case SignatureScopeTrailingStandalone:
 			// Outbound: the stream signature_delta must name the message whose
-			// text/thinking deltas it covers. Request: the ONLY supported shape
-			// is Message.trailing_signature covering fields of the SAME message.
-			// Pinning the exact message and field stops a corrupted registry
-			// from relabeling an ordinary string field (e.g. content) as the
-			// opaque token — Validate() is the host's startup proof that the
-			// policy table is coherent (edge calls it before serving).
+			// text/thinking deltas it covers.
 			if b.Domain == SignatureDomainOutbound {
 				if b.SignatureField != "signature_delta" {
 					return fmt.Errorf("%s.%s: TrailingStandalone only valid on signature_delta",
@@ -515,16 +580,18 @@ func (b SignatureBinding) validateShape() error {
 					return fmt.Errorf("%s.%s content[%d]: scope %v requires Message",
 						b.Message, b.SignatureField, i, c.Scope)
 				}
-			} else {
-				if b.Message != "torana.v2.Message" || b.SignatureField != "trailing_signature" {
-					return fmt.Errorf("%s.%s: request-domain TrailingStandalone only valid on Message.trailing_signature",
-						b.Message, b.SignatureField)
-				}
-				if c.Message != "" {
-					return fmt.Errorf("%s.%s content[%d]: request-domain TrailingStandalone must not name a different message",
-						b.Message, b.SignatureField, i)
-				}
 			}
+			// Request-domain Message bindings are pinned holistically after
+			// the loop by validateRequestBindingShape.
+		}
+	}
+	// Request-domain torana.v2.Message bindings are pinned holistically: the
+	// token field, its scope, and the exact signed content set must all match
+	// the contract table. Validate() is the host's startup proof, so a
+	// corrupted registry cannot rebind a token to different content.
+	if b.Domain == SignatureDomainRequest {
+		if err := validateRequestBindingShape(b); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -555,6 +622,19 @@ var signatureBindings = []SignatureBinding{
 		Content: []SignatureContentRef{
 			{Scope: SignatureScopeTrailingStandalone, Field: "thinking"},
 			{Scope: SignatureScopeTrailingStandalone, Field: "content"},
+		},
+	},
+	{
+		// A signature carried on an ordinary text part (Gemini/Code Assist
+		// thoughtSignature beside non-thought text) covers that part's content.
+		// Distinct from thinking_signature (thinking blocks) and trailing_signature
+		// (standalone final part). The verifier must classify a content mutation
+		// with the token retained as stale.
+		Domain:         SignatureDomainRequest,
+		Message:        "torana.v2.Message",
+		SignatureField: "content_signature",
+		Content: []SignatureContentRef{
+			{Scope: SignatureScopeSameMessage, Field: "content"},
 		},
 	},
 	{
@@ -851,8 +931,50 @@ func Validate() error {
 	if err := validateSignatureBindingUniqueness(); err != nil {
 		return err
 	}
+	if err := validateRequestBindingCompleteness(signatureBindings); err != nil {
+		return err
+	}
 	if err := validateBoundSignaturePairing(); err != nil {
 		return err
+	}
+	return nil
+}
+
+// validateRequestBindingCompleteness proves every pinned request-domain
+// contract is actually DECLARED. validateRequestBindingShape validates the
+// bindings that exist; this pass proves the required ones are all present —
+// removing a token's binding entirely would otherwise leave Validate() green
+// while the B2 verifier has no definition of what the token covers. The
+// contract-table field set and the declared request-binding field set must be
+// exactly equal: each contract has exactly one binding, no extra request token
+// exists, and neither table may declare a field twice.
+func validateRequestBindingCompleteness(bindings []SignatureBinding) error {
+	declared := map[string]bool{}
+	for _, b := range bindings {
+		if b.Domain != SignatureDomainRequest {
+			continue
+		}
+		if declared[b.SignatureField] {
+			return fmt.Errorf("request-domain binding %s is declared more than once", b.SignatureField)
+		}
+		declared[b.SignatureField] = true
+	}
+	required := map[string]bool{}
+	for i := range requestSignatureContracts {
+		if required[requestSignatureContracts[i].field] {
+			return fmt.Errorf("request signature contract %s is declared more than once", requestSignatureContracts[i].field)
+		}
+		required[requestSignatureContracts[i].field] = true
+	}
+	for field := range required {
+		if !declared[field] {
+			return fmt.Errorf("request-domain binding for %s is missing: nothing defines what content the token covers", field)
+		}
+	}
+	for field := range declared {
+		if !required[field] {
+			return fmt.Errorf("request-domain binding %s is not a pinned contract", field)
+		}
 	}
 	return nil
 }
