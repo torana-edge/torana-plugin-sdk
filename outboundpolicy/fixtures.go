@@ -180,6 +180,22 @@ func SignatureStreamFixtures() []StreamFixture {
 				"tracks a single open block or pools fragments across indexes " +
 				"misattributes block 1's content to block 0.",
 		},
+		{
+			// Twin of the fixture above over the SAME event slices, asking for
+			// block 1. A concurrency-specific failure — recording the first open
+			// tool correctly but ignoring or overwriting the second — can pass
+			// the index-0 fixture; the sequential index-1 fixtures do not
+			// exercise that shape. The concurrent shape must classify BOTH
+			// indexes, and the hard-case test asserts exactly that.
+			Name:     "two concurrently open tool blocks, interleaved deltas, second call intact",
+			Accepted: interleavedToolBlocks(),
+			Returned: interleavedToolBlocks(),
+			Index:    1,
+			Want:     SignatureIntact,
+			Why: "The second concurrently opened tool block must classify intact too: " +
+				"a verifier that tracks a single open block or drops the second " +
+				"start misattributes or loses block 1's signature.",
+		},
 	}
 }
 
