@@ -3,6 +3,8 @@ package plugin_sdk
 import (
 	"encoding/json"
 	"fmt"
+
+	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
 
 // Cache pricing
@@ -96,6 +98,17 @@ func (c CachePricing) Warmable() bool {
 }
 
 // GetCachePricing asks the host about one provider/model pair.
+//
+// Refusal classification:
+//
+//   - PERMISSION_DENIED, NOT_CONFIGURED, UNAVAILABLE — expected advisory
+//     refusals: degrade to CachePricing{Status: "unavailable"} with the reason
+//     token, exactly as if the host had answered "no pricing right now". A
+//     warming plugin must decline rather than assume a default.
+//   - INVALID_ARGUMENT, NOT_FOUND — plugin bugs (malformed query, unknown
+//     command); surfaced as errors so the author fixes the caller instead of
+//     debugging a silent "unavailable".
+//   - INTERNAL and any unknown code — host defects; surfaced as errors.
 func GetCachePricing(provider, model string) (CachePricing, error) {
 	payload, err := json.Marshal(map[string]string{"provider": provider, "model": model})
 	if err != nil {
@@ -106,12 +119,15 @@ func GetCachePricing(provider, model string) (CachePricing, error) {
 		return CachePricing{}, err
 	}
 	if herr != nil {
-		// A refusal is now a framed error arm rather than a JSON string the
-		// caller had to pattern-match. Reported through the existing
-		// unavailable/reason shape so callers do not change: pricing is
-		// advisory, and a plugin without the grant should degrade rather than
-		// fail.
-		return CachePricing{Status: "unavailable", Reason: hostErrorReason(herr)}, nil
+		// Expected advisory refusals degrade; caller/host defects surface.
+		switch herr.Code {
+		case pbv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED,
+			pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
+			pbv2.ErrorCode_ERROR_CODE_UNAVAILABLE:
+			return CachePricing{Status: "unavailable", Reason: hostErrorReason(herr)}, nil
+		default:
+			return CachePricing{}, classifiedRefusal(herr)
+		}
 	}
 	if len(res) == 0 {
 		return CachePricing{Status: "unavailable", Reason: "no_result"}, nil

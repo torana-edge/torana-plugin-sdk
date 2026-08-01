@@ -95,14 +95,18 @@ func TestGetCachePricingHandlesEmptyAndMalformedValues(t *testing.T) {
 	})
 }
 
-// Egress is all-or-nothing for the caller, so every refusal maps to the
-// sentinel — but errors.Is must keep working, or existing callers silently
-// stop recognising it.
-func TestSendRequestRefusalsStayErrEgressUnavailable(t *testing.T) {
+// Egress refusals are classified: the code survives programmatically so a
+// plugin can branch on the class (retry / operator / plugin fix / host
+// defect) without matching prose. Every known code is pinned through
+// errors.As.
+func TestSendRequestRefusalsCarryTheClassifiedCode(t *testing.T) {
 	for _, code := range []pbv2.ErrorCode{
 		pbv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED,
 		pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
 		pbv2.ErrorCode_ERROR_CODE_UNAVAILABLE,
+		pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+		pbv2.ErrorCode_ERROR_CODE_NOT_FOUND,
+		pbv2.ErrorCode_ERROR_CODE_INTERNAL,
 	} {
 		t.Run(code.String(), func(t *testing.T) {
 			h := sdktest.New(t)
@@ -114,8 +118,15 @@ func TestSendRequestRefusalsStayErrEgressUnavailable(t *testing.T) {
 				if err == nil {
 					t.Fatal("a refusal succeeded")
 				}
-				if !errors.Is(err, sdk.ErrEgressUnavailable) {
-					t.Fatalf("errors.Is(ErrEgressUnavailable) is false: %v", err)
+				var refusal *sdk.HostCallRefusalError
+				if !errors.As(err, &refusal) {
+					t.Fatalf("not a *HostCallRefusalError: %v", err)
+				}
+				if refusal.Code != code {
+					t.Fatalf("code = %v, want %v", refusal.Code, code)
+				}
+				if refusal.Reason == "" {
+					t.Fatal("reason token is empty")
 				}
 			})
 		})
@@ -142,20 +153,18 @@ func TestSendRequestDecodesAFramedValue(t *testing.T) {
 	})
 }
 
-// The reason tokens are a stable contract: callers branch on them, so the
-// message text cannot be the thing they read. Every known code is pinned, and
-// an unknown one must not collapse onto a known token.
-func TestHostErrorReasonCoversEveryKnownCode(t *testing.T) {
+// The reason tokens are a stable contract for the DEGRADE path (advisory
+// pricing refusals): callers branch on them, so the message text cannot be the
+// thing they read. Every degrade-eligible code is pinned; the error-path codes
+// are pinned by TestGetCachePricingClassifiesRefusals.
+func TestHostErrorReasonCoversEveryDegradeCode(t *testing.T) {
 	for _, tc := range []struct {
 		code pbv2.ErrorCode
 		want string
 	}{
 		{pbv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "permission_denied"},
-		{pbv2.ErrorCode_ERROR_CODE_NOT_FOUND, "not_found"},
 		{pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED, "not_configured"},
 		{pbv2.ErrorCode_ERROR_CODE_UNAVAILABLE, "unavailable"},
-		{pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid_argument"},
-		{pbv2.ErrorCode_ERROR_CODE_INTERNAL, "internal"},
 	} {
 		t.Run(tc.code.String(), func(t *testing.T) {
 			h2 := sdktest.New(t)
@@ -194,7 +203,10 @@ func TestHostResultErrorRejectsAnUnclassifiedCode(t *testing.T) {
 
 // Round 2 covered empty and malformed values for pricing but not egress. The
 // implementations were already correct; this is the missing coverage.
-func TestSendRequestEmptyValueStaysUnavailable(t *testing.T) {
+// send_request always returns the outcome envelope on success; a success with
+// NO body is a host defect, not "no result" — and must not look like a
+// classified refusal a caller could react to.
+func TestSendRequestEmptyValueIsAProtocolError(t *testing.T) {
 	h := sdktest.New(t)
 	h.StubHostCall("torana_send_request", func(string) (string, error) {
 		return sdktest.HostResultValue(nil), nil
@@ -202,10 +214,118 @@ func TestSendRequestEmptyValueStaysUnavailable(t *testing.T) {
 	h.Run(func() {
 		_, err := sdk.SendRequest(&pbv2.ChatRequest{Model: "m"},
 			sdk.SendRequestOptions{Provider: "anthropic", Path: "/v1/messages"})
-		if !errors.Is(err, sdk.ErrEgressUnavailable) {
-			t.Fatalf("an empty framed value did not stay ErrEgressUnavailable: %v", err)
+		if err == nil {
+			t.Fatal("an empty framed value succeeded")
+		}
+		var refusal *sdk.HostCallRefusalError
+		if errors.As(err, &refusal) {
+			t.Fatalf("an empty body was reported as a classified refusal: %v", err)
 		}
 	})
+}
+
+// A host-built body that is not valid base64 is a protocol/host defect, and
+// must not be silently dropped into a successful result with an empty body.
+func TestSendRequestMalformedBase64BodyIsADecodeError(t *testing.T) {
+	h := sdktest.New(t)
+	h.StubHostCall("torana_send_request", func(string) (string, error) {
+		body, _ := json.Marshal(map[string]any{"http_status": 200, "body": "!!!not-base64!!!"})
+		return sdktest.HostResultValue(body), nil
+	})
+	h.Run(func() {
+		got, err := sdk.SendRequest(&pbv2.ChatRequest{Model: "m"},
+			sdk.SendRequestOptions{Provider: "anthropic", Path: "/v1/messages"})
+		if err == nil {
+			t.Fatalf("a malformed base64 body succeeded with %d bytes", len(got.Body))
+		}
+	})
+}
+
+// The SDK mirrors the host's cheap input checks so an author gets immediate
+// feedback instead of a host refusal — and a malformed request must never
+// cross the boundary at all.
+func TestSendRequestMirrorsInputValidation(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		ms   int
+	}{
+		{"empty path", "", 0},
+		{"relative path", "v1/messages", 0},
+		{"absolute path", "https://attacker.example/v1", 0},
+		{"network-path", "//attacker.example/v1", 0},
+		{"userinfo path", "@attacker.example/v1", 0},
+		{"negative timeout", "/v1/messages", -1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			h := sdktest.New(t)
+			h.StubHostCall("torana_send_request", func(string) (string, error) {
+				called = true
+				return sdktest.HostResultValue(nil), nil
+			})
+			h.Run(func() {
+				_, err := sdk.SendRequest(&pbv2.ChatRequest{Model: "m"},
+					sdk.SendRequestOptions{Provider: "anthropic", Path: tc.path, TimeoutMS: tc.ms})
+				if err == nil {
+					t.Fatal("an invalid option set was accepted")
+				}
+				if called {
+					t.Fatal("an invalid option set crossed the host boundary")
+				}
+			})
+		})
+	}
+}
+
+// Pricing degrades for expected advisory refusals but surfaces caller and host
+// defects as errors — a plugin bug must not hide as an ordinary "unavailable".
+func TestGetCachePricingClassifiesRefusals(t *testing.T) {
+	degrade := []pbv2.ErrorCode{
+		pbv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED,
+		pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
+		pbv2.ErrorCode_ERROR_CODE_UNAVAILABLE,
+	}
+	for _, code := range degrade {
+		t.Run("degrades/"+code.String(), func(t *testing.T) {
+			h := sdktest.New(t)
+			h.StubHostCall("torana_cache_pricing", func(string) (string, error) {
+				return sdktest.HostResultError(code, "x"), nil
+			})
+			h.Run(func() {
+				got, err := sdk.GetCachePricing("p", "m")
+				if err != nil {
+					t.Fatalf("an advisory refusal errored: %v", err)
+				}
+				if got.Status != "unavailable" || got.Reason == "" {
+					t.Fatalf("status=%q reason=%q, want unavailable with a reason", got.Status, got.Reason)
+				}
+			})
+		})
+	}
+	for _, code := range []pbv2.ErrorCode{
+		pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+		pbv2.ErrorCode_ERROR_CODE_NOT_FOUND,
+		pbv2.ErrorCode_ERROR_CODE_INTERNAL,
+	} {
+		t.Run("errors/"+code.String(), func(t *testing.T) {
+			h := sdktest.New(t)
+			h.StubHostCall("torana_cache_pricing", func(string) (string, error) {
+				return sdktest.HostResultError(code, "x"), nil
+			})
+			h.Run(func() {
+				_, err := sdk.GetCachePricing("p", "m")
+				if err == nil {
+					t.Fatalf("a %v refusal degraded instead of erroring", code)
+				}
+				var refusal *sdk.HostCallRefusalError
+				if !errors.As(err, &refusal) || refusal.Code != code {
+					t.Fatalf("err=%v, want a %v refusal", err, code)
+				}
+			})
+		})
+	}
 }
 
 func TestSendRequestMalformedValueIsADecodeError(t *testing.T) {
@@ -219,9 +339,10 @@ func TestSendRequestMalformedValueIsADecodeError(t *testing.T) {
 		if err == nil {
 			t.Fatal("a malformed egress body was accepted")
 		}
-		if errors.Is(err, sdk.ErrEgressUnavailable) {
-			t.Fatal("a malformed body was reported as unavailable; " +
-				"a caller would retry a different provider instead of fixing the host")
+		var refusal *sdk.HostCallRefusalError
+		if errors.As(err, &refusal) {
+			t.Fatal("a malformed body was reported as a classified refusal; " +
+				"a caller would react to the wrong class")
 		}
 	})
 }
