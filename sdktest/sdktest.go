@@ -664,8 +664,6 @@ func (h *Harness) builtin(cmd, args string) string {
 
 	// Unconfigured-host answers, matching runtime.go exactly. Stub these when
 	// a test needs them to succeed.
-	case "torana_send_request":
-		return `{"status":"error","message":"plugin egress is not configured"}`
 	case "torana_cache_pricing":
 		return `{"status":"unavailable","reason":"pricing_unconfigured"}`
 	case "torana_evaluate_compaction":

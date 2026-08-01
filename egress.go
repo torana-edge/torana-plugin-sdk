@@ -3,8 +3,9 @@ package plugin_sdk
 import (
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 
 	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 	"google.golang.org/protobuf/proto"
@@ -41,9 +42,20 @@ import (
 // providers and silently fail for Bedrock's :invoke or Code Assist's
 // :generateContent.
 
-// ErrEgressUnavailable means the host refused the call — no budget configured,
-// no permission granted, or egress disabled entirely.
-var ErrEgressUnavailable = errors.New("torana: plugin egress is not available")
+// Refusal classification for SendRequest:
+//
+//   - PERMISSION_DENIED  — operator: the manifest lacks env.host_call.torana_send_request.
+//   - NOT_CONFIGURED     — operator: no budget sized for this plugin, the provider
+//     is not configured, or egress is disabled. Fix the configuration.
+//   - UNAVAILABLE        — retry later: an existing budget is exhausted (rate or
+//     token window) or a transport attempt failed.
+//   - INVALID_ARGUMENT   — plugin: the request, path, or options were malformed;
+//     retrying cannot help.
+//   - NOT_FOUND          — plugin: the named command/provider does not exist.
+//   - INTERNAL           — host defect: report it.
+//
+// Match with errors.As against *HostCallRefusalError; the Code field is the
+// classification, Reason is a stable token for logs, Message is for humans.
 
 // EgressUsage is what the provider reported for a plugin-originated request.
 type EgressUsage struct {
@@ -54,9 +66,13 @@ type EgressUsage struct {
 }
 
 // EgressResult is one plugin-originated request's outcome.
+//
+// It carries no status channel: a call that returns without error reached the
+// provider. A reached-but-refused provider is reported through HTTPStatus, not
+// a status field — SendRequest still returns an error for it, but the result
+// records the provider's actual status so a caller can tell a refusal apart
+// from a completed request.
 type EgressResult struct {
-	Status     string       `json:"status"`
-	Message    string       `json:"message,omitempty"`
 	HTTPStatus int          `json:"http_status,omitempty"`
 	Body       []byte       `json:"-"`
 	Usage      *EgressUsage `json:"usage,omitempty"`
@@ -97,8 +113,11 @@ func SendRequest(req *pbv2.ChatRequest, opts SendRequestOptions) (EgressResult, 
 	if opts.Provider == "" {
 		return EgressResult{}, fmt.Errorf("torana: provider is required")
 	}
-	if opts.Path == "" {
-		return EgressResult{}, fmt.Errorf("torana: path is required — Torana does not synthesize provider paths")
+	if err := validateEgressPath(opts.Path); err != nil {
+		return EgressResult{}, err
+	}
+	if opts.TimeoutMS < 0 {
+		return EgressResult{}, fmt.Errorf("torana: timeout_ms must not be negative")
 	}
 
 	raw, err := proto.Marshal(req)
@@ -120,14 +139,15 @@ func SendRequest(req *pbv2.ChatRequest, opts SendRequestOptions) (EgressResult, 
 		return EgressResult{}, err
 	}
 	if herr != nil {
-		// Egress is all-or-nothing for the caller, so every refusal maps to
-		// the existing sentinel. The code is wrapped in so the reason is not
-		// lost: a missing grant and an unconfigured backend read identically
-		// otherwise, and they need different fixes.
-		return EgressResult{}, fmt.Errorf("%w (%s)", ErrEgressUnavailable, hostErrorReason(herr))
+		// The classification survives programmatically: the caller can branch
+		// on the code without matching prose.
+		return EgressResult{}, classifiedRefusal(herr)
 	}
 	if len(res) == 0 {
-		return EgressResult{}, ErrEgressUnavailable
+		// send_request always returns the outcome envelope on success and a
+		// framed refusal on failure; a success with no body is a host defect,
+		// not "no result".
+		return EgressResult{}, fmt.Errorf("torana: host returned no egress result")
 	}
 
 	var envelope struct {
@@ -139,17 +159,19 @@ func SendRequest(req *pbv2.ChatRequest, opts SendRequestOptions) (EgressResult, 
 	}
 	out := envelope.EgressResult
 	if envelope.Body != "" {
-		if decoded, err := base64.StdEncoding.DecodeString(envelope.Body); err == nil {
-			out.Body = decoded
+		decoded, err := base64.StdEncoding.DecodeString(envelope.Body)
+		if err != nil {
+			// A host-built body that is not valid base64 is a protocol/host
+			// defect, not an absent body.
+			return EgressResult{}, fmt.Errorf("torana: decode egress body: %w", err)
 		}
+		out.Body = decoded
 	}
-	if out.Status == "error" {
-		return out, fmt.Errorf("torana: %s", out.Message)
-	}
-	// A reached-but-refused provider is a failure, not a success. The host
-	// reports transport success separately from what the provider said, and a
-	// caller that only checked err would count a 401 as a completed request —
-	// burning its budget while achieving nothing and reporting that it worked.
+	// A reached-but-refused provider is a failure, not a success, reported
+	// through HTTPStatus: the host returns transport-level refusals as host
+	// errors, and a caller that only checked err would count a 401 as a
+	// completed request — burning its budget while achieving nothing and
+	// reporting that it worked.
 	//
 	// The most common cause is a provider with no credential of its own: on the
 	// normal request path Torana forwards the caller's, but a plugin-originated
@@ -159,6 +181,41 @@ func SendRequest(req *pbv2.ChatRequest, opts SendRequestOptions) (EgressResult, 
 			opts.Provider, out.HTTPStatus, credentialHint(out.HTTPStatus))
 	}
 	return out, nil
+}
+
+// validateEgressPath enforces the guest path contract locally so an author
+// gets immediate feedback instead of a host refusal. This predicate MUST stay
+// semantically identical to the host's authoritative check
+// (torana-edge internal/proxy/egress.go, the guest path contract block) — both
+// sides are pinned by the same adversarial matrix, sdktest.EgressPathCases.
+//
+// Contract: the path must be a root-relative request URI — no scheme, no
+// authority, no userinfo, no opaque form, no fragment, and no leading "//"
+// (network-path reference) — so the request stays on the configured provider's
+// origin. ParseRequestURI is used deliberately: it rejects fragments and other
+// non-request-URI forms that url.Parse would accept.
+func validateEgressPath(path string) error {
+	if path == "" {
+		return fmt.Errorf("torana: path is required — Torana does not synthesize provider paths")
+	}
+	if !strings.HasPrefix(path, "/") {
+		return fmt.Errorf("torana: path must be root-relative, got %q", path)
+	}
+	u, err := url.ParseRequestURI(path)
+	if err != nil {
+		return fmt.Errorf("torana: invalid path %q: %v", path, err)
+	}
+	// A path beginning with "//" is a network-path reference in URI syntax
+	// (ParseRequestURI folds it into the path); reject it outright so the
+	// authority can never be ambiguous, along with absolute forms, opaque
+	// forms, and userinfo.
+	// ParseRequestURI folds a raw '#' into the path rather than parsing it as a
+	// fragment, so reject fragments on the raw input; a real '#' in a path
+	// must be %23-encoded.
+	if strings.Contains(path, "#") || u.Scheme != "" || u.Host != "" || u.User != nil || u.Opaque != "" || strings.HasPrefix(u.Path, "//") {
+		return fmt.Errorf("torana: path must stay on the configured provider origin, got %q", path)
+	}
+	return nil
 }
 
 func credentialHint(status int) string {
