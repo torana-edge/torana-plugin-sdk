@@ -3044,12 +3044,6 @@ func (x *StateDeleteArgs) GetKey() string {
 // Collapsing them recreates the v1 ambiguity this ABI removes: a plugin could
 // not tell "nothing stored" from "I stored nothing", so a cached or buffered
 // empty string was unusable.
-//
-// MIGRATION B DEPENDENCY: torana-edge main deletes the key when metaSet is
-// called with "", and ignores the presence boolean on cache reads. The v2
-// dispatcher must preserve an explicitly empty value and return NOT_FOUND only
-// when presence is false. Do not let the typed branch inherit the v1 helpers'
-// semantics.
 type MetaGetArgs struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Key within this plugin's request-scoped namespace. Must be non-empty.
