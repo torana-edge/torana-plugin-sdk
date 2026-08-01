@@ -511,13 +511,87 @@ func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 			Content: []SignatureContentRef{{Scope: SignatureScopeTrailingStandalone, Field: "name"}},
 		},
 		{
-			Domain: SignatureDomainRequest, Message: "torana.v2.Message", SignatureField: "trailing_signature",
+			Domain: SignatureDomainRequest, Message: "torana.v2.ToolCall", SignatureField: "trailing_signature",
 			Content: []SignatureContentRef{{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.ToolCall", Field: "name"}},
+		},
+		// The complete request-domain contracts are pinned, not just the field
+		// allowlist: rebinding a token to different content, swapping the
+		// thinking/content pair, changing scope, dropping or duplicating a
+		// covered field, or naming a different message all fail Validate()'s
+		// shape check — edge startup must not report a coherent table when the
+		// verifier would misclassify content changes as intact.
+		{
+			Domain: SignatureDomainRequest, Message: "torana.v2.Message", SignatureField: "content_signature",
+			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "thinking"}},
+		},
+		{ // swapped thinking/content pair: both field names individually valid
+			Domain: SignatureDomainRequest, Message: "torana.v2.Message", SignatureField: "thinking_signature",
+			Content: []SignatureContentRef{
+				{Scope: SignatureScopeSameMessage, Field: "content"},
+				{Scope: SignatureScopeSameMessage, Field: "redacted_thinking"},
+			},
+		},
+		{ // swapped pair, other side
+			Domain: SignatureDomainRequest, Message: "torana.v2.Message", SignatureField: "content_signature",
+			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "content"},
+				{Scope: SignatureScopeSameMessage, Field: "thinking"}},
+		},
+		{ // wrong scope for the token
+			Domain: SignatureDomainRequest, Message: "torana.v2.Message", SignatureField: "trailing_signature",
+			Content: []SignatureContentRef{
+				{Scope: SignatureScopeSameMessage, Field: "thinking"},
+				{Scope: SignatureScopeSameMessage, Field: "content"},
+			},
+		},
+		{ // partial trailing set (missing content)
+			Domain: SignatureDomainRequest, Message: "torana.v2.Message", SignatureField: "trailing_signature",
+			Content: []SignatureContentRef{{Scope: SignatureScopeTrailingStandalone, Field: "thinking"}},
+		},
+		{ // duplicated covered field
+			Domain: SignatureDomainRequest, Message: "torana.v2.Message", SignatureField: "content_signature",
+			Content: []SignatureContentRef{
+				{Scope: SignatureScopeSameMessage, Field: "content"},
+				{Scope: SignatureScopeSameMessage, Field: "content"},
+			},
+		},
+		{ // cross-message ref on a request binding
+			Domain: SignatureDomainRequest, Message: "torana.v2.Message", SignatureField: "trailing_signature",
+			Content: []SignatureContentRef{
+				{Scope: SignatureScopeTrailingStandalone, Field: "thinking"},
+				{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.ToolCall", Field: "name"},
+			},
 		},
 	}
 	for i, b := range bad {
 		if err := b.validateShape(); err == nil {
 			t.Errorf("case %d: expected shape error: %+v", i, b)
+		}
+	}
+}
+
+// The pinned content sets compare as SETS: declaration order is irrelevant, so
+// a registry that lists the same covered fields in a different order is still
+// the same contract.
+func TestRequestBindingShapeOrderIndependent(t *testing.T) {
+	good := []SignatureBinding{
+		{
+			Domain: SignatureDomainRequest, Message: "torana.v2.Message", SignatureField: "thinking_signature",
+			Content: []SignatureContentRef{
+				{Scope: SignatureScopeSameMessage, Field: "redacted_thinking"},
+				{Scope: SignatureScopeSameMessage, Field: "thinking"},
+			},
+		},
+		{
+			Domain: SignatureDomainRequest, Message: "torana.v2.Message", SignatureField: "trailing_signature",
+			Content: []SignatureContentRef{
+				{Scope: SignatureScopeTrailingStandalone, Field: "content"},
+				{Scope: SignatureScopeTrailingStandalone, Field: "thinking"},
+			},
+		},
+	}
+	for i, b := range good {
+		if err := b.validateShape(); err != nil {
+			t.Errorf("case %d: reordered refs must pass: %v", i, err)
 		}
 	}
 }
