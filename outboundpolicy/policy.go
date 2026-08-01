@@ -470,14 +470,16 @@ func (b SignatureBinding) validateShape() error {
 					b.Message, b.SignatureField, i)
 			}
 			// Request-domain SameMessage is pinned to exactly
-			// torana.v2.Message.thinking_signature (same-message refs), the
-			// mirror of the TrailingStandalone pin: both request-domain tokens
-			// must be proven by the same startup Validate() rather than only a
-			// pinned expectation test. Outbound bindings keep the generic
-			// SameMessage shape (ToolCall.signature, ToolCallRef.signature).
+			// torana.v2.Message.thinking_signature and Message.content_signature
+			// (same-message refs), the mirror of the TrailingStandalone pin: all
+			// request-domain tokens must be proven by the same startup
+			// Validate() rather than only a pinned expectation test. Outbound
+			// bindings keep the generic SameMessage shape (ToolCall.signature,
+			// ToolCallRef.signature).
 			if b.Domain == SignatureDomainRequest &&
-				(b.Message != "torana.v2.Message" || b.SignatureField != "thinking_signature") {
-				return fmt.Errorf("%s.%s: request-domain SameMessage only valid on Message.thinking_signature",
+				(b.Message != "torana.v2.Message" ||
+					(b.SignatureField != "thinking_signature" && b.SignatureField != "content_signature")) {
+				return fmt.Errorf("%s.%s: request-domain SameMessage only valid on Message.thinking_signature or Message.content_signature",
 					b.Message, b.SignatureField)
 			}
 		case SignatureScopeToolCallBlockByIndex:
@@ -555,6 +557,19 @@ var signatureBindings = []SignatureBinding{
 		Content: []SignatureContentRef{
 			{Scope: SignatureScopeTrailingStandalone, Field: "thinking"},
 			{Scope: SignatureScopeTrailingStandalone, Field: "content"},
+		},
+	},
+	{
+		// A signature carried on an ordinary text part (Gemini/Code Assist
+		// thoughtSignature beside non-thought text) covers that part's content.
+		// Distinct from thinking_signature (thinking blocks) and trailing_signature
+		// (standalone final part). The verifier must classify a content mutation
+		// with the token retained as stale.
+		Domain:         SignatureDomainRequest,
+		Message:        "torana.v2.Message",
+		SignatureField: "content_signature",
+		Content: []SignatureContentRef{
+			{Scope: SignatureScopeSameMessage, Field: "content"},
 		},
 	},
 	{

@@ -1033,3 +1033,47 @@ func TestMessageTrailingSignatureRoundTrip(t *testing.T) {
 		t.Fatal("absent trailing_signature must unmarshal empty")
 	}
 }
+
+// Message.content_signature (field 12) must survive a protobuf round trip.
+// The request adapter preserves Gemini/Code Assist thoughtSignature carried on
+// an ordinary text part as its own Message field, so a plugin must read it back
+// unchanged after any byte chaining across the plugin boundary.
+func TestMessageContentSignatureRoundTrip(t *testing.T) {
+	in := &v2.Message{
+		Role:             "assistant",
+		Content:          "done",
+		ContentSignature: "csig",
+	}
+	raw, err := proto.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Pin the wire number: field 12, wire type 2 = 0x62, then length + value.
+	if !bytes.Contains(raw, []byte{0x62, 0x04, 'c', 's', 'i', 'g'}) {
+		t.Fatalf("content_signature must marshal as field 12 (got %x)", raw)
+	}
+
+	var out v2.Message
+	if err := proto.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.ContentSignature != "csig" {
+		t.Fatalf("content_signature lost in round trip: %q", out.ContentSignature)
+	}
+	if !proto.Equal(in, &out) {
+		t.Fatalf("round trip mismatch: %+v vs %+v", in, &out)
+	}
+
+	// Absent on the wire stays absent after unmarshal.
+	trivial, err := proto.Marshal(&v2.Message{Content: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var absent v2.Message
+	if err := proto.Unmarshal(trivial, &absent); err != nil {
+		t.Fatal(err)
+	}
+	if absent.ContentSignature != "" {
+		t.Fatal("absent content_signature must unmarshal empty")
+	}
+}

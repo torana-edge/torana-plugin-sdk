@@ -311,6 +311,21 @@ func TestSignatureBindingsPinned(t *testing.T) {
 		t.Fatal("request Message must not re-enter the outbound field registry")
 	}
 
+	cs := byMsg["torana.v2.Message/content_signature"]
+	if cs.Domain != SignatureDomainRequest || cs.SignatureField != "content_signature" {
+		t.Fatal("Message.content_signature must remain a request-domain binding")
+	}
+	if len(cs.Content) != 1 {
+		t.Fatalf("content_signature must cover exactly one field, got %d", len(cs.Content))
+	}
+	c := cs.Content[0]
+	if c.Scope != SignatureScopeSameMessage || c.Message != "" || c.Field != "content" {
+		t.Fatalf("content_signature must SameMessage-bind content, got %+v", c)
+	}
+	if _, ok := OutboundFieldPolicy("torana.v2.Message", "content_signature"); ok {
+		t.Fatal("request Message must not re-enter the outbound field registry")
+	}
+
 	ref := byMsg["torana.v2.ToolCallRef/signature"]
 	var sawSameID, sawArgs bool
 	for _, c := range ref.Content {
@@ -391,6 +406,54 @@ func TestRequestThinkingSignatureMutationClassifies(t *testing.T) {
 	}
 }
 
+// Finding-1 regression: a request plugin that rewrites Message.content while
+// keeping content_signature must classify as stale. This is the binding the
+// verifier computes boundContentChanged over — it iterates the binding's
+// declared content refs, so the assertion that content_signature declares
+// SameMessage/content is what makes the classification provably the verifier's.
+func TestRequestContentSignatureMutationClassifies(t *testing.T) {
+	var binding SignatureBinding
+	found := false
+	for _, b := range AllSignatureBindings() {
+		if b.Message == "torana.v2.Message" && b.SignatureField == "content_signature" {
+			binding = b
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("request-domain Message.content_signature binding missing")
+	}
+	if binding.Domain != SignatureDomainRequest {
+		t.Fatalf("content_signature domain = %v, want request", binding.Domain)
+	}
+
+	// The verifier's boundContentChanged is computed over the binding's declared
+	// content refs; for content_signature that must be exactly Message.content.
+	if len(binding.Content) != 1 {
+		t.Fatalf("content_signature must declare exactly one content ref, got %d", len(binding.Content))
+	}
+	ref := binding.Content[0]
+	if ref.Scope != SignatureScopeSameMessage || ref.Message != "" || ref.Field != "content" {
+		t.Fatalf("content_signature must SameMessage-bind content, got %+v", ref)
+	}
+
+	// Request plugin rewrites Message.content but keeps the provider token: the
+	// stale case — a valid-looking provider signature over content the provider
+	// never signed — and it must reject.
+	if got := ClassifySignatureMutation("tok", "tok", true); got != SignatureStale || got.Allowed() {
+		t.Fatalf("intact token over mutated content: got %v allowed=%v", got, got.Allowed())
+	}
+	// Clearing when covered content changed is the prescribed response.
+	if got := ClassifySignatureMutation("tok", "", true); got != SignatureCleared || !got.Allowed() {
+		t.Fatalf("clear after content mutation: got %v allowed=%v", got, got.Allowed())
+	}
+	// Dropping the token without changing content remains forbidden.
+	if got := ClassifySignatureMutation("tok", "", false); got != SignatureDropped || got.Allowed() {
+		t.Fatalf("drop without content change: got %v allowed=%v", got, got.Allowed())
+	}
+}
+
 func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 	bad := []SignatureBinding{
 		{Domain: SignatureDomainOutbound, Message: "torana.v2.ToolCall", SignatureField: "signature"},
@@ -415,9 +478,10 @@ func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "thinking"}},
 		},
 		// Request-domain SameMessage is pinned to exactly
-		// torana.v2.Message.thinking_signature: a corrupted registry must not
-		// be able to relabel an ordinary string field (content) as the opaque
-		// thinking token and still pass the host's startup Validate() check.
+		// torana.v2.Message.thinking_signature and Message.content_signature: a
+		// corrupted registry must not be able to relabel an ordinary string
+		// field (content) as the opaque thinking token and still pass the
+		// host's startup Validate() check.
 		{
 			Domain: SignatureDomainRequest, Message: "torana.v2.Message", SignatureField: "content",
 			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "thinking"}},
@@ -425,6 +489,14 @@ func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 		{
 			Domain: SignatureDomainRequest, Message: "torana.v2.ToolCall", SignatureField: "thinking_signature",
 			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "name"}},
+		},
+		// The content_signature slot widens the pin, not the field set: a third
+		// relabeled ordinary field (role) must still fail shape validation even
+		// though its covered field (content) is the very field content_signature
+		// is supposed to bind.
+		{
+			Domain: SignatureDomainRequest, Message: "torana.v2.Message", SignatureField: "role",
+			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "content"}},
 		},
 		// Request-domain TrailingStandalone is pinned to exactly
 		// torana.v2.Message.trailing_signature: a corrupted registry must not

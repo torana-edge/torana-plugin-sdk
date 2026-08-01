@@ -216,8 +216,16 @@ type Message struct {
 	// The host must clear it when the covered content changes, or reject the
 	// mutation. Empty when the provider sent no trailing signature.
 	TrailingSignature string `protobuf:"bytes,11,opt,name=trailing_signature,json=trailingSignature,proto3" json:"trailing_signature,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Provider signature carried ON an ordinary text part (Gemini/Code Assist
+	// thoughtSignature beside non-thought text), covering that part's content.
+	// SignatureScopeSameMessage: binds this message's content field. Distinct
+	// from thinking_signature (thinking blocks) and trailing_signature
+	// (standalone final part). The host must clear it when the covered content
+	// changes, or reject the mutation. Empty when the provider sent no
+	// content-bound signature.
+	ContentSignature string `protobuf:"bytes,12,opt,name=content_signature,json=contentSignature,proto3" json:"content_signature,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *Message) Reset() {
@@ -323,6 +331,13 @@ func (x *Message) GetCacheControlJson() []byte {
 func (x *Message) GetTrailingSignature() string {
 	if x != nil {
 		return x.TrailingSignature
+	}
+	return ""
+}
+
+func (x *Message) GetContentSignature() string {
+	if x != nil {
+		return x.ContentSignature
 	}
 	return ""
 }
@@ -3358,7 +3373,7 @@ var File_proto_torana_v2_torana_proto protoreflect.FileDescriptor
 
 const file_proto_torana_v2_torana_proto_rawDesc = "" +
 	"\n" +
-	"\x1cproto/torana/v2/torana.proto\x12\ttorana.v2\"\xad\x03\n" +
+	"\x1cproto/torana/v2/torana.proto\x12\ttorana.v2\"\xda\x03\n" +
 	"\aMessage\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\tR\acontent\x12,\n" +
@@ -3373,7 +3388,8 @@ const file_proto_torana_v2_torana_proto_rawDesc = "" +
 	"\ttool_name\x18\t \x01(\tR\btoolName\x12,\n" +
 	"\x12cache_control_json\x18\n" +
 	" \x01(\fR\x10cacheControlJson\x12-\n" +
-	"\x12trailing_signature\x18\v \x01(\tR\x11trailingSignature\"s\n" +
+	"\x12trailing_signature\x18\v \x01(\tR\x11trailingSignature\x12+\n" +
+	"\x11content_signature\x18\f \x01(\tR\x10contentSignature\"s\n" +
 	"\bToolCall\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12%\n" +
