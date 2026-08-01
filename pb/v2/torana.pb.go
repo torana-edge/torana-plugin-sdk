@@ -209,8 +209,15 @@ type Message struct {
 	// Anthropic {"type":"ephemeral"}). Preserved verbatim across the plugin
 	// boundary so mutating plugins don't strip prompt-cache markers.
 	CacheControlJson []byte `protobuf:"bytes,10,opt,name=cache_control_json,json=cacheControlJson,proto3" json:"cache_control_json,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Standalone provider signature on a trailing signature-only part (Code
+	// Assist's final {"thoughtSignature", "text":""} part after earlier text).
+	// SignatureScopeTrailingStandalone: binds the preceding closed
+	// text/thinking content of this message; does not bind tool-call blocks.
+	// The host must clear it when the covered content changes, or reject the
+	// mutation. Empty when the provider sent no trailing signature.
+	TrailingSignature string `protobuf:"bytes,11,opt,name=trailing_signature,json=trailingSignature,proto3" json:"trailing_signature,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *Message) Reset() {
@@ -311,6 +318,13 @@ func (x *Message) GetCacheControlJson() []byte {
 		return x.CacheControlJson
 	}
 	return nil
+}
+
+func (x *Message) GetTrailingSignature() string {
+	if x != nil {
+		return x.TrailingSignature
+	}
+	return ""
 }
 
 // An assistant's request to invoke a tool.
@@ -3344,7 +3358,7 @@ var File_proto_torana_v2_torana_proto protoreflect.FileDescriptor
 
 const file_proto_torana_v2_torana_proto_rawDesc = "" +
 	"\n" +
-	"\x1cproto/torana/v2/torana.proto\x12\ttorana.v2\"\xfe\x02\n" +
+	"\x1cproto/torana/v2/torana.proto\x12\ttorana.v2\"\xad\x03\n" +
 	"\aMessage\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\tR\acontent\x12,\n" +
@@ -3358,7 +3372,8 @@ const file_proto_torana_v2_torana_proto_rawDesc = "" +
 	"toolCallId\x12\x1b\n" +
 	"\ttool_name\x18\t \x01(\tR\btoolName\x12,\n" +
 	"\x12cache_control_json\x18\n" +
-	" \x01(\fR\x10cacheControlJson\"s\n" +
+	" \x01(\fR\x10cacheControlJson\x12-\n" +
+	"\x12trailing_signature\x18\v \x01(\tR\x11trailingSignature\"s\n" +
 	"\bToolCall\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12%\n" +

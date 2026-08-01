@@ -1,6 +1,7 @@
 package v2_test
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -985,5 +986,50 @@ func TestDecodeHookResultRefusesRepeatedSameArm(t *testing.T) {
 		t.Fatal("DecodeHookResult must refuse a repeated known action arm")
 	} else if !strings.Contains(err.Error(), "more than one known oneof arm") {
 		t.Fatalf("want multi-arm error, got %v", err)
+	}
+}
+
+// Message.trailing_signature (field 11) must survive a protobuf round trip.
+// The non-stream adapter preserves Code Assist's trailing signature-only part
+// as its own Message field, so a plugin must read it back unchanged after any
+// byte chaining across the plugin boundary.
+func TestMessageTrailingSignatureRoundTrip(t *testing.T) {
+	in := &v2.Message{
+		Role:              "assistant",
+		Content:           "done",
+		Thinking:          "reasoned",
+		TrailingSignature: "sig",
+	}
+	raw, err := proto.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Pin the wire number: field 11, wire type 2 = 0x5a, then length + value.
+	if !bytes.Contains(raw, []byte{0x5a, 0x03, 's', 'i', 'g'}) {
+		t.Fatalf("trailing_signature must marshal as field 11 (got %x)", raw)
+	}
+
+	var out v2.Message
+	if err := proto.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.TrailingSignature != "sig" {
+		t.Fatalf("trailing_signature lost in round trip: %q", out.TrailingSignature)
+	}
+	if !proto.Equal(in, &out) {
+		t.Fatalf("round trip mismatch: %+v vs %+v", in, &out)
+	}
+
+	// Absent on the wire stays absent after unmarshal.
+	trivial, err := proto.Marshal(&v2.Message{Content: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var absent v2.Message
+	if err := proto.Unmarshal(trivial, &absent); err != nil {
+		t.Fatal(err)
+	}
+	if absent.TrailingSignature != "" {
+		t.Fatal("absent trailing_signature must unmarshal empty")
 	}
 }

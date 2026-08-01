@@ -61,6 +61,13 @@ message Message {
   // Anthropic {"type":"ephemeral"}). Preserved verbatim across the plugin
   // boundary so mutating plugins don't strip prompt-cache markers.
   bytes cache_control_json = 10;
+  // Standalone provider signature on a trailing signature-only part (Code
+  // Assist's final {"thoughtSignature", "text":""} part after earlier text).
+  // SignatureScopeTrailingStandalone: binds the preceding closed
+  // text/thinking content of this message; does not bind tool-call blocks.
+  // The host must clear it when the covered content changes, or reject the
+  // mutation. Empty when the provider sent no trailing signature.
+  string trailing_signature = 11;
 }
 
 // An assistant's request to invoke a tool.

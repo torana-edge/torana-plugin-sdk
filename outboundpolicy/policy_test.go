@@ -254,9 +254,9 @@ func TestOutboundPolicyAccessorsAreCopies(t *testing.T) {
 }
 
 func TestSignatureBindingsPinned(t *testing.T) {
-	byMsg := map[protoreflect.FullName]SignatureBinding{}
+	byMsg := map[string]SignatureBinding{}
 	for _, b := range AllSignatureBindings() {
-		byMsg[b.Message] = b
+		byMsg[string(b.Message)+"/"+b.SignatureField] = b
 		if err := b.validateShape(); err != nil {
 			t.Errorf("shape: %v", err)
 		}
@@ -265,7 +265,7 @@ func TestSignatureBindingsPinned(t *testing.T) {
 		t.Fatalf("Validate: %v", err)
 	}
 
-	msg := byMsg["torana.v2.Message"]
+	msg := byMsg["torana.v2.Message/thinking_signature"]
 	if msg.Domain != SignatureDomainRequest || msg.SignatureField != "thinking_signature" {
 		t.Fatal("Message.thinking_signature must remain a request-domain binding")
 	}
@@ -285,7 +285,33 @@ func TestSignatureBindingsPinned(t *testing.T) {
 		t.Fatal("request Message must not re-enter the outbound field registry")
 	}
 
-	ref := byMsg["torana.v2.ToolCallRef"]
+	trail := byMsg["torana.v2.Message/trailing_signature"]
+	if trail.Domain != SignatureDomainRequest || trail.SignatureField != "trailing_signature" {
+		t.Fatal("Message.trailing_signature must remain a request-domain binding")
+	}
+	var sawTrailThinking, sawTrailContent bool
+	for _, c := range trail.Content {
+		if c.Scope != SignatureScopeTrailingStandalone {
+			t.Fatalf("trailing_signature unexpected scope %v", c.Scope)
+		}
+		if c.Message != "" {
+			t.Fatal("request-domain TrailingStandalone must stay on the same message")
+		}
+		if c.Field == "thinking" {
+			sawTrailThinking = true
+		}
+		if c.Field == "content" {
+			sawTrailContent = true
+		}
+	}
+	if !sawTrailThinking || !sawTrailContent {
+		t.Fatal("trailing_signature must bind TrailingStandalone thinking and content")
+	}
+	if _, ok := OutboundFieldPolicy("torana.v2.Message", "trailing_signature"); ok {
+		t.Fatal("request Message must not re-enter the outbound field registry")
+	}
+
+	ref := byMsg["torana.v2.ToolCallRef/signature"]
 	var sawSameID, sawArgs bool
 	for _, c := range ref.Content {
 		if c.Scope == SignatureScopeSameMessage && c.Field == "id" {
@@ -300,7 +326,7 @@ func TestSignatureBindingsPinned(t *testing.T) {
 		t.Fatal("ToolCallRef.signature must SameMessage id/name and ToolCallBlockByIndex arguments_delta")
 	}
 
-	sig := byMsg["torana.v2.StreamEvent"]
+	sig := byMsg["torana.v2.StreamEvent/signature_delta"]
 	if sig.SignatureField != "signature_delta" {
 		t.Fatal("signature_delta binding missing")
 	}

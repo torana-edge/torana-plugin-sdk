@@ -478,7 +478,7 @@ func (b SignatureBinding) validateShape() error {
 				return fmt.Errorf("%s.%s content[%d]: ToolCallBlockByIndex requires Message",
 					b.Message, b.SignatureField, i)
 			}
-		case SignatureScopeCurrentContentBlock, SignatureScopeTrailingStandalone:
+		case SignatureScopeCurrentContentBlock:
 			if b.SignatureField != "signature_delta" {
 				return fmt.Errorf("%s.%s: %v only valid on signature_delta",
 					b.Message, b.SignatureField, c.Scope)
@@ -486,6 +486,23 @@ func (b SignatureBinding) validateShape() error {
 			if c.Message == "" {
 				return fmt.Errorf("%s.%s content[%d]: scope %v requires Message",
 					b.Message, b.SignatureField, i, c.Scope)
+			}
+		case SignatureScopeTrailingStandalone:
+			// Outbound: the stream signature_delta must name the message whose
+			// text/thinking deltas it covers. Request: Message.trailing_signature
+			// covers fields of the SAME message, so Message must stay empty.
+			if b.Domain == SignatureDomainOutbound {
+				if b.SignatureField != "signature_delta" {
+					return fmt.Errorf("%s.%s: TrailingStandalone only valid on signature_delta",
+						b.Message, b.SignatureField)
+				}
+				if c.Message == "" {
+					return fmt.Errorf("%s.%s content[%d]: scope %v requires Message",
+						b.Message, b.SignatureField, i, c.Scope)
+				}
+			} else if c.Message != "" {
+				return fmt.Errorf("%s.%s content[%d]: request-domain TrailingStandalone must not name a different message",
+					b.Message, b.SignatureField, i)
 			}
 		}
 	}
@@ -504,6 +521,19 @@ var signatureBindings = []SignatureBinding{
 		Content: []SignatureContentRef{
 			{Scope: SignatureScopeSameMessage, Field: "thinking"},
 			{Scope: SignatureScopeSameMessage, Field: "redacted_thinking"},
+		},
+	},
+	{
+		// Code Assist's trailing signature-only empty-text part. TrailingStandalone
+		// binds the preceding closed text/thinking content of this same message;
+		// it does not bind tool-call blocks. The host must clear the token when
+		// the covered content changes, or reject the mutation.
+		Domain:         SignatureDomainRequest,
+		Message:        "torana.v2.Message",
+		SignatureField: "trailing_signature",
+		Content: []SignatureContentRef{
+			{Scope: SignatureScopeTrailingStandalone, Field: "thinking"},
+			{Scope: SignatureScopeTrailingStandalone, Field: "content"},
 		},
 	},
 	{
