@@ -469,6 +469,17 @@ func (b SignatureBinding) validateShape() error {
 				return fmt.Errorf("%s.%s content[%d]: SameMessage must not name a different message",
 					b.Message, b.SignatureField, i)
 			}
+			// Request-domain SameMessage is pinned to exactly
+			// torana.v2.Message.thinking_signature (same-message refs), the
+			// mirror of the TrailingStandalone pin: both request-domain tokens
+			// must be proven by the same startup Validate() rather than only a
+			// pinned expectation test. Outbound bindings keep the generic
+			// SameMessage shape (ToolCall.signature, ToolCallRef.signature).
+			if b.Domain == SignatureDomainRequest &&
+				(b.Message != "torana.v2.Message" || b.SignatureField != "thinking_signature") {
+				return fmt.Errorf("%s.%s: request-domain SameMessage only valid on Message.thinking_signature",
+					b.Message, b.SignatureField)
+			}
 		case SignatureScopeToolCallBlockByIndex:
 			if b.Message != "torana.v2.ToolCallRef" {
 				return fmt.Errorf("%s.%s: ToolCallBlockByIndex only valid on ToolCallRef.signature",
@@ -478,7 +489,7 @@ func (b SignatureBinding) validateShape() error {
 				return fmt.Errorf("%s.%s content[%d]: ToolCallBlockByIndex requires Message",
 					b.Message, b.SignatureField, i)
 			}
-		case SignatureScopeCurrentContentBlock, SignatureScopeTrailingStandalone:
+		case SignatureScopeCurrentContentBlock:
 			if b.SignatureField != "signature_delta" {
 				return fmt.Errorf("%s.%s: %v only valid on signature_delta",
 					b.Message, b.SignatureField, c.Scope)
@@ -486,6 +497,33 @@ func (b SignatureBinding) validateShape() error {
 			if c.Message == "" {
 				return fmt.Errorf("%s.%s content[%d]: scope %v requires Message",
 					b.Message, b.SignatureField, i, c.Scope)
+			}
+		case SignatureScopeTrailingStandalone:
+			// Outbound: the stream signature_delta must name the message whose
+			// text/thinking deltas it covers. Request: the ONLY supported shape
+			// is Message.trailing_signature covering fields of the SAME message.
+			// Pinning the exact message and field stops a corrupted registry
+			// from relabeling an ordinary string field (e.g. content) as the
+			// opaque token — Validate() is the host's startup proof that the
+			// policy table is coherent (edge calls it before serving).
+			if b.Domain == SignatureDomainOutbound {
+				if b.SignatureField != "signature_delta" {
+					return fmt.Errorf("%s.%s: TrailingStandalone only valid on signature_delta",
+						b.Message, b.SignatureField)
+				}
+				if c.Message == "" {
+					return fmt.Errorf("%s.%s content[%d]: scope %v requires Message",
+						b.Message, b.SignatureField, i, c.Scope)
+				}
+			} else {
+				if b.Message != "torana.v2.Message" || b.SignatureField != "trailing_signature" {
+					return fmt.Errorf("%s.%s: request-domain TrailingStandalone only valid on Message.trailing_signature",
+						b.Message, b.SignatureField)
+				}
+				if c.Message != "" {
+					return fmt.Errorf("%s.%s content[%d]: request-domain TrailingStandalone must not name a different message",
+						b.Message, b.SignatureField, i)
+				}
 			}
 		}
 	}
@@ -504,6 +542,19 @@ var signatureBindings = []SignatureBinding{
 		Content: []SignatureContentRef{
 			{Scope: SignatureScopeSameMessage, Field: "thinking"},
 			{Scope: SignatureScopeSameMessage, Field: "redacted_thinking"},
+		},
+	},
+	{
+		// Code Assist's trailing signature-only empty-text part. TrailingStandalone
+		// binds the preceding closed text/thinking content of this same message;
+		// it does not bind tool-call blocks. The host must clear the token when
+		// the covered content changes, or reject the mutation.
+		Domain:         SignatureDomainRequest,
+		Message:        "torana.v2.Message",
+		SignatureField: "trailing_signature",
+		Content: []SignatureContentRef{
+			{Scope: SignatureScopeTrailingStandalone, Field: "thinking"},
+			{Scope: SignatureScopeTrailingStandalone, Field: "content"},
 		},
 	},
 	{

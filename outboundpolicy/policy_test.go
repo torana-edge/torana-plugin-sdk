@@ -254,9 +254,9 @@ func TestOutboundPolicyAccessorsAreCopies(t *testing.T) {
 }
 
 func TestSignatureBindingsPinned(t *testing.T) {
-	byMsg := map[protoreflect.FullName]SignatureBinding{}
+	byMsg := map[string]SignatureBinding{}
 	for _, b := range AllSignatureBindings() {
-		byMsg[b.Message] = b
+		byMsg[string(b.Message)+"/"+b.SignatureField] = b
 		if err := b.validateShape(); err != nil {
 			t.Errorf("shape: %v", err)
 		}
@@ -265,7 +265,7 @@ func TestSignatureBindingsPinned(t *testing.T) {
 		t.Fatalf("Validate: %v", err)
 	}
 
-	msg := byMsg["torana.v2.Message"]
+	msg := byMsg["torana.v2.Message/thinking_signature"]
 	if msg.Domain != SignatureDomainRequest || msg.SignatureField != "thinking_signature" {
 		t.Fatal("Message.thinking_signature must remain a request-domain binding")
 	}
@@ -285,7 +285,33 @@ func TestSignatureBindingsPinned(t *testing.T) {
 		t.Fatal("request Message must not re-enter the outbound field registry")
 	}
 
-	ref := byMsg["torana.v2.ToolCallRef"]
+	trail := byMsg["torana.v2.Message/trailing_signature"]
+	if trail.Domain != SignatureDomainRequest || trail.SignatureField != "trailing_signature" {
+		t.Fatal("Message.trailing_signature must remain a request-domain binding")
+	}
+	var sawTrailThinking, sawTrailContent bool
+	for _, c := range trail.Content {
+		if c.Scope != SignatureScopeTrailingStandalone {
+			t.Fatalf("trailing_signature unexpected scope %v", c.Scope)
+		}
+		if c.Message != "" {
+			t.Fatal("request-domain TrailingStandalone must stay on the same message")
+		}
+		if c.Field == "thinking" {
+			sawTrailThinking = true
+		}
+		if c.Field == "content" {
+			sawTrailContent = true
+		}
+	}
+	if !sawTrailThinking || !sawTrailContent {
+		t.Fatal("trailing_signature must bind TrailingStandalone thinking and content")
+	}
+	if _, ok := OutboundFieldPolicy("torana.v2.Message", "trailing_signature"); ok {
+		t.Fatal("request Message must not re-enter the outbound field registry")
+	}
+
+	ref := byMsg["torana.v2.ToolCallRef/signature"]
 	var sawSameID, sawArgs bool
 	for _, c := range ref.Content {
 		if c.Scope == SignatureScopeSameMessage && c.Field == "id" {
@@ -300,7 +326,7 @@ func TestSignatureBindingsPinned(t *testing.T) {
 		t.Fatal("ToolCallRef.signature must SameMessage id/name and ToolCallBlockByIndex arguments_delta")
 	}
 
-	sig := byMsg["torana.v2.StreamEvent"]
+	sig := byMsg["torana.v2.StreamEvent/signature_delta"]
 	if sig.SignatureField != "signature_delta" {
 		t.Fatal("signature_delta binding missing")
 	}
@@ -388,10 +414,38 @@ func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 			Message: "torana.v2.Message", SignatureField: "thinking_signature",
 			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "thinking"}},
 		},
+		// Request-domain SameMessage is pinned to exactly
+		// torana.v2.Message.thinking_signature: a corrupted registry must not
+		// be able to relabel an ordinary string field (content) as the opaque
+		// thinking token and still pass the host's startup Validate() check.
+		{
+			Domain: SignatureDomainRequest, Message: "torana.v2.Message", SignatureField: "content",
+			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "thinking"}},
+		},
+		{
+			Domain: SignatureDomainRequest, Message: "torana.v2.ToolCall", SignatureField: "thinking_signature",
+			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "name"}},
+		},
+		// Request-domain TrailingStandalone is pinned to exactly
+		// torana.v2.Message.trailing_signature: a corrupted registry must not
+		// be able to relabel an ordinary string field (content) as the opaque
+		// token and still pass the host's startup Validate() check.
+		{
+			Domain: SignatureDomainRequest, Message: "torana.v2.Message", SignatureField: "content",
+			Content: []SignatureContentRef{{Scope: SignatureScopeTrailingStandalone, Field: "thinking"}},
+		},
+		{
+			Domain: SignatureDomainRequest, Message: "torana.v2.ToolCall", SignatureField: "trailing_signature",
+			Content: []SignatureContentRef{{Scope: SignatureScopeTrailingStandalone, Field: "name"}},
+		},
+		{
+			Domain: SignatureDomainRequest, Message: "torana.v2.Message", SignatureField: "trailing_signature",
+			Content: []SignatureContentRef{{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.ToolCall", Field: "name"}},
+		},
 	}
 	for i, b := range bad {
 		if err := b.validateShape(); err == nil {
-			t.Errorf("case %d: expected shape error", i)
+			t.Errorf("case %d: expected shape error: %+v", i, b)
 		}
 	}
 }

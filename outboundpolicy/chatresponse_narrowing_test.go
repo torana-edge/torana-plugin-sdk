@@ -52,6 +52,7 @@ func TestChatResponseNarrowedPolicyContract(t *testing.T) {
 	for _, field := range []string{
 		"role", "content_parts_json", "thinking", "thinking_signature",
 		"redacted_thinking", "tool_call_id", "tool_name", "cache_control_json",
+		"trailing_signature",
 	} {
 		if _, ok := OutboundFieldPolicy("torana.v2.ResponseMessage", field); ok {
 			t.Errorf("ResponseMessage must not expose dead field %q", field)
