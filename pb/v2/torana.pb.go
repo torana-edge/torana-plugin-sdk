@@ -954,8 +954,9 @@ func (x *ToolCallRef) GetSignature() string {
 
 type ToolCallDelta struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Must equal the ContentBlockStart.index of the open tool-call block this
-	// delta belongs to. See StreamEvent index invariants.
+	// Must name the OPEN tool-call block this delta belongs to: tool deltas
+	// bind their tool block BY INDEX, and multiple tool blocks may be open
+	// concurrently. See StreamEvent index invariants.
 	Index          int32  `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
 	ArgumentsDelta string `protobuf:"bytes,2,opt,name=arguments_delta,json=argumentsDelta,proto3" json:"arguments_delta,omitempty"`
 	unknownFields  protoimpl.UnknownFields
@@ -1009,10 +1010,10 @@ func (x *ToolCallDelta) GetArgumentsDelta() string {
 type StreamError struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Terminal abort of the streamed message. See StreamEvent stream-state rules:
-	// may arrive while a content block is open; abandons that block without a
-	// ContentBlockStop; ends the stream (no MessageStop required); no further
-	// events. Incomplete tool-call argument buffers must be discarded, not
-	// assembled into an executable call.
+	// may arrive while content blocks are open; abandons ALL open blocks (tool
+	// and non-tool) without ContentBlockStops; ends the stream (no MessageStop
+	// required); no further events. Incomplete tool-call argument buffers must be
+	// discarded, not assembled into an executable call.
 	Code          int32  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
 	Message       string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -1315,20 +1316,25 @@ func (x *ProviderBlock) GetKind() string {
 // some — contradictions a reader would have to know were impossible. A oneof
 // makes them unrepresentable.
 //
-// Stream-state rule: within one message, at most one ContentBlockStart may be
-// open. A second start before the matching ContentBlockStop is invalid.
-// "Parallel" tool calls are sequential blocks with distinct indexes — they are
-// not simultaneously open. TextDelta / ThinkingDelta / signature_delta under
-// CurrentContentBlock belong to that single open block (and are invalid when
-// no compatible block is open).
+// Stream-state rule: non-tool content (text, thinking, provider) is exclusive —
+// at most ONE non-tool block may be open at a time, and no tool block may be
+// open concurrently with it. Tool-call blocks are the exception: MULTIPLE tool
+// blocks may be open at once, each at its own unique never-reused index
+// (OpenAI Chat legitimately streams several tool calls concurrently). A
+// non-tool start requires no block open; a tool start requires no non-tool
+// block open but may coexist with other open tool blocks. TextDelta /
+// ThinkingDelta / signature_delta under CurrentContentBlock belong to the
+// single open non-tool block (and are invalid when no compatible block is
+// open).
 type ContentBlockStart struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Unique across the entire streamed message; never reused after the block
 	// closes. Deltas and ContentBlockStop must use this same index. A
-	// ContentBlockStop / ToolCallDelta whose index does not name the currently
-	// open start is invalid. Adapters MUST assign distinct indexes to sequential
-	// parallel tool-call parts (emitting Index:0 for every Gemini functionCall
-	// is not conformant). SignatureScopeToolCallBlockByIndex depends on this.
+	// ContentBlockStop / ToolCallDelta whose index does not name an open start
+	// of the matching kind is invalid. Adapters MUST assign distinct indexes to
+	// concurrent parallel tool-call parts (emitting Index:0 for every Gemini
+	// functionCall is not conformant). SignatureScopeToolCallBlockByIndex
+	// depends on this.
 	Index int32 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
 	// Types that are valid to be assigned to Block:
 	//
@@ -1451,7 +1457,9 @@ func (*ContentBlockStart_Provider) isContentBlockStart_Block() {}
 
 type ContentBlockStop struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Must match the currently open ContentBlockStart.index.
+	// Must name an OPEN block of the matching kind: tool stops bind their open
+	// tool block by index (multiple tool blocks may be open concurrently); a
+	// non-tool stop names the single open non-tool block.
 	Index         int32 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1499,12 +1507,16 @@ func (x *ContentBlockStop) GetIndex() int32 {
 // The canonical sequence, which adapters produce and plugins may rely on:
 //
 //	MessageStart{role, id, model}
-//	  ContentBlockStart{index, text{} | thinking{}}
+//	  ContentBlockStart{index: 0, tool_call{id, name}}
+//	    ToolCallDelta{index: 0, arguments_delta} ...
+//	  ContentBlockStart{index: 1, tool_call{id, name}}   // 2nd tool opens
+//	    ToolCallDelta{index: 1, arguments_delta} ...     //   before 0 closes;
+//	    ToolCallDelta{index: 0, arguments_delta} ...     //   deltas interleave
+//	  ContentBlockStop{index: 0}                        //   by index
+//	  ContentBlockStop{index: 1}
+//	  ContentBlockStart{index: 2, text{} | thinking{}}
 //	    TextDelta / ThinkingDelta ...
-//	  ContentBlockStop{index}
-//	  ContentBlockStart{index, tool_call{id, name}}
-//	    ToolCallDelta{index, arguments_delta} ...
-//	  ContentBlockStop{index}
+//	  ContentBlockStop{index: 2}
 //	Usage
 //	MessageStop{finish_reason}
 //
@@ -1515,22 +1527,29 @@ func (x *ContentBlockStop) GetIndex() int32 {
 // once.
 //
 // Stream-state / index invariants (ABI):
-//   - At most one content block is open at a time. A second ContentBlockStart
-//     before the matching stop is invalid.
+//   - Non-tool content (text, thinking, provider) is exclusive: at most ONE
+//     non-tool block is open at a time, and no tool block may be open
+//     concurrently with it. A non-tool start requires no block open.
+//   - MULTIPLE tool-call blocks may be open concurrently, each at its own
+//     unique never-reused index. A tool start requires no non-tool block open
+//     but may coexist with other open tool blocks.
 //   - Indexes are unique across the entire streamed message and are never
 //     reused after close.
-//   - Every ToolCallDelta / ContentBlockStop index must name the currently
-//     open ContentBlockStart; open-missing indexes are invalid.
+//   - Every ToolCallDelta / ContentBlockStop index must name an open block of
+//     the matching kind: tool deltas/stops bind their open tool block BY
+//     INDEX; a non-tool stop names the single open non-tool block.
+//     Open-missing or kind-mismatched indexes are invalid.
 //   - TextDelta / ThinkingDelta / CurrentContentBlock signature_delta require
-//     a compatible open block; otherwise invalid.
+//     exactly the compatible open non-tool block; otherwise invalid.
 //   - StreamError is a terminal abort: it may occur at any point, including
-//     while a content block is open. It implicitly abandons/clears that open
-//     block and any buffered incomplete tool-call arguments — this is not a
-//     successful ContentBlockStop and must not be represented as one. It
-//     terminates the message/stream; neither MessageStop nor a synthetic block
-//     stop is required. Any event after StreamError is invalid.
-//   - MessageStop / end-of-stream while any block remains open is invalid,
-//     unless that open block was terminally aborted by StreamError (in which
+//     while content blocks are open. It implicitly abandons ALL open blocks
+//     (tool and non-tool) and any buffered incomplete tool-call arguments —
+//     this is not a successful ContentBlockStop and must not be represented as
+//     one. It terminates the message/stream; neither MessageStop nor a
+//     synthetic block stop is required. Any event after StreamError is
+//     invalid.
+//   - MessageStop / end-of-stream while ANY block remains open is invalid,
+//     unless the open blocks were terminally aborted by StreamError (in which
 //     case the stream already ended at the error — ordinary EOF after a
 //     non-error open block is still invalid).
 //   - Host Migration B must fix adapters that violate index uniqueness (e.g.
