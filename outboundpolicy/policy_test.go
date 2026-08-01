@@ -414,6 +414,18 @@ func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 			Message: "torana.v2.Message", SignatureField: "thinking_signature",
 			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "thinking"}},
 		},
+		// Request-domain SameMessage is pinned to exactly
+		// torana.v2.Message.thinking_signature: a corrupted registry must not
+		// be able to relabel an ordinary string field (content) as the opaque
+		// thinking token and still pass the host's startup Validate() check.
+		{
+			Domain: SignatureDomainRequest, Message: "torana.v2.Message", SignatureField: "content",
+			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "thinking"}},
+		},
+		{
+			Domain: SignatureDomainRequest, Message: "torana.v2.ToolCall", SignatureField: "thinking_signature",
+			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "name"}},
+		},
 		// Request-domain TrailingStandalone is pinned to exactly
 		// torana.v2.Message.trailing_signature: a corrupted registry must not
 		// be able to relabel an ordinary string field (content) as the opaque

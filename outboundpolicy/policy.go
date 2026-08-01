@@ -469,6 +469,17 @@ func (b SignatureBinding) validateShape() error {
 				return fmt.Errorf("%s.%s content[%d]: SameMessage must not name a different message",
 					b.Message, b.SignatureField, i)
 			}
+			// Request-domain SameMessage is pinned to exactly
+			// torana.v2.Message.thinking_signature (same-message refs), the
+			// mirror of the TrailingStandalone pin: both request-domain tokens
+			// must be proven by the same startup Validate() rather than only a
+			// pinned expectation test. Outbound bindings keep the generic
+			// SameMessage shape (ToolCall.signature, ToolCallRef.signature).
+			if b.Domain == SignatureDomainRequest &&
+				(b.Message != "torana.v2.Message" || b.SignatureField != "thinking_signature") {
+				return fmt.Errorf("%s.%s: request-domain SameMessage only valid on Message.thinking_signature",
+					b.Message, b.SignatureField)
+			}
 		case SignatureScopeToolCallBlockByIndex:
 			if b.Message != "torana.v2.ToolCallRef" {
 				return fmt.Errorf("%s.%s: ToolCallBlockByIndex only valid on ToolCallRef.signature",
