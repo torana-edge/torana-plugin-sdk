@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	sdk "github.com/torana-edge/torana-plugin-sdk"
@@ -41,7 +42,6 @@ func TestGetCachePricingDegradesWithTheReason(t *testing.T) {
 		code       pbv2.ErrorCode
 		wantReason string
 	}{
-		{pbv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "permission_denied"},
 		{pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED, "not_configured"},
 		{pbv2.ErrorCode_ERROR_CODE_UNAVAILABLE, "unavailable"},
 	} {
@@ -68,17 +68,17 @@ func TestGetCachePricingDegradesWithTheReason(t *testing.T) {
 
 func TestGetCachePricingHandlesEmptyAndMalformedValues(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
+		// torana_cache_pricing is a QUERY: the host must return either a
+		// pricing envelope or a refusal. An empty success value is a
+		// protocol/host defect, not "no pricing".
 		h := sdktest.New(t)
 		h.StubHostCall("torana_cache_pricing", func(string) (string, error) {
 			return sdktest.HostResultValue(nil), nil
 		})
 		h.Run(func() {
-			got, err := sdk.GetCachePricing("p", "m")
-			if err != nil {
-				t.Fatalf("an empty value became an error: %v", err)
-			}
-			if got.Status != "unavailable" || got.Reason != "no_result" {
-				t.Fatalf("got %+v, want unavailable/no_result", got)
+			_, err := sdk.GetCachePricing("p", "m")
+			if err == nil {
+				t.Fatal("an empty pricing value was treated as advisory data")
 			}
 		})
 	})
@@ -162,7 +162,6 @@ func TestHostErrorReasonCoversEveryDegradeCode(t *testing.T) {
 		code pbv2.ErrorCode
 		want string
 	}{
-		{pbv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "permission_denied"},
 		{pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED, "not_configured"},
 		{pbv2.ErrorCode_ERROR_CODE_UNAVAILABLE, "unavailable"},
 	} {
@@ -243,47 +242,80 @@ func TestSendRequestMalformedBase64BodyIsADecodeError(t *testing.T) {
 
 // The SDK mirrors the host's cheap input checks so an author gets immediate
 // feedback instead of a host refusal — and a malformed request must never
-// cross the boundary at all.
+// cross the boundary at all. The adversarial matrix is the SHARED reference
+// table (sdktest.EgressPathCases): the host pins the same rows, so the two
+// predicates cannot quietly diverge.
 func TestSendRequestMirrorsInputValidation(t *testing.T) {
-	cases := []struct {
-		name string
-		path string
-		ms   int
-	}{
-		{"empty path", "", 0},
-		{"relative path", "v1/messages", 0},
-		{"absolute path", "https://attacker.example/v1", 0},
-		{"network-path", "//attacker.example/v1", 0},
-		{"userinfo path", "@attacker.example/v1", 0},
-		{"negative timeout", "/v1/messages", -1},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, tc := range sdktest.EgressPathCases {
+		t.Run(pathCaseName(tc.Path), func(t *testing.T) {
 			called := false
 			h := sdktest.New(t)
 			h.StubHostCall("torana_send_request", func(string) (string, error) {
 				called = true
-				return sdktest.HostResultValue(nil), nil
+				// A valid outcome envelope so a VALID path completes cleanly; an
+				// invalid path never reaches this stub.
+				return sdktest.HostResultValue([]byte(`{"http_status":200}`)), nil
 			})
 			h.Run(func() {
 				_, err := sdk.SendRequest(&pbv2.ChatRequest{Model: "m"},
-					sdk.SendRequestOptions{Provider: "anthropic", Path: tc.path, TimeoutMS: tc.ms})
-				if err == nil {
-					t.Fatal("an invalid option set was accepted")
+					sdk.SendRequestOptions{Provider: "anthropic", Path: tc.Path})
+				if tc.Valid && err != nil {
+					t.Fatalf("a valid path was rejected: %v", err)
 				}
-				if called {
-					t.Fatal("an invalid option set crossed the host boundary")
+				if !tc.Valid && err == nil {
+					t.Fatalf("an invalid path %q was accepted", tc.Path)
+				}
+				if !tc.Valid && called {
+					t.Fatalf("an invalid path crossed the host boundary")
+				}
+				if tc.Valid && !called {
+					t.Fatalf("a valid path did not reach the host")
 				}
 			})
 		})
 	}
+	t.Run("negative timeout", func(t *testing.T) {
+		called := false
+		h := sdktest.New(t)
+		h.StubHostCall("torana_send_request", func(string) (string, error) {
+			called = true
+			return sdktest.HostResultValue(nil), nil
+		})
+		h.Run(func() {
+			_, err := sdk.SendRequest(&pbv2.ChatRequest{Model: "m"},
+				sdk.SendRequestOptions{Provider: "anthropic", Path: "/v1/messages", TimeoutMS: -1})
+			if err == nil {
+				t.Fatal("a negative timeout was accepted")
+			}
+			if called {
+				t.Fatal("a negative timeout crossed the host boundary")
+			}
+		})
+	})
+}
+
+// pathCaseName renders a path (which may contain control characters) into a
+// stable, readable subtest name.
+func pathCaseName(p string) string {
+	n := strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return '_'
+		}
+		return r
+	}, p)
+	if n == "" {
+		return "(empty)"
+	}
+	return n
 }
 
 // Pricing degrades for expected advisory refusals but surfaces caller and host
 // defects as errors — a plugin bug must not hide as an ordinary "unavailable".
 func TestGetCachePricingClassifiesRefusals(t *testing.T) {
+	// Only operator/transient states degrade: NOT_CONFIGURED (operator gap) and
+	// UNAVAILABLE (retry later). PERMISSION_DENIED is NOT advisory — approvals
+	// are all-or-nothing, so a permission refusal is an author or host defect.
 	degrade := []pbv2.ErrorCode{
-		pbv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED,
 		pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
 		pbv2.ErrorCode_ERROR_CODE_UNAVAILABLE,
 	}
@@ -305,6 +337,7 @@ func TestGetCachePricingClassifiesRefusals(t *testing.T) {
 		})
 	}
 	for _, code := range []pbv2.ErrorCode{
+		pbv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED,
 		pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 		pbv2.ErrorCode_ERROR_CODE_NOT_FOUND,
 		pbv2.ErrorCode_ERROR_CODE_INTERNAL,

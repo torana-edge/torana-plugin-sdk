@@ -184,10 +184,16 @@ func SendRequest(req *pbv2.ChatRequest, opts SendRequestOptions) (EgressResult, 
 }
 
 // validateEgressPath enforces the guest path contract locally so an author
-// gets immediate feedback instead of a host refusal: the path must be a
-// root-relative request URI — no scheme, no authority, no userinfo — so the
-// request stays on the configured provider's origin. The host enforces the
-// same contract authoritatively (handwritten guests bypass this check).
+// gets immediate feedback instead of a host refusal. This predicate MUST stay
+// semantically identical to the host's authoritative check
+// (torana-edge internal/proxy/egress.go, the guest path contract block) — both
+// sides are pinned by the same adversarial matrix, sdktest.EgressPathCases.
+//
+// Contract: the path must be a root-relative request URI — no scheme, no
+// authority, no userinfo, no opaque form, no fragment, and no leading "//"
+// (network-path reference) — so the request stays on the configured provider's
+// origin. ParseRequestURI is used deliberately: it rejects fragments and other
+// non-request-URI forms that url.Parse would accept.
 func validateEgressPath(path string) error {
 	if path == "" {
 		return fmt.Errorf("torana: path is required — Torana does not synthesize provider paths")
@@ -195,11 +201,18 @@ func validateEgressPath(path string) error {
 	if !strings.HasPrefix(path, "/") {
 		return fmt.Errorf("torana: path must be root-relative, got %q", path)
 	}
-	u, err := url.Parse(path)
+	u, err := url.ParseRequestURI(path)
 	if err != nil {
-		return fmt.Errorf("torana: invalid path %q: %w", path, err)
+		return fmt.Errorf("torana: invalid path %q: %v", path, err)
 	}
-	if u.Scheme != "" || u.Host != "" || u.User != nil {
+	// A path beginning with "//" is a network-path reference in URI syntax
+	// (ParseRequestURI folds it into the path); reject it outright so the
+	// authority can never be ambiguous, along with absolute forms, opaque
+	// forms, and userinfo.
+	// ParseRequestURI folds a raw '#' into the path rather than parsing it as a
+	// fragment, so reject fragments on the raw input; a real '#' in a path
+	// must be %23-encoded.
+	if strings.Contains(path, "#") || u.Scheme != "" || u.Host != "" || u.User != nil || u.Opaque != "" || strings.HasPrefix(u.Path, "//") {
 		return fmt.Errorf("torana: path must stay on the configured provider origin, got %q", path)
 	}
 	return nil

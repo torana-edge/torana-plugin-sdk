@@ -101,14 +101,22 @@ func (c CachePricing) Warmable() bool {
 //
 // Refusal classification:
 //
-//   - PERMISSION_DENIED, NOT_CONFIGURED, UNAVAILABLE — expected advisory
-//     refusals: degrade to CachePricing{Status: "unavailable"} with the reason
-//     token, exactly as if the host had answered "no pricing right now". A
-//     warming plugin must decline rather than assume a default.
+//   - NOT_CONFIGURED, UNAVAILABLE — expected advisory refusals: degrade to
+//     CachePricing{Status: "unavailable"} with the reason token, exactly as if
+//     the host had answered "no pricing right now". A warming plugin must
+//     decline rather than assume a default.
+//   - PERMISSION_DENIED — NOT an advisory gap. Torana approvals are
+//     all-or-nothing: an enabled plugin has every declared permission, so a
+//     permission refusal means the plugin called a capability it did not
+//     declare (an author bug) or the host violated the approval invariant.
+//     Surfaced as an error either way.
 //   - INVALID_ARGUMENT, NOT_FOUND — plugin bugs (malformed query, unknown
 //     command); surfaced as errors so the author fixes the caller instead of
 //     debugging a silent "unavailable".
 //   - INTERNAL and any unknown code — host defects; surfaced as errors.
+//   - An empty success value — torana_cache_pricing is a QUERY: the host must
+//     return either a pricing envelope or a refusal. An empty value is a
+//     protocol/host defect, not "no pricing".
 func GetCachePricing(provider, model string) (CachePricing, error) {
 	payload, err := json.Marshal(map[string]string{"provider": provider, "model": model})
 	if err != nil {
@@ -119,10 +127,10 @@ func GetCachePricing(provider, model string) (CachePricing, error) {
 		return CachePricing{}, err
 	}
 	if herr != nil {
-		// Expected advisory refusals degrade; caller/host defects surface.
+		// Expected advisory refusals degrade; permission/caller/host defects
+		// surface.
 		switch herr.Code {
-		case pbv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED,
-			pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
+		case pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
 			pbv2.ErrorCode_ERROR_CODE_UNAVAILABLE:
 			return CachePricing{Status: "unavailable", Reason: hostErrorReason(herr)}, nil
 		default:
@@ -130,7 +138,7 @@ func GetCachePricing(provider, model string) (CachePricing, error) {
 		}
 	}
 	if len(res) == 0 {
-		return CachePricing{Status: "unavailable", Reason: "no_result"}, nil
+		return CachePricing{}, fmt.Errorf("torana: host returned no cache pricing result")
 	}
 	var out CachePricing
 	if err := json.Unmarshal(res, &out); err != nil {
