@@ -36,9 +36,9 @@ type StreamFixture struct {
 	// Index is the content block the expectation is about. Fixtures with more
 	// than one block exist precisely to catch verifiers that correlate wrongly.
 	//
-	// Multi-block fixtures are SEQUENTIAL — one block opens, fills and stops
-	// before the next opens. v2 forbids two simultaneously open content blocks,
-	// so an "interleaved" fixture would teach a topology the contract rejects.
+	// Sequential fixtures stay valid: the contract permits interleaving only
+	// among TOOL blocks (non-tool content remains exclusive), so the interleaved
+	// fixture below exercises exactly that concurrent-tool topology.
 	Index int32
 	// Want is the classification for that block's signature.
 	Want SignatureMutation
@@ -169,6 +169,33 @@ func SignatureStreamFixtures() []StreamFixture {
 			Why: "Same streams as above, different block. A verifier keying on anything " +
 				"but the block index cannot produce both answers.",
 		},
+		{
+			Name:     "two concurrently open tool blocks, interleaved deltas, both intact",
+			Accepted: interleavedToolBlocks(),
+			Returned: interleavedToolBlocks(),
+			Index:    0,
+			Want:     SignatureIntact,
+			Why: "OpenAI Chat shape: block 1 opens and its deltas interleave before " +
+				"block 0 closes. Tokens travel with their blocks — a verifier that " +
+				"tracks a single open block or pools fragments across indexes " +
+				"misattributes block 1's content to block 0.",
+		},
+		{
+			// Twin of the fixture above over the SAME event slices, asking for
+			// block 1. A concurrency-specific failure — recording the first open
+			// tool correctly but ignoring or overwriting the second — can pass
+			// the index-0 fixture; the sequential index-1 fixtures do not
+			// exercise that shape. The concurrent shape must classify BOTH
+			// indexes, and the hard-case test asserts exactly that.
+			Name:     "two concurrently open tool blocks, interleaved deltas, second call intact",
+			Accepted: interleavedToolBlocks(),
+			Returned: interleavedToolBlocks(),
+			Index:    1,
+			Want:     SignatureIntact,
+			Why: "The second concurrently opened tool block must classify intact too: " +
+				"a verifier that tracks a single open block or drops the second " +
+				"start misattributes or loses block 1's signature.",
+		},
 	}
 }
 
@@ -202,4 +229,47 @@ func toolBlockDeltas(index int32, id, name, signature string, args ...string) []
 			ContentBlockStop: &pbv2.ContentBlockStop{Index: index},
 		},
 	})
+}
+
+// interleavedToolBlocks renders two tool-call blocks that are open
+// CONCURRENTLY, with their arguments deltas interleaved by index — the OpenAI
+// Chat parallel-tool shape. Block 1 starts before block 0 stops, so only an
+// index-keyed assembler/verifier can keep the two argument buffers apart.
+func interleavedToolBlocks() []*pbv2.StreamEvent {
+	return []*pbv2.StreamEvent{
+		{Event: &pbv2.StreamEvent_ContentBlockStart{
+			ContentBlockStart: &pbv2.ContentBlockStart{
+				Index: 0,
+				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{
+					Id: "call_1", Name: "read_file", Signature: sigA,
+				}},
+			},
+		}},
+		{Event: &pbv2.StreamEvent_ToolCallDelta{
+			ToolCallDelta: &pbv2.ToolCallDelta{Index: 0, ArgumentsDelta: `{"path":`},
+		}},
+		{Event: &pbv2.StreamEvent_ContentBlockStart{
+			ContentBlockStart: &pbv2.ContentBlockStart{
+				Index: 1,
+				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{
+					Id: "call_2", Name: "write_file", Signature: sigB,
+				}},
+			},
+		}},
+		{Event: &pbv2.StreamEvent_ToolCallDelta{
+			ToolCallDelta: &pbv2.ToolCallDelta{Index: 1, ArgumentsDelta: `{"path":`},
+		}},
+		{Event: &pbv2.StreamEvent_ToolCallDelta{
+			ToolCallDelta: &pbv2.ToolCallDelta{Index: 0, ArgumentsDelta: `"/a"}`},
+		}},
+		{Event: &pbv2.StreamEvent_ToolCallDelta{
+			ToolCallDelta: &pbv2.ToolCallDelta{Index: 1, ArgumentsDelta: `"/b"}`},
+		}},
+		{Event: &pbv2.StreamEvent_ContentBlockStop{
+			ContentBlockStop: &pbv2.ContentBlockStop{Index: 0},
+		}},
+		{Event: &pbv2.StreamEvent_ContentBlockStop{
+			ContentBlockStop: &pbv2.ContentBlockStop{Index: 1},
+		}},
+	}
 }

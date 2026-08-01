@@ -4,6 +4,7 @@ package plugin_sdk
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"strconv"
 	"strings"
@@ -221,6 +222,182 @@ func TestStreamAssemblerFeedCorruptFrameOnStop(t *testing.T) {
 		}
 		if len(fr.Emit) != 0 || fr.Complete != nil {
 			t.Fatalf("must not pass stop alone: %+v", fr)
+		}
+	})
+}
+
+// Two tool blocks open CONCURRENTLY (OpenAI Chat shape): the second start
+// arrives before the first stop, and deltas for both indexes interleave.
+// Assembly is per-index host metadata, so each completed call must carry its
+// own complete arguments — the reviewer's regression 5.
+func TestStreamAssemblerInterleavedToolBlocks(t *testing.T) {
+	m := newMetaHost()
+	withMetaHost(m, func() {
+		asm := NewStreamAssembler().WithToolAssembly()
+		events := []*pbv2.StreamEvent{
+			{Event: &pbv2.StreamEvent_ContentBlockStart{ContentBlockStart: &pbv2.ContentBlockStart{
+				Index: 0,
+				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{Id: "call_1", Name: "read_file"}},
+			}}},
+			{Event: &pbv2.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv2.ToolCallDelta{Index: 0, ArgumentsDelta: `{"path":`}}},
+			{Event: &pbv2.StreamEvent_ContentBlockStart{ContentBlockStart: &pbv2.ContentBlockStart{
+				Index: 1,
+				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{Id: "call_2", Name: "write_file"}},
+			}}},
+			{Event: &pbv2.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv2.ToolCallDelta{Index: 1, ArgumentsDelta: `{"path":`}}},
+			{Event: &pbv2.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv2.ToolCallDelta{Index: 0, ArgumentsDelta: `"/a"}`}}},
+			{Event: &pbv2.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv2.ToolCallDelta{Index: 1, ArgumentsDelta: `"/b"}`}}},
+			{Event: &pbv2.StreamEvent_ContentBlockStop{ContentBlockStop: &pbv2.ContentBlockStop{Index: 0}}},
+			{Event: &pbv2.StreamEvent_ContentBlockStop{ContentBlockStop: &pbv2.ContentBlockStop{Index: 1}}},
+		}
+
+		var got []ToolCall
+		for _, ev := range events {
+			fr := asm.Feed(ev)
+			if fr.Err != nil {
+				t.Fatalf("feed %v: %v", ev, fr.Err)
+			}
+			if !fr.Suppress {
+				t.Fatalf("event must suppress while assembling: %v", ev)
+			}
+			if fr.Complete != nil {
+				got = append(got, *fr.Complete)
+			}
+		}
+		if len(got) != 2 {
+			t.Fatalf("completed calls: got %d want 2", len(got))
+		}
+		if got[0].Index != 0 || got[0].ID != "call_1" || got[0].Name != "read_file" ||
+			got[0].Arguments != `{"path":"/a"}` {
+			t.Fatalf("block 0 assembled wrong: %+v", got[0])
+		}
+		if got[1].Index != 1 || got[1].ID != "call_2" || got[1].Name != "write_file" ||
+			got[1].Arguments != `{"path":"/b"}` {
+			t.Fatalf("block 1 assembled wrong: %+v", got[1])
+		}
+	})
+}
+
+// A non-tool start while a tool block is open is a contract violation, but the
+// ASSEMBLER only handles tool blocks: it passes non-tool starts through and
+// leaves exclusivity to the HOST validator, which has the full open-block set.
+// The tool block's own assembly must be unaffected.
+func TestStreamAssemblerPassesNonToolStartThroughWhileToolOpen(t *testing.T) {
+	m := newMetaHost()
+	withMetaHost(m, func() {
+		asm := NewStreamAssembler().WithToolAssembly()
+		fr := asm.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStart{
+			ContentBlockStart: &pbv2.ContentBlockStart{
+				Index: 0,
+				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{Id: "c", Name: "n"}},
+			},
+		}})
+		if !fr.Suppress || fr.Err != nil {
+			t.Fatalf("tool start %+v", fr)
+		}
+
+		// Text start while the tool block is open: passed through, not buffered.
+		fr = asm.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStart{
+			ContentBlockStart: &pbv2.ContentBlockStart{
+				Index: 1,
+				Block: &pbv2.ContentBlockStart_Text{Text: &pbv2.TextBlock{}},
+			},
+		}})
+		if fr.Err != nil || fr.Suppress || fr.Complete != nil || len(fr.Emit) != 1 {
+			t.Fatalf("non-tool start %+v", fr)
+		}
+
+		// The tool block's own deltas still assemble independently.
+		if fr := asm.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ToolCallDelta{
+			ToolCallDelta: &pbv2.ToolCallDelta{Index: 0, ArgumentsDelta: `{"a":1}`},
+		}}); !fr.Suppress || fr.Err != nil {
+			t.Fatalf("delta %+v", fr)
+		}
+		fr = asm.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStop{
+			ContentBlockStop: &pbv2.ContentBlockStop{Index: 0},
+		}})
+		if fr.Err != nil || fr.Complete == nil || fr.Complete.Arguments != `{"a":1}` {
+			t.Fatalf("stop %+v", fr)
+		}
+	})
+}
+
+// StreamHandler presents BOTH concurrently assembled tool calls to the
+// callback, each with its own complete arguments, in stop order, and emits the
+// re-assembled blocks in the same order.
+func TestStreamHandlerConcurrentToolBlocks(t *testing.T) {
+	m := newMetaHost()
+	withMetaHost(m, func() {
+		h := NewStreamHandler()
+		var got []ToolCall
+		h.OnToolCall(func(_ context.Context, call ToolCall) (ToolCallAction, error) {
+			got = append(got, call)
+			return PassToolCall(), nil
+		})
+		events := []*pbv2.StreamEvent{
+			{Event: &pbv2.StreamEvent_ContentBlockStart{ContentBlockStart: &pbv2.ContentBlockStart{
+				Index: 0,
+				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{Id: "call_1", Name: "read_file"}},
+			}}},
+			{Event: &pbv2.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv2.ToolCallDelta{Index: 0, ArgumentsDelta: `{"path":`}}},
+			{Event: &pbv2.StreamEvent_ContentBlockStart{ContentBlockStart: &pbv2.ContentBlockStart{
+				Index: 1,
+				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{Id: "call_2", Name: "write_file"}},
+			}}},
+			{Event: &pbv2.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv2.ToolCallDelta{Index: 1, ArgumentsDelta: `{"path":`}}},
+			{Event: &pbv2.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv2.ToolCallDelta{Index: 0, ArgumentsDelta: `"/a"}`}}},
+			{Event: &pbv2.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv2.ToolCallDelta{Index: 1, ArgumentsDelta: `"/b"}`}}},
+			{Event: &pbv2.StreamEvent_ContentBlockStop{ContentBlockStop: &pbv2.ContentBlockStop{Index: 0}}},
+			{Event: &pbv2.StreamEvent_ContentBlockStop{ContentBlockStop: &pbv2.ContentBlockStop{Index: 1}}},
+		}
+
+		var emitted []*pbv2.StreamEvent
+		for _, ev := range events {
+			res, err := h.Handle(context.Background(), ev)
+			if err != nil {
+				t.Fatalf("handle %v: %v", ev, err)
+			}
+			if res.inner != nil {
+				if ee := res.inner.GetEmitEvents(); ee != nil {
+					emitted = append(emitted, ee.GetEvents()...)
+				}
+			}
+		}
+
+		if len(got) != 2 {
+			t.Fatalf("callbacks: got %d want 2", len(got))
+		}
+		if got[0].Index != 0 || got[0].Arguments != `{"path":"/a"}` {
+			t.Fatalf("call 0: %+v", got[0])
+		}
+		if got[1].Index != 1 || got[1].Arguments != `{"path":"/b"}` {
+			t.Fatalf("call 1: %+v", got[1])
+		}
+
+		if len(emitted) != 6 {
+			t.Fatalf("emitted events: got %d want 6 (start+delta+stop per block)", len(emitted))
+		}
+		if s := emitted[0].GetContentBlockStart(); s == nil || s.GetIndex() != 0 ||
+			s.GetToolCall().GetId() != "call_1" {
+			t.Fatalf("emitted block 0 start: %+v", emitted[0])
+		}
+		if d := emitted[1].GetToolCallDelta(); d == nil || d.GetIndex() != 0 ||
+			d.GetArgumentsDelta() != `{"path":"/a"}` {
+			t.Fatalf("emitted block 0 delta: %+v", emitted[1])
+		}
+		if s := emitted[2].GetContentBlockStop(); s == nil || s.GetIndex() != 0 {
+			t.Fatalf("emitted block 0 stop: %+v", emitted[2])
+		}
+		if s := emitted[3].GetContentBlockStart(); s == nil || s.GetIndex() != 1 ||
+			s.GetToolCall().GetId() != "call_2" {
+			t.Fatalf("emitted block 1 start: %+v", emitted[3])
+		}
+		if d := emitted[4].GetToolCallDelta(); d == nil || d.GetIndex() != 1 ||
+			d.GetArgumentsDelta() != `{"path":"/b"}` {
+			t.Fatalf("emitted block 1 delta: %+v", emitted[4])
+		}
+		if s := emitted[5].GetContentBlockStop(); s == nil || s.GetIndex() != 1 {
+			t.Fatalf("emitted block 1 stop: %+v", emitted[5])
 		}
 	})
 }

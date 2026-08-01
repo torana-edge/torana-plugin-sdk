@@ -222,14 +222,17 @@ authority matches (assistant text on request and response). Topology is separate
   not synthesize an empty block, and bind the preceding attributed
   text/thinking of the turn.
 * Block indexes are unique across the entire streamed message and are never
-  reused after close; delta/stop must match the currently open start. At most
-  one content block may be open — a second start before stop is invalid;
-  MessageStop/end-of-stream with an open block is invalid unless that block was
-  terminally aborted by `StreamError`. Duplicate/open-missing sequences are
-  invalid. Parallel tool calls are sequential blocks with distinct indexes.
-* `StreamError` is a **terminal abort**: may arrive mid-block; abandons the open
-  block and incomplete tool-call buffers without a synthetic `ContentBlockStop`;
-  ends the stream (no `MessageStop` required); any later event is invalid. It is
+  reused after close; tool deltas/stops bind their open tool block by index.
+  Non-tool content (text/thinking/provider) is exclusive — at most one
+  non-tool block may be open, and no tool block may be open with it — but
+  MULTIPLE tool blocks may be open concurrently (OpenAI Chat streams parallel
+  tool calls this way), each at its own unique index. MessageStop/end-of-stream
+  with ANY block open is invalid unless the open blocks were terminally aborted
+  by `StreamError`. Duplicate/open-missing sequences are invalid.
+* `StreamError` is a **terminal abort**: may arrive mid-block; abandons ALL
+  open blocks and incomplete tool-call buffers without synthetic
+  `ContentBlockStop`s; ends the stream (no `MessageStop` required); any later
+  event is invalid. It is
   also host-owned — do not forge provider-looking upstream failures; suppress
   under topology, trap under `failure_mode`, or use attributed verdicts.
 * Nested message fields use `PolicyContainer` (or presence-sensitive

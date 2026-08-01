@@ -343,3 +343,37 @@ func TestWrongVerifiersFailTheFixtures(t *testing.T) {
 		})
 	}
 }
+
+// The concurrent-tool shape must classify BOTH blocks: a fixture that only
+// asks about index 0 lets a verifier record the first open tool correctly
+// while ignoring or overwriting the second concurrently opened one. This
+// guard pins both expectations so a later cleanup cannot silently remove one.
+func TestConcurrentToolFixtureCoversBothIndexes(t *testing.T) {
+	var concurrent []StreamFixture
+	for _, f := range SignatureStreamFixtures() {
+		if len(f.Accepted) == 0 || len(f.Returned) == 0 {
+			continue
+		}
+		// The concurrent shape is the one whose accepted stream opens two tool
+		// blocks before either closes.
+		var sawStarts []int32
+		for _, ev := range f.Accepted {
+			if s, ok := ev.Event.(*pbv2.StreamEvent_ContentBlockStart); ok && s.ContentBlockStart.GetToolCall() != nil {
+				sawStarts = append(sawStarts, s.ContentBlockStart.Index)
+			}
+		}
+		if len(sawStarts) >= 2 {
+			concurrent = append(concurrent, f)
+		}
+	}
+	if len(concurrent) < 2 {
+		t.Fatalf("expected the concurrent shape to carry at least two fixtures (one per block), got %d", len(concurrent))
+	}
+	wants := map[int32]SignatureMutation{}
+	for _, f := range concurrent {
+		wants[f.Index] = f.Want
+	}
+	if wants[0] != SignatureIntact || wants[1] != SignatureIntact {
+		t.Fatalf("concurrent shape must classify BOTH blocks intact, got %v", wants)
+	}
+}

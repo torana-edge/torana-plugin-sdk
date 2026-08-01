@@ -222,10 +222,11 @@ Opaque signatures (`thinking_signature`, `ToolCall.signature`,
 content while leaving the signature in place is invalid — the host must reject
 that mutation or clear the signature. On the stream path, `ToolCallRef.signature`
 binds `id`/`name` and `ToolCallDelta.arguments_delta` for the **same unique
-content-block index** (never reused after close; parallel tool calls are
-sequential blocks with distinct indexes). At most one content block may be open.
-`StreamError` is a terminal abort: it may arrive mid-block, abandons the open
-block and incomplete tool-call buffers without a synthetic stop, ends the
+content-block index** (never reused after close; adapters must assign distinct
+indexes to parallel tool calls, which may be open concurrently — non-tool
+content stays exclusive). `StreamError` is a terminal abort: it may arrive
+mid-block, abandons ALL open blocks and incomplete tool-call buffers without a
+synthetic stop, ends the
 stream, and makes any later event invalid. Streamed `signature_delta` with open
 text/thinking binds that block; a trailing signature-only part (Code Assist) is
 standalone — preserve it without synthesizing an empty block. `StreamError` is
