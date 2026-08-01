@@ -126,7 +126,6 @@ func TestSendRequestDecodesAFramedValue(t *testing.T) {
 	h := sdktest.New(t)
 	h.StubHostCall("torana_send_request", func(string) (string, error) {
 		body, _ := json.Marshal(map[string]any{
-			"status":      "ok",
 			"http_status": 200,
 			"body":        base64.StdEncoding.EncodeToString([]byte("hello")),
 		})

@@ -54,9 +54,13 @@ type EgressUsage struct {
 }
 
 // EgressResult is one plugin-originated request's outcome.
+//
+// It carries no status channel: a call that returns without error reached the
+// provider. A reached-but-refused provider is reported through HTTPStatus, not
+// a status field — SendRequest still returns an error for it, but the result
+// records the provider's actual status so a caller can tell a refusal apart
+// from a completed request.
 type EgressResult struct {
-	Status     string       `json:"status"`
-	Message    string       `json:"message,omitempty"`
 	HTTPStatus int          `json:"http_status,omitempty"`
 	Body       []byte       `json:"-"`
 	Usage      *EgressUsage `json:"usage,omitempty"`
@@ -143,13 +147,11 @@ func SendRequest(req *pbv2.ChatRequest, opts SendRequestOptions) (EgressResult, 
 			out.Body = decoded
 		}
 	}
-	if out.Status == "error" {
-		return out, fmt.Errorf("torana: %s", out.Message)
-	}
-	// A reached-but-refused provider is a failure, not a success. The host
-	// reports transport success separately from what the provider said, and a
-	// caller that only checked err would count a 401 as a completed request —
-	// burning its budget while achieving nothing and reporting that it worked.
+	// A reached-but-refused provider is a failure, not a success, reported
+	// through HTTPStatus: the host returns transport-level refusals as host
+	// errors, and a caller that only checked err would count a 401 as a
+	// completed request — burning its budget while achieving nothing and
+	// reporting that it worked.
 	//
 	// The most common cause is a provider with no credential of its own: on the
 	// normal request path Torana forwards the caller's, but a plugin-originated
