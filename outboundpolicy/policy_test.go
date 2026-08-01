@@ -569,6 +569,41 @@ func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 	}
 }
 
+// Completeness: removing ANY required request-domain binding must fail the
+// startup proof — Validate() must prove every pinned token has a declaration,
+// not just that the declarations that exist are well-formed. Table-driven over
+// all three tokens so a fourth token added to the contract table cannot
+// silently skip this check.
+func TestRequestBindingCompletenessRequiresEveryToken(t *testing.T) {
+	for _, token := range []string{"thinking_signature", "content_signature", "trailing_signature"} {
+		t.Run(token+" removed", func(t *testing.T) {
+			bindings := make([]SignatureBinding, 0, len(signatureBindings)-1)
+			for _, b := range signatureBindings {
+				if b.Domain == SignatureDomainRequest && b.SignatureField == token {
+					continue
+				}
+				bindings = append(bindings, b)
+			}
+			if err := validateRequestBindingCompleteness(bindings); err == nil {
+				t.Fatalf("removing the %s binding must fail the completeness pass", token)
+			}
+		})
+	}
+	// An extra, unpinned request token is equally a broken registry.
+	bindings := append([]SignatureBinding{}, signatureBindings...)
+	bindings = append(bindings, SignatureBinding{
+		Domain: SignatureDomainRequest, Message: "torana.v2.Message", SignatureField: "invented_signature",
+		Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "content"}},
+	})
+	if err := validateRequestBindingCompleteness(bindings); err == nil {
+		t.Fatal("an unpinned request token must fail the completeness pass")
+	}
+	// The real registry passes.
+	if err := validateRequestBindingCompleteness(signatureBindings); err != nil {
+		t.Fatalf("the real registry must pass: %v", err)
+	}
+}
+
 // The pinned content sets compare as SETS: declaration order is irrelevant, so
 // a registry that lists the same covered fields in a different order is still
 // the same contract.

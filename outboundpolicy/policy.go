@@ -931,8 +931,50 @@ func Validate() error {
 	if err := validateSignatureBindingUniqueness(); err != nil {
 		return err
 	}
+	if err := validateRequestBindingCompleteness(signatureBindings); err != nil {
+		return err
+	}
 	if err := validateBoundSignaturePairing(); err != nil {
 		return err
+	}
+	return nil
+}
+
+// validateRequestBindingCompleteness proves every pinned request-domain
+// contract is actually DECLARED. validateRequestBindingShape validates the
+// bindings that exist; this pass proves the required ones are all present —
+// removing a token's binding entirely would otherwise leave Validate() green
+// while the B2 verifier has no definition of what the token covers. The
+// contract-table field set and the declared request-binding field set must be
+// exactly equal: each contract has exactly one binding, no extra request token
+// exists, and neither table may declare a field twice.
+func validateRequestBindingCompleteness(bindings []SignatureBinding) error {
+	declared := map[string]bool{}
+	for _, b := range bindings {
+		if b.Domain != SignatureDomainRequest {
+			continue
+		}
+		if declared[b.SignatureField] {
+			return fmt.Errorf("request-domain binding %s is declared more than once", b.SignatureField)
+		}
+		declared[b.SignatureField] = true
+	}
+	required := map[string]bool{}
+	for i := range requestSignatureContracts {
+		if required[requestSignatureContracts[i].field] {
+			return fmt.Errorf("request signature contract %s is declared more than once", requestSignatureContracts[i].field)
+		}
+		required[requestSignatureContracts[i].field] = true
+	}
+	for field := range required {
+		if !declared[field] {
+			return fmt.Errorf("request-domain binding for %s is missing: nothing defines what content the token covers", field)
+		}
+	}
+	for field := range declared {
+		if !required[field] {
+			return fmt.Errorf("request-domain binding %s is not a pinned contract", field)
+		}
 	}
 	return nil
 }
