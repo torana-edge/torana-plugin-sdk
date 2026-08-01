@@ -414,10 +414,26 @@ func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 			Message: "torana.v2.Message", SignatureField: "thinking_signature",
 			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "thinking"}},
 		},
+		// Request-domain TrailingStandalone is pinned to exactly
+		// torana.v2.Message.trailing_signature: a corrupted registry must not
+		// be able to relabel an ordinary string field (content) as the opaque
+		// token and still pass the host's startup Validate() check.
+		{
+			Domain: SignatureDomainRequest, Message: "torana.v2.Message", SignatureField: "content",
+			Content: []SignatureContentRef{{Scope: SignatureScopeTrailingStandalone, Field: "thinking"}},
+		},
+		{
+			Domain: SignatureDomainRequest, Message: "torana.v2.ToolCall", SignatureField: "trailing_signature",
+			Content: []SignatureContentRef{{Scope: SignatureScopeTrailingStandalone, Field: "name"}},
+		},
+		{
+			Domain: SignatureDomainRequest, Message: "torana.v2.Message", SignatureField: "trailing_signature",
+			Content: []SignatureContentRef{{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.ToolCall", Field: "name"}},
+		},
 	}
 	for i, b := range bad {
 		if err := b.validateShape(); err == nil {
-			t.Errorf("case %d: expected shape error", i)
+			t.Errorf("case %d: expected shape error: %+v", i, b)
 		}
 	}
 }

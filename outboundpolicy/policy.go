@@ -489,8 +489,12 @@ func (b SignatureBinding) validateShape() error {
 			}
 		case SignatureScopeTrailingStandalone:
 			// Outbound: the stream signature_delta must name the message whose
-			// text/thinking deltas it covers. Request: Message.trailing_signature
-			// covers fields of the SAME message, so Message must stay empty.
+			// text/thinking deltas it covers. Request: the ONLY supported shape
+			// is Message.trailing_signature covering fields of the SAME message.
+			// Pinning the exact message and field stops a corrupted registry
+			// from relabeling an ordinary string field (e.g. content) as the
+			// opaque token — Validate() is the host's startup proof that the
+			// policy table is coherent (edge calls it before serving).
 			if b.Domain == SignatureDomainOutbound {
 				if b.SignatureField != "signature_delta" {
 					return fmt.Errorf("%s.%s: TrailingStandalone only valid on signature_delta",
@@ -500,9 +504,15 @@ func (b SignatureBinding) validateShape() error {
 					return fmt.Errorf("%s.%s content[%d]: scope %v requires Message",
 						b.Message, b.SignatureField, i, c.Scope)
 				}
-			} else if c.Message != "" {
-				return fmt.Errorf("%s.%s content[%d]: request-domain TrailingStandalone must not name a different message",
-					b.Message, b.SignatureField, i)
+			} else {
+				if b.Message != "torana.v2.Message" || b.SignatureField != "trailing_signature" {
+					return fmt.Errorf("%s.%s: request-domain TrailingStandalone only valid on Message.trailing_signature",
+						b.Message, b.SignatureField)
+				}
+				if c.Message != "" {
+					return fmt.Errorf("%s.%s content[%d]: request-domain TrailingStandalone must not name a different message",
+						b.Message, b.SignatureField, i)
+				}
 			}
 		}
 	}
