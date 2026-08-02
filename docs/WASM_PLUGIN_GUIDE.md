@@ -202,6 +202,11 @@ Enforcement is Migration B. Declare every `ir.*.write` capability you need in
 `plugin.json`. Content grants reuse the same names across hooks where the
 authority matches (assistant text on request and response). Topology is separate:
 
+* `ir.cache_control.write` covers the cache breakpoint marker ONLY —
+  `Message.cache_control_json` and `ToolDef.cache_control_json`. It does not
+  authorise message or tool content/schema changes, and the message-role
+  grants / `ir.tools.write` do not authorise those marker fields. A
+  cache-economics plugin needs this one grant, not a prompt-rewriter's.
 * `ir.stream.write` is **additive**. Suppress, fan-out, event-kind change, and
   block-boundary edits need it **plus** every content section you **change,
   remove, or add**. It cannot alone authorise changing or forging host-owned

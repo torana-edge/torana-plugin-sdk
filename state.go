@@ -136,21 +136,31 @@ func StateGetJSON(key string, v any) (found bool, err error) {
 	return true, nil
 }
 
-// stateError converts a classified refusal into an error for the JSON
-// convenience helpers.
+// stateError converts a classified refusal into an error that satisfies BOTH
+// classification contracts at once:
 //
-// NOT_CONFIGURED wraps ErrStateUnavailable so errors.Is keeps working, as that
-// sentinel's documentation has always promised. The raw typed helpers return
-// *HostError and let the caller classify; these wrappers exist to be
-// convenient, and a convenience that drops the classification is not.
+//   - errors.As recovers the typed *HostCallRefusalError (Code, Reason,
+//     Message) for EVERY framed refusal, so a caller can branch on the class
+//     without string matching — advisory (NOT_CONFIGURED/UNAVAILABLE) versus
+//     contract/protocol (PERMISSION_DENIED/INVALID_ARGUMENT/INTERNAL) versus
+//     absence (NOT_FOUND);
+//   - errors.Is(err, ErrStateUnavailable) stays true for NOT_CONFIGURED, as
+//     that sentinel's documentation has always promised.
+//
+// A malformed or empty host reply is a protocol defect and deliberately does
+// NOT produce a refusal: nothing was classified, so errors.As must not match.
 func stateError(key string, herr *pbv2.HostError) error {
 	if herr == nil {
 		return nil
 	}
+	refusal := classifiedRefusal(herr)
+	wrapped := fmt.Errorf("torana: state %q: %w", key, refusal)
 	if herr.Code == pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED {
-		return fmt.Errorf("torana: state %q: %w: %s", key, ErrStateUnavailable, herr.Message)
+		// Join both so errors.Is(ErrStateUnavailable) and errors.As(refusal)
+		// hold simultaneously — one contract must not replace the other.
+		return errors.Join(wrapped, ErrStateUnavailable)
 	}
-	return fmt.Errorf("torana: state %q: %s: %s", key, hostErrorReason(herr), herr.Message)
+	return wrapped
 }
 
 // StateSetJSON encodes v and stores it.
@@ -187,8 +197,10 @@ func Now() (int64, error) {
 		return 0, err
 	}
 	if herr != nil {
-		return 0, fmt.Errorf("torana: clock is unavailable (%s): %s",
-			hostErrorReason(herr), herr.Message)
+		// The classification survives: errors.As recovers the typed refusal,
+		// exactly like the state helpers. An empty or malformed success is a
+		// protocol defect and is NOT a refusal.
+		return 0, fmt.Errorf("torana: clock is unavailable: %w", classifiedRefusal(herr))
 	}
 	if len(raw) == 0 {
 		return 0, errors.New("torana: clock returned no reading")
