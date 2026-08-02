@@ -140,11 +140,12 @@ func TestWritePermissionsAreSorted(t *testing.T) {
 	}
 }
 
-// TestCacheControlWriteFieldInventory pins the documented field inventory of
-// the ir.cache_control.write grant against the ACTUAL proto descriptors: the
-// grant covers exactly Message.cache_control_json and ToolDef.cache_control_json
-// (both bytes fields). If a future proto change renames or moves either field,
-// or the inventory doc drifts, this test forces a deliberate update.
+// TestCacheControlWriteFieldInventory anchors the two SDK-documented
+// descriptor fields of the ir.cache_control.write grant: it proves
+// Message.cache_control_json and ToolDef.cache_control_json exist as bytes
+// fields, so a future proto rename or doc drift forces a deliberate update.
+// It does NOT prove the host maps no third field — that positive-and-negative
+// enforcement inventory is the Edge verifier PR's job.
 func TestCacheControlWriteFieldInventory(t *testing.T) {
 	msgFields := (&pbv2.Message{}).ProtoReflect().Descriptor().Fields()
 	toolFields := (&pbv2.ToolDef{}).ProtoReflect().Descriptor().Fields()

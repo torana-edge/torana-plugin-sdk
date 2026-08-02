@@ -205,6 +205,7 @@ opaque signatures) are **host-owned** — immutable under plugin mutation
 
 | Capability | Covers |
 | --- | --- |
+| `ir.cache_control.write` | The cache breakpoint marker ONLY: `Message.cache_control_json` and `ToolDef.cache_control_json`. It does NOT authorise message or tool content/schema changes, and the message-role grants / `ir.tools.write` do NOT authorise these marker fields — a plugin that changes a breakpoint marker must hold this grant, and nothing else it changes is covered by it. |
 | `ir.messages.write.{user,assistant,system,tool,developer,other}` | Message **content** of that role (request and response). Not response role or signatures. |
 | `ir.tools.write` | Tool definitions on the request. |
 | `ir.model.write` | **Request** model selection only. |
@@ -370,6 +371,37 @@ Treat every field as optional. An empty value means the host did not supply it,
 and a plugin that would spend money on the strength of it should decline instead.
 
 ---
+
+
+**Classified refusals through the convenience helpers**
+
+`StateGetJSON`, `StateSetJSON`, and `sdk.Now()` return plain `error`s, but the
+classification is preserved: any framed host refusal unwraps with `errors.As`
+into `*sdk.HostCallRefusalError` (Code, Reason, Message), so you branch
+advisory-vs-contract without string matching. State `NOT_CONFIGURED`
+simultaneously satisfies `errors.Is(err, sdk.ErrStateUnavailable)` — both
+contracts hold for the same error:
+
+```go
+var refusal *sdk.HostCallRefusalError
+if errors.As(err, &refusal) {
+    switch refusal.Code {
+    case pb.ErrorCode_ERROR_CODE_NOT_CONFIGURED, pb.ErrorCode_ERROR_CODE_UNAVAILABLE:
+        // Advisory: decline and continue — retrying now cannot help.
+    default:
+        // Contract/protocol defect (PERMISSION_DENIED, INVALID_ARGUMENT,
+        // INTERNAL, ...): return the error so the host applies failure_mode.
+    }
+}
+if errors.Is(err, sdk.ErrStateUnavailable) {
+    // State-specific advisory: durable state is not configured.
+}
+```
+
+`StateGetJSON` keeps its special absence contract: a `NOT_FOUND` refusal means
+`found == false` with a nil error. Malformed frames, empty successes, and
+local decode/marshal failures are plain errors — `errors.As` will NOT match a
+refusal, because nothing was classified.
 
 ## 5. Describing your configuration (`schema.json`)
 
