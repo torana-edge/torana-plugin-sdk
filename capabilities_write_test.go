@@ -4,6 +4,10 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"google.golang.org/protobuf/reflect/protoreflect"
+
+	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
 
 // Every message role Torana models must have a write grant, and every write
@@ -133,5 +137,36 @@ func TestPermissionsHasNoDuplicates(t *testing.T) {
 func TestWritePermissionsAreSorted(t *testing.T) {
 	if !sort.StringsAreSorted(WritePermissions) {
 		t.Errorf("WritePermissions is not sorted: %v", WritePermissions)
+	}
+}
+
+// TestCacheControlWriteFieldInventory pins the documented field inventory of
+// the ir.cache_control.write grant against the ACTUAL proto descriptors: the
+// grant covers exactly Message.cache_control_json and ToolDef.cache_control_json
+// (both bytes fields). If a future proto change renames or moves either field,
+// or the inventory doc drifts, this test forces a deliberate update.
+func TestCacheControlWriteFieldInventory(t *testing.T) {
+	msgFields := (&pbv2.Message{}).ProtoReflect().Descriptor().Fields()
+	toolFields := (&pbv2.ToolDef{}).ProtoReflect().Descriptor().Fields()
+
+	msgCC := msgFields.ByName("cache_control_json")
+	if msgCC == nil || msgCC.Kind() != protoreflect.BytesKind {
+		t.Fatalf("Message.cache_control_json missing or not bytes: %v", msgCC)
+	}
+	toolCC := toolFields.ByName("cache_control_json")
+	if toolCC == nil || toolCC.Kind() != protoreflect.BytesKind {
+		t.Fatalf("ToolDef.cache_control_json missing or not bytes: %v", toolCC)
+	}
+
+	// The grant names exactly these two fields; the vocabulary constant and
+	// the permission list agree.
+	if SectionCacheControl != "ir.cache_control.write" {
+		t.Fatalf("SectionCacheControl=%q", SectionCacheControl)
+	}
+	if !IsWritePermission("ir.cache_control.write") {
+		t.Fatal("ir.cache_control.write is not a write grant")
+	}
+	if !IsPermission("ir.cache_control.write") {
+		t.Fatal("ir.cache_control.write is absent from Permissions — hosts build their allowlist from it")
 	}
 }

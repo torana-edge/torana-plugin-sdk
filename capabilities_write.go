@@ -36,6 +36,7 @@ package plugin_sdk
 // disclosure control worth doing on its own terms, later, with that cost
 // measured rather than assumed.
 var WritePermissions = []string{
+	"ir.cache_control.write",
 	"ir.messages.write.assistant",
 	"ir.messages.write.developer",
 	"ir.messages.write.other",
@@ -52,6 +53,22 @@ var WritePermissions = []string{
 type WriteSection string
 
 const (
+	// SectionCacheControl covers the cache_control_json marker on messages and
+	// on tool definitions — and ONLY those two fields. Changing a breakpoint
+	// marker changes the provider's cached prefix bytes (and buys a different
+	// cache lifetime), so it is a write, but it is NOT a content, role, tool
+	// identity/schema, model, params, stream, topology, or signature mutation.
+	// A cache-economics plugin therefore needs this one grant, not a role's
+	// message grant or ir.tools.write — the approval UI must describe it as
+	// what it is, not as a universal prompt rewriter.
+	//
+	// FIELD INVENTORY (pinned by TestCacheControlWriteFieldInventory):
+	//   - pbv2.Message.cache_control_json
+	//   - pbv2.ToolDef.cache_control_json
+	// Nothing else is authorised by this grant. Enforcement lives in the host
+	// verifier (edge); the SDK pins the documented contract.
+	SectionCacheControl WriteSection = "ir.cache_control.write"
+
 	// SectionMessagesUser and friends cover one message role each. A change at
 	// a position where the role differs on either side needs both grants: a
 	// reorder or replacement involves the role that left the slot and the one
