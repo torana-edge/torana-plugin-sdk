@@ -240,7 +240,28 @@ in package `outboundpolicy` (not for WASM guests).
 | --- | --- | --- |
 | `env.original_request` | `sdk.OriginalRequest` | The caller's pristine request, before any plugin ran. Plugins are chained, so this is the only way to see what was actually sent. |
 | `env.original_response` | `sdk.OriginalResponse` | The raw upstream body. Non-streaming only — streams are never buffered. |
-| `env.request_headers` | via `ToranaMeta` | Allowlisted request headers. |
+| `env.request_headers` | via `ToranaMeta` **and** `HttpRequest.headers_json` | Allowlisted request headers (see below). Applies **per target**: the grant is checked against the exact plugin that will execute, for both the chat metadata surface (`ToranaMeta` `_request_headers`) and the HTTP hook surface (`HttpRequest.headers_json`). |
+
+**HTTP hook headers — three classes, enforced at dispatch**
+
+`run_on_http_request` handlers receive `HttpRequest.headers_json`, a
+JSON-encoded `map[string][]string`. The host forwards ONLY:
+
+- **safe operational headers, always visible:** `Accept`, `Content-Type`,
+  `User-Agent`;
+- **credential/identity headers, only when your exact plugin holds the
+  approved `env.request_headers` grant:** `Authorization`, `X-Api-Key`,
+  `X-Torana-User`, `X-Torana-Team`, `X-Torana-Tenant`;
+- **everything else is never forwarded** — including `Cookie`,
+  `Proxy-Authorization`, arbitrary custom secret headers, and
+  `X-Torana-Agent` (which is caller-controlled, not host-injected; never
+  treat it as trusted).
+
+Allowed multi-values are preserved under their canonical names. The filter
+runs at the plugin dispatch boundary against the target plugin's approved
+grants: a caller-supplied `headers_json` is never authoritative, and plugin B
+does not inherit sensitive-header access merely because plugin A holds the
+grant. There is no v1 behavior to rely on here.
 
 **State — pick the right one; the wrong choice fails silently**
 

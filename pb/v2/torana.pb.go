@@ -1837,8 +1837,16 @@ type HttpRequest struct {
 	// Caller address, for a plugin that wants to refuse non-local requests
 	// itself. The host has already applied its own guard before dispatching.
 	RemoteAddr string `protobuf:"bytes,5,opt,name=remote_addr,json=remoteAddr,proto3" json:"remote_addr,omitempty"`
-	// JSON-encoded map of request headers (map[string][]string), filtered by the
-	// host to the same allowlist the chat path uses.
+	// JSON-encoded map of request headers (map[string][]string). The host
+	// forwards ONLY the safe operational headers (Accept, Content-Type,
+	// User-Agent) unconditionally, plus the credential/identity headers
+	// (Authorization, X-Api-Key, X-Torana-User, X-Torana-Team, X-Torana-Tenant)
+	// when the exact executing plugin holds the approved env.request_headers
+	// grant. All other headers — including Cookie, Proxy-Authorization,
+	// arbitrary custom secrets, and X-Torana-Agent — are never forwarded.
+	// Allowed multi-values are preserved under their canonical names. This is
+	// enforced at the plugin dispatch boundary; a caller-supplied value here is
+	// never authoritative.
 	HeadersJson   []byte `protobuf:"bytes,6,opt,name=headers_json,json=headersJson,proto3" json:"headers_json,omitempty"`
 	Body          []byte `protobuf:"bytes,7,opt,name=body,proto3" json:"body,omitempty"`
 	unknownFields protoimpl.UnknownFields
