@@ -386,7 +386,7 @@ contracts hold for the same error:
 var refusal *sdk.HostCallRefusalError
 if errors.As(err, &refusal) {
     switch refusal.Code {
-    case pb.ErrorCode_ERROR_CODE_NOT_CONFIGURED, pb.ErrorCode_ERROR_CODE_UNAVAILABLE:
+    case pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED, pbv2.ErrorCode_ERROR_CODE_UNAVAILABLE:
         // Advisory: decline and continue — retrying now cannot help.
     default:
         // Contract/protocol defect (PERMISSION_DENIED, INVALID_ARGUMENT,
@@ -399,9 +399,17 @@ if errors.Is(err, sdk.ErrStateUnavailable) {
 ```
 
 `StateGetJSON` keeps its special absence contract: a `NOT_FOUND` refusal means
-`found == false` with a nil error. Malformed frames, empty successes, and
-local decode/marshal failures are plain errors — `errors.As` will NOT match a
-refusal, because nothing was classified.
+`found == false` with a nil error. The error classes are precise:
+
+- malformed `HostCallResult` frames are protocol errors, never refusals;
+- `StateGetJSON` on a present-empty value is a local JSON decode error (and
+  is not absence);
+- `Now` on an empty or non-numeric successful value is a local/protocol
+  reading error;
+- local JSON marshal/decode errors are not refusals;
+- `StateSetJSON` may validly succeed with an empty result value — setters
+  have no result payload, so an empty value is a successful ack, not an
+  error.
 
 ## 5. Describing your configuration (`schema.json`)
 
