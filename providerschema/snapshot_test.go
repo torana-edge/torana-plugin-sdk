@@ -3,41 +3,50 @@ package providerschema
 // Offline provider-schema inventory (no network; the vendored artifacts
 // are the immutable inputs):
 //
-//   - TestSnapshotArtifactDigestsPinned — the vendored bytes match the
-//     manifest digests (tamper / un-re-vendored artifact detection).
-//   - TestSnapshotGeneratedExact — an in-memory re-render of snapshot.gen.go
-//     is byte-identical to the checked-in file (artifact change without
+//   - TestSnapshotArtifactDigestsPinned — vendored bytes match the manifest
+//     digests (tamper / un-re-vendored artifact detection).
+//   - TestSnapshotGeneratedExact — an in-memory re-render is byte-identical
+//     to the checked-in snapshot.gen.go (artifact/manifest change without
 //     regeneration fails; determinism across runs).
-//   - TestSnapshotInventoryBidirectional — the decision set is EXACTLY the
-//     generated node set, both directions, namespaced. Every nested member
-//     (FunctionResponseBlob/FileData, mediaResolution.level and its enum
-//     values, the scheduling enum values) participates.
-//   - TestSnapshotInventoryAdversarial — revert-proven rows: deleting,
-//     substituting, or adding any node/decision fails the SAME guard.
-//   - TestSnapshotWireSpellings — camelCase across EVERY table.
+//   - TestSnapshotInventoryBidirectional — the generated decision set is
+//     EXACTLY the generated node set, both directions, namespaced; every
+//     nested member and enum value participates.
+//   - TestSnapshotUnionInventoryExact — SchemaNodes() (generated ∪
+//     agent-platform) is the complete union: every returned node resolves
+//     via CarrierFor, and no decision in either map is stale.
+//   - TestSnapshotInventoryAdversarial — revert-proven rows for the SAME
+//     guards (removal/drop/substitution/addition/stale).
+//   - TestSnapshotWireSpellings — camelCase across every table.
 //   - TestSnapshotVocabularyPinned — usable vocabularies derived from the
 //     decisions; UNSPECIFIED excluded exactly like any unknown value.
 //   - TestAgentPlatformArmsHonest — the agent-platform arms are a reviewed
-//     NON-descriptor decision: grep-verified absent from the vendored
-//     artifacts, never claimed as descriptor-derived.
+//     NON-descriptor decision: parsed oneof identities + tokenized
+//     snake_case text guards prove absence from the vendored artifacts
+//     (a synthetic tool_call row must trip the same guard), and the
+//     separate decision map is validated bidirectionally.
+//   - TestSchemaNodesDeepCloneIsolation — exported accessors never expose
+//     the authority: mutation of returned nodes/surfaces is invisible.
 
 import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/torana-edge/torana-plugin-sdk/providerschema/gen"
 )
 
 // TestSnapshotArtifactDigestsPinned: the vendored artifacts must match the
 // manifest digests. Changing a vendored proto without re-vendoring (and
 // regenerating) fails here.
 func TestSnapshotArtifactDigestsPinned(t *testing.T) {
-	m, err := LoadManifest()
+	m, err := gen.LoadManifest()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyVendoredDigests(m); err != nil {
+	if err := gen.VerifyVendoredDigests(m); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -47,11 +56,11 @@ func TestSnapshotArtifactDigestsPinned(t *testing.T) {
 // manifest provenance or the vendored artifacts without regenerating
 // fails here.
 func TestSnapshotGeneratedExact(t *testing.T) {
-	got, err := RenderGeneratedFile()
+	got, err := gen.RenderGeneratedFile()
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := RenderGeneratedFile()
+	again, err := gen.RenderGeneratedFile()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,36 +74,25 @@ func TestSnapshotGeneratedExact(t *testing.T) {
 	if !bytes.Equal(got, checkedIn) {
 		t.Fatal("snapshot.gen.go is stale: regenerate with ./generate.sh and review the diff")
 	}
-	// Provenance header: the manifest SHAs must appear in the generated
-	// file, so changing a SHA in the manifest without regenerating fails.
-	for _, f := range mustManifest(t).Files {
+	m, err := gen.LoadManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range m.Files {
 		if !bytes.Contains(got, []byte(f.UpstreamCommitSHA)) {
 			t.Errorf("generated file does not record upstream SHA %s", f.UpstreamCommitSHA)
 		}
 	}
 }
 
-func mustManifest(t *testing.T) *Manifest {
-	t.Helper()
-	m, err := LoadManifest()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return m
-}
-
 // TestSnapshotInventoryBidirectional: every generated node has exactly one
-// decision and every decision names a generated node. The node set is
-// namespaced and includes nested members and enum values, so a deletion,
-// substitution, or addition anywhere in the schema surface fails.
+// decision and every decision names a generated node.
 func TestSnapshotInventoryBidirectional(t *testing.T) {
-	// Direction 1: every node has a decision.
 	for _, n := range schemaNodes {
 		if _, ok := schemaCarrierDecisions[n.ID]; !ok {
 			t.Errorf("schema node %s has no carrier decision; add one to schemaCarrierDecisions", n.ID)
 		}
 	}
-	// Direction 2: every decision names a node (stale decisions fail).
 	nodes := map[string]bool{}
 	for _, n := range schemaNodes {
 		nodes[n.ID] = true
@@ -102,6 +100,30 @@ func TestSnapshotInventoryBidirectional(t *testing.T) {
 	for id := range schemaCarrierDecisions {
 		if !nodes[id] {
 			t.Errorf("carrier decision %s names no schema node; remove or re-vendor", id)
+		}
+	}
+}
+
+// TestSnapshotUnionInventoryExact (finding 2): SchemaNodes() is the
+// complete surface union, and EVERY node it returns — generated or
+// reviewed — has exactly one resolvable decision through CarrierFor. No
+// decision in either map is stale.
+func TestSnapshotUnionInventoryExact(t *testing.T) {
+	seen := map[string]bool{}
+	for _, n := range SchemaNodes() {
+		seen[n.ID] = true
+		if CarrierFor(n.ID) == "" {
+			t.Errorf("union node %s has no resolvable decision", n.ID)
+		}
+	}
+	for _, n := range schemaNodes {
+		if !seen[n.ID] {
+			t.Errorf("generated node %s missing from SchemaNodes()", n.ID)
+		}
+	}
+	for _, n := range agentPlatformArms {
+		if !seen[n.ID] {
+			t.Errorf("agent-platform node %s missing from SchemaNodes()", n.ID)
 		}
 	}
 }
@@ -119,9 +141,6 @@ func TestSnapshotInventoryAdversarial(t *testing.T) {
 		}
 		return out
 	}
-	// inventoryBroken runs the LIVE bidirectional invariant (the same
-	// logic as TestSnapshotInventoryBidirectional) against one mutated
-	// side and reports whether the mutation is caught.
 	inventoryBroken := func(nodes []SchemaNode, decisions map[string]string) bool {
 		for _, n := range nodes {
 			if _, ok := decisions[n.ID]; !ok {
@@ -166,7 +185,7 @@ func TestSnapshotInventoryAdversarial(t *testing.T) {
 	}
 
 	// Removing a nested FunctionResponseBlob member (the class finding 3
-	// called out) must fail the guard.
+	// of round 1 called out) must fail the guard.
 	for _, removed := range members("function-response-blob.member.") {
 		ns := clone(schemaNodes)
 		filtered := ns[:0]
@@ -178,7 +197,6 @@ func TestSnapshotInventoryAdversarial(t *testing.T) {
 		check("remove node "+removed+" (decision kept stale)", filtered, cloneDec(), true)
 		check("drop decision "+removed+" (node kept)", clone(schemaNodes), dropDec(cloneDec(), removed), true)
 	}
-	// Same for FileData members and mediaResolution.level.
 	for _, removed := range members("function-response-file-data.member.") {
 		ns := clone(schemaNodes)
 		filtered := ns[:0]
@@ -190,7 +208,6 @@ func TestSnapshotInventoryAdversarial(t *testing.T) {
 		check("remove node "+removed+" (decision kept stale)", filtered, cloneDec(), true)
 		check("drop decision "+removed+" (node kept)", clone(schemaNodes), dropDec(cloneDec(), removed), true)
 	}
-	// Removing the mediaResolution.level member (the object shape) fails.
 	{
 		ns := clone(schemaNodes)
 		filtered := ns[:0]
@@ -203,9 +220,7 @@ func TestSnapshotInventoryAdversarial(t *testing.T) {
 		check("drop decision media-resolution.member.level (node kept)", clone(schemaNodes), dropDec(cloneDec(), "media-resolution.member.level"), true)
 	}
 	// Substituting an arm member spelling is caught by the WIRE-SPELLING
-	// guard (the bidirectional inventory is ID-based by design; the
-	// spelling guard is TestSnapshotWireSpellings). Run that guard's logic
-	// here as the revert proof.
+	// guard (the bidirectional inventory is ID-based by design).
 	{
 		ns := clone(schemaNodes)
 		for i := range ns {
@@ -238,12 +253,12 @@ func TestSnapshotInventoryAdversarial(t *testing.T) {
 
 // TestSnapshotWireSpellings: EVERY generated member is a camelCase wire
 // spelling — arms, ancillaries, FunctionResponse members, nested blob/
-// file-data members, the mediaResolution level member, and enum values
-// (enum values are the canonical provider spellings, not proto names).
+// file-data members, the mediaResolution level member. Enum values are
+// canonical provider spellings, pinned exactly by TestSnapshotVocabularyPinned.
 func TestSnapshotWireSpellings(t *testing.T) {
 	for _, n := range schemaNodes {
 		if n.Kind == "enum-value" {
-			continue // canonical provider enum spellings, pinned exactly by TestSnapshotVocabularyPinned
+			continue
 		}
 		if strings.Contains(n.Member, "_") {
 			t.Errorf("node %s member %q is not a camelCase wire spelling", n.ID, n.Member)
@@ -252,7 +267,7 @@ func TestSnapshotWireSpellings(t *testing.T) {
 			t.Errorf("node %s has an empty member", n.ID)
 		}
 	}
-	for _, a := range AgentPlatformArms {
+	for _, a := range agentPlatformArms {
 		if strings.Contains(a.Member, "_") {
 			t.Errorf("agent-platform arm %s member %q is not a camelCase wire spelling", a.ID, a.Member)
 		}
@@ -261,8 +276,7 @@ func TestSnapshotWireSpellings(t *testing.T) {
 
 // TestSnapshotVocabularyPinned: the usable vocabularies are DERIVED from
 // the decisions; SCHEDULING_UNSPECIFIED and MEDIA_RESOLUTION_UNSPECIFIED
-// are excluded exactly like any unknown value, and absence stays distinct
-// (the docs + Edge acceptance rows pin the same rule).
+// are excluded exactly like any unknown value, and absence stays distinct.
 func TestSnapshotVocabularyPinned(t *testing.T) {
 	got := UsableEnumValues("scheduling.enum.")
 	want := []string{"SILENT", "WHEN_IDLE", "INTERRUPT"}
@@ -282,42 +296,167 @@ func TestSnapshotVocabularyPinned(t *testing.T) {
 	}
 }
 
-// TestAgentPlatformArmsHonest: the agent-platform arms are a reviewed
-// NON-descriptor decision. They must be absent from every vendored
-// artifact (grep, on the pinned bytes), and the docs must not claim
-// descriptor provenance for them.
+// TestAgentPlatformArmsHonest (finding 3): the agent-platform arms are a
+// reviewed NON-descriptor decision. The absence guard is IDENTITY-based —
+// the PARSED oneof members of every vendored artifact must not contain
+// them — plus a tokenized snake_case text guard as defense in depth (a
+// raw substring search for the camelCase spelling would miss the real
+// proto member). A synthetic Part containing tool_call must trip the same
+// guard, and the separate decision map is validated bidirectionally.
 func TestAgentPlatformArmsHonest(t *testing.T) {
-	for _, a := range AgentPlatformArms {
-		if strings.HasPrefix(a.ID, "part.arm.") {
-			// They must not exist in any vendored artifact.
-			for _, f := range mustManifest(t).Files {
-				raw, err := os.ReadFile(filepath.Join("source", f.Local))
-				if err != nil {
-					t.Fatal(err)
-				}
-				if bytes.Contains(raw, []byte(strings.ToLower(a.Member[:1])+a.Member[1:])) {
-					// proto member would be tool_call / tool_response
-					t.Errorf("agent-platform arm %s appears in vendored %s; move it into the descriptor-derived tables", a.ID, f.Local)
-				}
+	// (a) Parsed-identity guard: the generated node set (derived from the
+	// vendored artifacts) contains no agent-platform arm.
+	parsed, _, err := gen.ParseVendoredSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsedIDs := map[string]bool{}
+	for _, n := range parsed {
+		parsedIDs[n.ID] = true
+	}
+	for _, a := range agentPlatformArms {
+		if parsedIDs[a.ID] {
+			t.Errorf("agent-platform arm %s is descriptor-derived; move it into the generated tables", a.ID)
+		}
+	}
+
+	// (b) Tokenized snake_case text guard over the vendored bytes: the
+	// exact proto spellings, word-bounded — a real `tool_call` member
+	// anywhere in a vendored file must trip it (comments cannot, because
+	// the token is the proto member name and the guard scans the raw
+	// bytes for the word).
+	guard := func(raw []byte, protoMember string) bool {
+		return regexp.MustCompile(`\b` + regexp.QuoteMeta(protoMember) + `\b`).Match(raw)
+	}
+	m, err := gen.LoadManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range agentPlatformArms {
+		protoMember := snakeMember(a.Member)
+		for _, f := range m.Files {
+			raw, err := os.ReadFile(filepath.Join("source", f.Local))
+			if err != nil {
+				t.Fatal(err)
 			}
-			// And the SEPARATE decision map must carry them like other
-			// unknown arms (payload carrier).
-			if got := AgentPlatformCarrierDecisions[a.ID]; got != "torana.v2.RequestUnknownBlock.payload_json" {
-				t.Errorf("agent-platform arm %s decision = %q, want the unknown-payload carrier", a.ID, got)
+			if guard(raw, protoMember) {
+				t.Errorf("agent-platform proto member %s appears in vendored %s; move it into the descriptor-derived tables", protoMember, f.Local)
 			}
 		}
+	}
+
+	// (c) Synthetic rejection: the SAME guards trip on a synthetic Part
+	// declaring tool_call inside oneof data.
+	synthetic := "message Part {\n  oneof data {\n    string tool_call = 2;\n  }\n}"
+	if !guard([]byte(synthetic), "tool_call") {
+		t.Fatal("synthetic tool_call not caught by the tokenized text guard")
+	}
+	syntheticNodes, err := gen.SyntheticPartArms(synthetic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !syntheticNodes["part.arm.toolCall"] {
+		t.Fatal("synthetic tool_call was not classified as an arm — the parsed-identity guard would MISS a real vendored tool_call")
+	}
+	// The collision is the failure mode the guard exists to prevent: a
+	// vendored tool_call arm and the separate non-descriptor declaration
+	// would both claim part.arm.toolCall.
+	if parsedIDs["part.arm.toolCall"] {
+		t.Fatal("parsed vendored set contains part.arm.toolCall (descriptor + non-descriptor collision)")
+	}
+
+	// (d) The separate decision map is bidirectionally exact: missing,
+	// extra, duplicate, or wrong-carrier rows all fail.
+	seen := map[string]bool{}
+	for _, a := range agentPlatformArms {
+		seen[a.ID] = true
+		if got := agentPlatformCarrierDecisions[a.ID]; got != "torana.v2.RequestUnknownBlock.payload_json" {
+			t.Errorf("agent-platform arm %s decision = %q, want the unknown-payload carrier", a.ID, got)
+		}
+	}
+	for id := range agentPlatformCarrierDecisions {
+		if !seen[id] {
+			t.Errorf("agent-platform decision %s names no arm", id)
+		}
+	}
+	if len(agentPlatformCarrierDecisions) != len(agentPlatformArms) {
+		t.Errorf("agent-platform decision count %d != arm count %d", len(agentPlatformCarrierDecisions), len(agentPlatformArms))
+	}
+}
+
+// snakeMember converts a camelCase wire member back to the exact proto
+// snake_case spelling (toolCall -> tool_call).
+func snakeMember(member string) string {
+	var out []rune
+	for _, r := range member {
+		if r >= 'A' && r <= 'Z' {
+			out = append(out, '_', r-'A'+'a')
+		} else {
+			out = append(out, r)
+		}
+	}
+	return string(out)
+}
+
+// TestSchemaNodesDeepCloneIsolation (finding 2): exported accessors never
+// expose the authority — mutating returned nodes (including their Surfaces
+// slices) is invisible to later callers.
+func TestSchemaNodesDeepCloneIsolation(t *testing.T) {
+	first := SchemaNodes()
+	second := SchemaNodes()
+	if len(first) == 0 {
+		t.Fatal("SchemaNodes() returned nothing")
+	}
+	// Mutate the returned structs and their surface slices.
+	first[0].Member = "corrupted"
+	first[0].Kind = "corrupted"
+	first[0].Surfaces[0] = "corrupted-surface"
+	first[0].Surfaces = append(first[0].Surfaces, "corrupted-extra")
+	for i := 1; i < len(first); i++ {
+		if len(first[i].Surfaces) > 0 {
+			first[i].Surfaces[0] = "corrupted-surface"
+		}
+	}
+	// The authority and a fresh clone are untouched.
+	if second[0].Member == "corrupted" || second[0].Kind == "corrupted" {
+		t.Fatal("member/kind mutation leaked into a later clone")
+	}
+	for _, n := range second {
+		for _, s := range n.Surfaces {
+			if s == "corrupted-surface" || s == "corrupted-extra" {
+				t.Fatalf("surface mutation leaked: %s surfaces %v", n.ID, n.Surfaces)
+			}
+		}
+	}
+	for _, n := range schemaNodes {
+		for _, s := range n.Surfaces {
+			if s == "corrupted-surface" || s == "corrupted-extra" {
+				t.Fatalf("surface mutation leaked into the authority: %s", n.ID)
+			}
+		}
+	}
+	// CarrierFor resolves across the union and returns "" only for
+	// unknown IDs.
+	if CarrierFor("part.arm.toolCall") == "" {
+		t.Fatal("CarrierFor must resolve the agent-platform union")
+	}
+	if CarrierFor("part.arm.text") == "" {
+		t.Fatal("CarrierFor must resolve generated nodes")
+	}
+	if CarrierFor("no.such.node") != "" {
+		t.Fatal("CarrierFor must return \"\" for unknown IDs")
 	}
 }
 
 // TestSchemaNodesCoverSurfaces: every generated node has at least one
-// surface and every surface name is known.
+// known surface.
 func TestSchemaNodesCoverSurfaces(t *testing.T) {
 	for _, n := range schemaNodes {
 		if len(n.Surfaces) == 0 {
 			t.Errorf("node %s has no surface", n.ID)
 		}
 		for _, s := range n.Surfaces {
-			if s != surfaceGemini && s != surfaceVertex {
+			if s != gen.SurfaceGemini && s != gen.SurfaceVertex {
 				t.Errorf("node %s has unknown surface %q", n.ID, s)
 			}
 		}

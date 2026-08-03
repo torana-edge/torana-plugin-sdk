@@ -2,11 +2,12 @@
 // Part/FunctionResponse inventory is validated against.
 //
 // The SCHEMA FACTS live in snapshot.gen.go, GENERATED from the vendored
-// artifacts (source/*.proto) by generate.go — see source/manifest.json for
-// the immutable upstream revisions (repository, commit SHA, path/URL,
-// fetch date, Apache-2.0 license) and generate.sh for the deterministic
-// update command. Ordinary tests and CI compare against the checked-in
-// generated file and the vendored bytes; they never need the network.
+// artifacts (source/*.proto) by the gen subpackage — see
+// source/manifest.json for the immutable upstream revisions (repository,
+// commit SHA, path/URL, fetch date, Apache-2.0 license) and generate.sh
+// for the deterministic update command. Ordinary tests and CI compare
+// against the checked-in generated file and the vendored bytes; they
+// never need the network.
 //
 // This file holds the REVIEWED DECISIONS on top of those facts: which ABI
 // carrier (or explicit rejection) each schema node maps to, and the
@@ -15,7 +16,19 @@
 // EXACTLY the generated node set in both directions, so a new provider
 // member fails until a decision is recorded and a stale decision fails
 // until it is removed.
+//
+// The source tables are PACKAGE-PRIVATE; every exported accessor returns
+// deep clones or immutable scalars so no importer can mutate the
+// authority another caller observes.
 package providerschema
+
+import (
+	"github.com/torana-edge/torana-plugin-sdk/providerschema/gen"
+)
+
+// SchemaNode is the generated schema-node type (aliased from the gen
+// subpackage; snapshot.gen.go is generated against this alias).
+type SchemaNode = gen.SchemaNode
 
 // SnapshotRevision pins the exact upstream state the snapshot was
 // generated from (must match source/manifest.json).
@@ -102,39 +115,63 @@ var schemaCarrierDecisions = map[string]string{
 	"scheduling.enum.SCHEDULING_UNSPECIFIED": DecisionExcludedValue,
 }
 
-// AgentPlatformArms are Part data arms of the agent-platform surface. They
-// are NOT present in any vendored artifact (grep-verified by
-// TestAgentPlatformArmsHonest); they are a REVIEWED non-descriptor
-// decision, cited from the agent-platform surface by the reviewing round
-// (SDK_SIGNED_PART_CHECKPOINT.md §0) and carried like the other
-// future/unknown arms. A snapshot refresh must confirm them before any
-// generated table can claim descriptor provenance for them.
-var AgentPlatformArms = []SchemaNode{
-	{ID: "part.arm.toolCall", Member: "toolCall", Kind: "message", Surfaces: []string{"agent-platform"}},
-	{ID: "part.arm.toolResponse", Member: "toolResponse", Kind: "message", Surfaces: []string{"agent-platform"}},
+// agentPlatformArms are Part data arms of the agent-platform surface. They
+// are NOT present in any vendored artifact (the absence guard parses the
+// artifacts' oneof members and tokenizes the exact proto spellings); they
+// are a REVIEWED non-descriptor decision, cited from the agent-platform
+// surface by the reviewing round (SDK_SIGNED_PART_CHECKPOINT.md §0) and
+// carried like the other future/unknown arms. A snapshot refresh must
+// confirm them before any generated table can claim descriptor provenance
+// for them.
+var agentPlatformArms = []SchemaNode{
+	{ID: "part.arm.toolCall", Member: "toolCall", Kind: "message", Oneof: "data", Surfaces: []string{"agent-platform"}},
+	{ID: "part.arm.toolResponse", Member: "toolResponse", Kind: "message", Oneof: "data", Surfaces: []string{"agent-platform"}},
 }
 
-// SchemaNodes returns the generated node set plus the reviewed
-// agent-platform arms (the complete Part surface union).
-func SchemaNodes() []SchemaNode {
-	out := make([]SchemaNode, 0, len(schemaNodes)+len(AgentPlatformArms))
-	out = append(out, schemaNodes...)
-	out = append(out, AgentPlatformArms...)
-	return out
-}
-
-// AgentPlatformCarrierDecisions maps the reviewed non-descriptor arms to
+// agentPlatformCarrierDecisions maps the reviewed non-descriptor arms to
 // their carriers. Kept SEPARATE from schemaCarrierDecisions so the
 // bidirectional inventory over the generated nodes can never claim
-// descriptor provenance for them; TestAgentPlatformArmsHonest checks this
-// map and the artifacts' absence.
-var AgentPlatformCarrierDecisions = map[string]string{
+// descriptor provenance for them.
+var agentPlatformCarrierDecisions = map[string]string{
 	"part.arm.toolCall":     "torana.v2.RequestUnknownBlock.payload_json",
 	"part.arm.toolResponse": "torana.v2.RequestUnknownBlock.payload_json",
 }
 
-// CarrierFor returns the decision for a node ID ("" when absent).
-func CarrierFor(id string) string { return schemaCarrierDecisions[id] }
+// SchemaNodes returns a DEEP CLONE of the complete surface union: the
+// generated node set plus the reviewed agent-platform arms. Mutating the
+// returned nodes (including their Surfaces slices) never affects the
+// authority.
+func SchemaNodes() []SchemaNode {
+	out := make([]SchemaNode, 0, len(schemaNodes)+len(agentPlatformArms))
+	for _, n := range schemaNodes {
+		out = append(out, cloneNode(n))
+	}
+	for _, n := range agentPlatformArms {
+		out = append(out, cloneNode(n))
+	}
+	return out
+}
+
+func cloneNode(n SchemaNode) SchemaNode {
+	n.Surfaces = append([]string(nil), n.Surfaces...)
+	return n
+}
+
+// CarrierFor resolves the carrier decision for a node ID across the
+// COMPLETE union — generated nodes and the reviewed non-descriptor arms —
+// so a node returned by SchemaNodes() always has a resolvable decision
+// ("" only for unknown IDs). The provenance split is internal; the
+// decision for agent-platform arms is the unknown-payload carrier, the
+// same as any other future arm.
+func CarrierFor(id string) string {
+	if d, ok := schemaCarrierDecisions[id]; ok {
+		return d
+	}
+	if d, ok := agentPlatformCarrierDecisions[id]; ok {
+		return d
+	}
+	return ""
+}
 
 // UsableEnumValues returns the usable vocabulary for an enum node ID
 // (e.g. "scheduling.enum." or "media-resolution.level.enum."): every value

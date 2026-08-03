@@ -3,52 +3,56 @@
 //
 // Immutable upstream inputs (see source/manifest.json for full provenance,
 // fetch date, and license):
-//   google/ai/generativelanguage/v1beta/content.proto @ bc7e3baa28fbb223fa93782e130260fab8205bfc (2025-12-18T08:25:06Z)
-//   google/cloud/aiplatform/v1/content.proto @ fb6e47ad850029fd0c4deb96815550bd47bb42f2 (2026-07-20T19:22:08Z)
-//   google/cloud/aiplatform/v1/tool.proto @ fb6e47ad850029fd0c4deb96815550bd47bb42f2 (2026-07-20T19:22:08Z)
+//
+//	google/ai/generativelanguage/v1beta/content.proto @ bc7e3baa28fbb223fa93782e130260fab8205bfc (2025-12-18T08:25:06Z)
+//	google/cloud/aiplatform/v1/content.proto @ fb6e47ad850029fd0c4deb96815550bd47bb42f2 (2026-07-20T19:22:08Z)
+//	google/cloud/aiplatform/v1/tool.proto @ fb6e47ad850029fd0c4deb96815550bd47bb42f2 (2026-07-20T19:22:08Z)
 //
 // Deterministic regeneration: ./generate.sh (byte-identical across runs;
 // TestSnapshotGeneratedExact enforces it offline).
 package providerschema
 
-// schemaNodes is the complete machine-derived node set.
+// schemaNodes is the complete machine-derived node set. Every node
+// carries the contract dimensions the adapter grammar needs: oneof
+// membership (arms are `data`-oneof members), repeated cardinality,
+// proto3 optional presence, and google.api.field_behavior.
 var schemaNodes = []SchemaNode{
-	{ID: "function-response-blob.member.data", Member: "data", Kind: "bytes", Surfaces: []string{"gemini", "vertex"}},
-	{ID: "function-response-blob.member.displayName", Member: "displayName", Kind: "string", Surfaces: []string{"vertex"}},
-	{ID: "function-response-blob.member.mimeType", Member: "mimeType", Kind: "string", Surfaces: []string{"gemini", "vertex"}},
-	{ID: "function-response-file-data.member.displayName", Member: "displayName", Kind: "string", Surfaces: []string{"vertex"}},
-	{ID: "function-response-file-data.member.fileUri", Member: "fileUri", Kind: "string", Surfaces: []string{"vertex"}},
-	{ID: "function-response-file-data.member.mimeType", Member: "mimeType", Kind: "string", Surfaces: []string{"vertex"}},
-	{ID: "function-response-part.arm.fileData", Member: "fileData", Kind: "message", Surfaces: []string{"vertex"}},
-	{ID: "function-response-part.arm.inlineData", Member: "inlineData", Kind: "message", Surfaces: []string{"gemini", "vertex"}},
-	{ID: "function-response.member.id", Member: "id", Kind: "string", Surfaces: []string{"gemini"}},
-	{ID: "function-response.member.name", Member: "name", Kind: "string", Surfaces: []string{"gemini", "vertex"}},
-	{ID: "function-response.member.parts", Member: "parts", Kind: "repeated-FunctionResponsePart", Surfaces: []string{"gemini", "vertex"}},
-	{ID: "function-response.member.response", Member: "response", Kind: "object", Surfaces: []string{"gemini", "vertex"}},
-	{ID: "function-response.member.scheduling", Member: "scheduling", Kind: "enum", Surfaces: []string{"gemini"}},
-	{ID: "function-response.member.willContinue", Member: "willContinue", Kind: "bool", Surfaces: []string{"gemini"}},
-	{ID: "media-resolution.level.enum.MEDIA_RESOLUTION_HIGH", Member: "MEDIA_RESOLUTION_HIGH", Kind: "enum-value", Surfaces: []string{"vertex"}},
-	{ID: "media-resolution.level.enum.MEDIA_RESOLUTION_LOW", Member: "MEDIA_RESOLUTION_LOW", Kind: "enum-value", Surfaces: []string{"vertex"}},
-	{ID: "media-resolution.level.enum.MEDIA_RESOLUTION_MEDIUM", Member: "MEDIA_RESOLUTION_MEDIUM", Kind: "enum-value", Surfaces: []string{"vertex"}},
-	{ID: "media-resolution.level.enum.MEDIA_RESOLUTION_ULTRA_HIGH", Member: "MEDIA_RESOLUTION_ULTRA_HIGH", Kind: "enum-value", Surfaces: []string{"vertex"}},
-	{ID: "media-resolution.level.enum.MEDIA_RESOLUTION_UNSPECIFIED", Member: "MEDIA_RESOLUTION_UNSPECIFIED", Kind: "enum-value", Surfaces: []string{"vertex"}},
-	{ID: "media-resolution.member.level", Member: "level", Kind: "enum", Surfaces: []string{"vertex"}},
-	{ID: "part.ancillary.mediaResolution", Member: "mediaResolution", Kind: "message", Surfaces: []string{"vertex"}},
-	{ID: "part.ancillary.partMetadata", Member: "partMetadata", Kind: "object", Surfaces: []string{"gemini"}},
-	{ID: "part.ancillary.thought", Member: "thought", Kind: "bool", Surfaces: []string{"gemini", "vertex"}},
-	{ID: "part.ancillary.thoughtSignature", Member: "thoughtSignature", Kind: "bytes", Surfaces: []string{"gemini", "vertex"}},
-	{ID: "part.ancillary.videoMetadata", Member: "videoMetadata", Kind: "message", Surfaces: []string{"gemini", "vertex"}},
-	{ID: "part.arm.codeExecutionResult", Member: "codeExecutionResult", Kind: "message", Surfaces: []string{"gemini", "vertex"}},
-	{ID: "part.arm.executableCode", Member: "executableCode", Kind: "message", Surfaces: []string{"gemini", "vertex"}},
-	{ID: "part.arm.fileData", Member: "fileData", Kind: "message", Surfaces: []string{"gemini", "vertex"}},
-	{ID: "part.arm.functionCall", Member: "functionCall", Kind: "message", Surfaces: []string{"gemini", "vertex"}},
-	{ID: "part.arm.functionResponse", Member: "functionResponse", Kind: "message", Surfaces: []string{"gemini", "vertex"}},
-	{ID: "part.arm.inlineData", Member: "inlineData", Kind: "message", Surfaces: []string{"gemini", "vertex"}},
-	{ID: "part.arm.text", Member: "text", Kind: "string", Surfaces: []string{"gemini", "vertex"}},
-	{ID: "scheduling.enum.INTERRUPT", Member: "INTERRUPT", Kind: "enum-value", Surfaces: []string{"gemini"}},
-	{ID: "scheduling.enum.SCHEDULING_UNSPECIFIED", Member: "SCHEDULING_UNSPECIFIED", Kind: "enum-value", Surfaces: []string{"gemini"}},
-	{ID: "scheduling.enum.SILENT", Member: "SILENT", Kind: "enum-value", Surfaces: []string{"gemini"}},
-	{ID: "scheduling.enum.WHEN_IDLE", Member: "WHEN_IDLE", Kind: "enum-value", Surfaces: []string{"gemini"}},
+	{ID: "function-response-blob.member.data", Member: "data", Kind: "bytes", Surfaces: []string{"gemini", "vertex"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "REQUIRED"},
+	{ID: "function-response-blob.member.displayName", Member: "displayName", Kind: "string", Surfaces: []string{"vertex"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "OPTIONAL"},
+	{ID: "function-response-blob.member.mimeType", Member: "mimeType", Kind: "string", Surfaces: []string{"gemini", "vertex"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "REQUIRED"},
+	{ID: "function-response-file-data.member.displayName", Member: "displayName", Kind: "string", Surfaces: []string{"vertex"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "OPTIONAL"},
+	{ID: "function-response-file-data.member.fileUri", Member: "fileUri", Kind: "string", Surfaces: []string{"vertex"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "REQUIRED"},
+	{ID: "function-response-file-data.member.mimeType", Member: "mimeType", Kind: "string", Surfaces: []string{"vertex"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "REQUIRED"},
+	{ID: "function-response-part.arm.fileData", Member: "fileData", Kind: "message", Surfaces: []string{"vertex"}, Oneof: "data", Repeated: false, Optional: false, FieldBehavior: "UNSPECIFIED"},
+	{ID: "function-response-part.arm.inlineData", Member: "inlineData", Kind: "message", Surfaces: []string{"gemini", "vertex"}, Oneof: "data", Repeated: false, Optional: false, FieldBehavior: "UNSPECIFIED"},
+	{ID: "function-response.member.id", Member: "id", Kind: "string", Surfaces: []string{"gemini"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "OPTIONAL"},
+	{ID: "function-response.member.name", Member: "name", Kind: "string", Surfaces: []string{"gemini", "vertex"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "REQUIRED"},
+	{ID: "function-response.member.parts", Member: "parts", Kind: "repeated-FunctionResponsePart", Surfaces: []string{"gemini", "vertex"}, Oneof: "", Repeated: true, Optional: false, FieldBehavior: "OPTIONAL"},
+	{ID: "function-response.member.response", Member: "response", Kind: "object", Surfaces: []string{"gemini", "vertex"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "REQUIRED"},
+	{ID: "function-response.member.scheduling", Member: "scheduling", Kind: "enum", Surfaces: []string{"gemini"}, Oneof: "", Repeated: false, Optional: true, FieldBehavior: "OPTIONAL"},
+	{ID: "function-response.member.willContinue", Member: "willContinue", Kind: "bool", Surfaces: []string{"gemini"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "OPTIONAL"},
+	{ID: "media-resolution.level.enum.MEDIA_RESOLUTION_HIGH", Member: "MEDIA_RESOLUTION_HIGH", Kind: "enum-value", Surfaces: []string{"vertex"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "UNSPECIFIED"},
+	{ID: "media-resolution.level.enum.MEDIA_RESOLUTION_LOW", Member: "MEDIA_RESOLUTION_LOW", Kind: "enum-value", Surfaces: []string{"vertex"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "UNSPECIFIED"},
+	{ID: "media-resolution.level.enum.MEDIA_RESOLUTION_MEDIUM", Member: "MEDIA_RESOLUTION_MEDIUM", Kind: "enum-value", Surfaces: []string{"vertex"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "UNSPECIFIED"},
+	{ID: "media-resolution.level.enum.MEDIA_RESOLUTION_ULTRA_HIGH", Member: "MEDIA_RESOLUTION_ULTRA_HIGH", Kind: "enum-value", Surfaces: []string{"vertex"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "UNSPECIFIED"},
+	{ID: "media-resolution.level.enum.MEDIA_RESOLUTION_UNSPECIFIED", Member: "MEDIA_RESOLUTION_UNSPECIFIED", Kind: "enum-value", Surfaces: []string{"vertex"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "UNSPECIFIED"},
+	{ID: "media-resolution.member.level", Member: "level", Kind: "enum", Surfaces: []string{"vertex"}, Oneof: "value", Repeated: false, Optional: false, FieldBehavior: "UNSPECIFIED"},
+	{ID: "part.ancillary.mediaResolution", Member: "mediaResolution", Kind: "message", Surfaces: []string{"vertex"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "UNSPECIFIED"},
+	{ID: "part.ancillary.partMetadata", Member: "partMetadata", Kind: "object", Surfaces: []string{"gemini"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "UNSPECIFIED"},
+	{ID: "part.ancillary.thought", Member: "thought", Kind: "bool", Surfaces: []string{"gemini", "vertex"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "OPTIONAL"},
+	{ID: "part.ancillary.thoughtSignature", Member: "thoughtSignature", Kind: "bytes", Surfaces: []string{"gemini", "vertex"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "OPTIONAL"},
+	{ID: "part.ancillary.videoMetadata", Member: "videoMetadata", Kind: "message", Surfaces: []string{"gemini", "vertex"}, Oneof: "metadata", Repeated: false, Optional: false, FieldBehavior: "OPTIONAL"},
+	{ID: "part.arm.codeExecutionResult", Member: "codeExecutionResult", Kind: "message", Surfaces: []string{"gemini", "vertex"}, Oneof: "data", Repeated: false, Optional: false, FieldBehavior: "OPTIONAL"},
+	{ID: "part.arm.executableCode", Member: "executableCode", Kind: "message", Surfaces: []string{"gemini", "vertex"}, Oneof: "data", Repeated: false, Optional: false, FieldBehavior: "OPTIONAL"},
+	{ID: "part.arm.fileData", Member: "fileData", Kind: "message", Surfaces: []string{"gemini", "vertex"}, Oneof: "data", Repeated: false, Optional: false, FieldBehavior: "OPTIONAL"},
+	{ID: "part.arm.functionCall", Member: "functionCall", Kind: "message", Surfaces: []string{"gemini", "vertex"}, Oneof: "data", Repeated: false, Optional: false, FieldBehavior: "OPTIONAL"},
+	{ID: "part.arm.functionResponse", Member: "functionResponse", Kind: "message", Surfaces: []string{"gemini", "vertex"}, Oneof: "data", Repeated: false, Optional: false, FieldBehavior: "OPTIONAL"},
+	{ID: "part.arm.inlineData", Member: "inlineData", Kind: "message", Surfaces: []string{"gemini", "vertex"}, Oneof: "data", Repeated: false, Optional: false, FieldBehavior: "OPTIONAL"},
+	{ID: "part.arm.text", Member: "text", Kind: "string", Surfaces: []string{"gemini", "vertex"}, Oneof: "data", Repeated: false, Optional: false, FieldBehavior: "OPTIONAL"},
+	{ID: "scheduling.enum.INTERRUPT", Member: "INTERRUPT", Kind: "enum-value", Surfaces: []string{"gemini"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "UNSPECIFIED"},
+	{ID: "scheduling.enum.SCHEDULING_UNSPECIFIED", Member: "SCHEDULING_UNSPECIFIED", Kind: "enum-value", Surfaces: []string{"gemini"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "UNSPECIFIED"},
+	{ID: "scheduling.enum.SILENT", Member: "SILENT", Kind: "enum-value", Surfaces: []string{"gemini"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "UNSPECIFIED"},
+	{ID: "scheduling.enum.WHEN_IDLE", Member: "WHEN_IDLE", Kind: "enum-value", Surfaces: []string{"gemini"}, Oneof: "", Repeated: false, Optional: false, FieldBehavior: "UNSPECIFIED"},
 }
 
 // schedulingArtifactOrder / mediaResolutionLevelArtifactOrder (provider enum order).
