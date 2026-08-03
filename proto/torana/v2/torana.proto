@@ -46,39 +46,149 @@ option go_package = "github.com/torana-edge/torana-plugin-sdk/pb/v2";
 // ---------------------------------------------------------------------------
 
 // A single turn in a chat conversation.
+//
+// The message BODY is the ordered block sequence: one authority, in provider
+// wire order, for every content fact (text, thinking, tool use, tool result,
+// cache breakpoints, unknown provider arms, signatures). There are no
+// competing flat content fields. An explicit empty provider message is one
+// RequestTextBlock with text == ""; an empty blocks list is not a second
+// spelling (a request Message always carries at least one block).
 message Message {
   string role = 1;
-  string content = 2;
-  // JSON array of multimodal parts (e.g. vision).
-  bytes content_parts_json = 3;
-  string thinking = 4;
-  string thinking_signature = 5;
-  string redacted_thinking = 6;
-  repeated ToolCall tool_calls = 7;
-  string tool_call_id = 8;
-  string tool_name = 9;
-  // Opaque provider cache breakpoint on this message (JSON object, e.g.
-  // Anthropic {"type":"ephemeral"}). Preserved verbatim across the plugin
-  // boundary so mutating plugins don't strip prompt-cache markers.
-  bytes cache_control_json = 10;
-  // Standalone provider signature on a trailing signature-only part (Code
-  // Assist's final {"thoughtSignature", "text":""} part after earlier text).
-  // SignatureScopeTrailingStandalone: binds the preceding closed
-  // text/thinking content of this message; does not bind tool-call blocks.
-  // The host must clear it when the covered content changes, or reject the
-  // mutation. Empty when the provider sent no trailing signature.
-  string trailing_signature = 11;
-  // Provider signature carried ON an ordinary text part (Gemini/Code Assist
-  // thoughtSignature beside non-thought text), covering that part's content.
-  // SignatureScopeSameMessage: binds this message's content field. Distinct
-  // from thinking_signature (thinking blocks) and trailing_signature
-  // (standalone final part). The host must clear it when the covered content
-  // changes, or reject the mutation. Empty when the provider sent no
-  // content-bound signature.
-  string content_signature = 12;
+  // The sole body authority. Order is provider wire order and is preserved
+  // exactly; the adapter never reorders blocks.
+  repeated RequestBlock blocks = 2;
+}
+
+// One ordered element of a request message body.
+message RequestBlock {
+  oneof kind {
+    RequestTextBlock text = 1;
+    RequestThinkingBlock thinking = 2;
+    RequestRedactedThinkingBlock redacted_thinking = 3;
+    RequestToolUseBlock tool_use = 4;
+    RequestToolResultBlock tool_result = 5;
+    RequestCacheBreakpoint cache_breakpoint = 6;
+    RequestUnknownBlock unknown = 7;
+    RequestTrailingSignatureBlock trailing_signature = 8;
+  }
+}
+
+// Plain text. Explicit empty text is a first-class arm (provider-visible
+// position must survive).
+message RequestTextBlock {
+  string text = 1;
+  // Opaque provider token bound to THIS text block (Gemini/Code Assist
+  // thoughtSignature beside non-thought text). Provenance-governed: the host
+  // verifier rejects a retained token over changed text (stale), requires a
+  // cleared token over changed text, and rejects added/changed/reused tokens.
+  string signature = 2;
+}
+
+// Extended thinking / reasoning text.
+message RequestThinkingBlock {
+  string text = 1;
+  // Opaque provider token bound to this thinking block (current-block
+  // signature). Provenance-governed exactly like RequestTextBlock.signature.
+  string signature = 2;
+}
+
+// A redacted reasoning block: the provider replaced the reasoning payload
+// with a placeholder; only the placeholder bytes survive.
+message RequestRedactedThinkingBlock {
+  string data = 1;
 }
 
 // An assistant's request to invoke a tool.
+//
+// Request-side tool calls are blocks at their exact wire position. Identity
+// (id/name) and arguments are writable under the containing message-role
+// grant; the provider signature token is provenance-governed.
+message RequestToolUseBlock {
+  // Required, non-empty, valid UTF-8.
+  string id = 1;
+  // Required, non-empty, valid UTF-8.
+  string name = 2;
+  // Required non-empty JSON object, verbatim (key order is part of the
+  // cacheable prefix). "{}" is the canonical empty arguments shape.
+  bytes arguments_json = 3;
+  // Opaque provider token bound to this call (e.g. Gemini thoughtSignature).
+  string signature = 4;
+}
+
+// A tool result at its exact wire position inside a (usually user-role)
+// message. Provider message boundaries stay intact: one provider message
+// with [text, tool_result, text] stays ONE Message with three blocks.
+message RequestToolResultBlock {
+  // Required, non-empty, valid UTF-8. Identifies the answered call; the
+  // host correlates it against the call the provider actually issued.
+  string tool_call_id = 1;
+  // Provider-neutral tool name when the wire carries one (empty otherwise).
+  string tool_name = 2;
+  // Ordered NESTED content of this result. Dedicated block types: nested
+  // tool uses/results/thinking/signatures are impossible at the type level.
+  // A present provider result is either a non-empty list or one explicit
+  // empty ToolResultTextBlock — never an empty list masquerading as "absent".
+  repeated ToolResultContentBlock content = 3;
+}
+
+// A provider cache breakpoint at an explicit position in the ordered body:
+// the breakpoint CLOSES the cached prefix at its position (after the content
+// it covers). Multiple markers per message are naturally representable;
+// there is no separate message-level summary field.
+message RequestCacheBreakpoint {
+  // Required JSON object, verbatim (e.g. Anthropic {"type":"ephemeral"}).
+  bytes marker_json = 1;
+}
+
+// A provider content arm Torana does not model, preserved at its exact wire
+// position.
+message RequestUnknownBlock {
+  // Required, non-empty provider wire kind/type name.
+  string kind = 1;
+  // Required validated JSON object: the block's payload with the
+  // discriminant and any canonical cache member REMOVED (the block kinds are
+  // the single authority for those facts).
+  bytes payload_json = 2;
+}
+
+// Code Assist's trailing signature-only empty-text part: the standalone
+// provider token binding the preceding CLOSED text/thinking content of this
+// message (never tool-call blocks). Assistant-only, singular, and FINAL.
+message RequestTrailingSignatureBlock {
+  // Required, non-empty.
+  string signature = 1;
+}
+
+// One ordered element of a tool result's nested content. Dedicated oneof:
+// nested tool use/result/thinking/signature blocks are unrepresentable.
+message ToolResultContentBlock {
+  oneof kind {
+    ToolResultTextBlock text = 1;
+    ToolResultUnknownBlock unknown = 2;
+    ToolResultCacheBreakpoint cache_breakpoint = 3;
+  }
+}
+
+message ToolResultTextBlock {
+  string text = 1;
+}
+
+message ToolResultUnknownBlock {
+  // Required, non-empty provider wire kind/type name.
+  string kind = 1;
+  // Required validated JSON object; canonical members removed.
+  bytes payload_json = 2;
+}
+
+message ToolResultCacheBreakpoint {
+  // Required JSON object, verbatim.
+  bytes marker_json = 1;
+}
+
+// A tool call on the RESPONSE path (ResponseMessage) or the stream
+// (ToolCallRef). Request-side tool calls use RequestToolUseBlock; this type
+// deliberately has no request-domain role.
 message ToolCall {
   string id = 1;
   string name = 2;

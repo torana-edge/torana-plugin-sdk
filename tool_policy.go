@@ -18,11 +18,12 @@ const ToolOutputMarker = "[torana-tool-output v1]"
 var nonzeroExitCodePattern = regexp.MustCompile(`(?i)(?:"exit_code"\s*:\s*|process exited with code\s+)([1-9][0-9]*)`)
 
 // ToolNamesByCallID recovers provider-neutral tool names for result messages.
-// Several wire adapters identify results only by tool_call_id.
+// Several wire adapters identify results only by tool_call_id. Operates on
+// the ordered body via the block helpers (tool-use blocks).
 func ToolNamesByCallID(messages []*pbv2.Message) map[string]string {
 	names := make(map[string]string)
 	for _, message := range messages {
-		for _, call := range message.ToolCalls {
+		for _, call := range ToolCalls(message) {
 			if call.Id != "" && call.Name != "" {
 				names[call.Id] = call.Name
 			}
@@ -31,11 +32,12 @@ func ToolNamesByCallID(messages []*pbv2.Message) map[string]string {
 	return names
 }
 
-// ToolCallsByID returns original call metadata for cache identity and recovery.
-func ToolCallsByID(messages []*pbv2.Message) map[string]*pbv2.ToolCall {
-	calls := make(map[string]*pbv2.ToolCall)
+// ToolCallsByID returns original call metadata for cache identity and
+// recovery (copied views).
+func ToolCallsByID(messages []*pbv2.Message) map[string]ToolCallView {
+	calls := make(map[string]ToolCallView)
 	for _, message := range messages {
-		for _, call := range message.ToolCalls {
+		for _, call := range ToolCalls(message) {
 			if call.Id != "" {
 				calls[call.Id] = call
 			}

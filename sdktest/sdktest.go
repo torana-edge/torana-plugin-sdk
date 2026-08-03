@@ -19,7 +19,7 @@
 //			return sdktest.HostResultValue([]byte(`{"completion":"EMAIL"}`)), nil
 //		})
 //
-//		res := h.BeforeRequest(&pbv2.ChatRequest{Messages: []*pbv2.Message{
+//		res := h.BeforeRequest(&pbv2.ChatRequest{Messages: []*pbv2.Message{{Role: "user", Blocks: []*pbv2.RequestBlock{{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "hi"}}}}},
 //			{Role: "tool", Content: "contact: someone@example.com"},
 //		}})
 //

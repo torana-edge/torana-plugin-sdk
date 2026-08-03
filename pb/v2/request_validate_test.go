@@ -1,16 +1,17 @@
 package v2_test
 
-// Normative request-replacement validation matrix (written before the
-// validator, per the review process). Every rule class is pinned here:
-// universal structural rules (nil nesting, unknown protobuf fields, finite
-// floats, non-empty identity fields) and the JSON field table (absent /
-// valid / malformed / wrong top-level / duplicate keys / lone surrogate per
-// field, with the documented top-level shape and absence capability).
+// Normative request-replacement validation matrix (the executable ABI
+// invariant/adversarial spec for the ordered message body). Every rule class
+// is pinned here: universal structural rules (nil nesting, unknown protobuf
+// fields, finite floats, block-grammar identity and placement) and the JSON
+// field table (absent / valid / malformed / wrong top-level / duplicate keys
+// / lone surrogate per field, with the documented top-level shape and
+// absence capability).
 //
-// These are REPLACEMENT-OUTPUT rules: accepted host input is normalized into
-// this closed domain before plugin dispatch. Tool-call ID rules apply to the
-// REQUEST context only — anonymous response tool calls keep their separate
-// generic ToolCall.Validate (host-owned IDs may be absent there).
+// These are ABSOLUTE STRUCTURAL rules: they validate what a plugin RETURNS
+// as a ReplaceRequest with no accepted request in sight. Relational
+// provenance (signature binding, grants, host-owned facts) is the host
+// verifier's layer, not this validator's.
 
 import (
 	"math"
@@ -23,11 +24,15 @@ import (
 	v2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
 
+func textBlock(text string) *v2.RequestBlock {
+	return &v2.RequestBlock{Kind: &v2.RequestBlock_Text{Text: &v2.RequestTextBlock{Text: text}}}
+}
+
 func baseRequest() *v2.ChatRequest {
 	return &v2.ChatRequest{
 		Model: "m",
 		Messages: []*v2.Message{
-			{Role: "user", Content: "hi"},
+			{Role: "user", Blocks: []*v2.RequestBlock{textBlock("hi")}},
 		},
 	}
 }
@@ -68,22 +73,72 @@ func mustAcceptReplacement(t *testing.T, name string, req *v2.ChatRequest) {
 func TestReplacementNilAndNestedNil(t *testing.T) {
 	mustRejectReplacement(t, "nil chat", nil)
 	mustRejectReplacement(t, "nil message", &v2.ChatRequest{Messages: []*v2.Message{nil}})
-	mustRejectReplacement(t, "nil tool call", &v2.ChatRequest{Messages: []*v2.Message{{
-		Role: "assistant", ToolCalls: []*v2.ToolCall{nil},
+	mustRejectReplacement(t, "nil block", &v2.ChatRequest{Messages: []*v2.Message{{
+		Role: "user", Blocks: []*v2.RequestBlock{nil},
+	}}})
+	mustRejectReplacement(t, "block without arm", &v2.ChatRequest{Messages: []*v2.Message{{
+		Role: "user", Blocks: []*v2.RequestBlock{{}},
+	}}})
+	mustRejectReplacement(t, "typed-nil text arm", &v2.ChatRequest{Messages: []*v2.Message{{
+		Role: "user", Blocks: []*v2.RequestBlock{{Kind: &v2.RequestBlock_Text{}}},
+	}}})
+	mustRejectReplacement(t, "typed-nil tool_use arm", &v2.ChatRequest{Messages: []*v2.Message{{
+		Role: "assistant", Blocks: []*v2.RequestBlock{{Kind: &v2.RequestBlock_ToolUse{}}},
+	}}})
+	mustRejectReplacement(t, "nil nested content", &v2.ChatRequest{Messages: []*v2.Message{{
+		Role: "user", Blocks: []*v2.RequestBlock{{
+			Kind: &v2.RequestBlock_ToolResult{ToolResult: &v2.RequestToolResultBlock{
+				ToolCallId: "t1",
+				Content:    []*v2.ToolResultContentBlock{nil},
+			}},
+		}},
+	}}})
+	mustRejectReplacement(t, "nested content without arm", &v2.ChatRequest{Messages: []*v2.Message{{
+		Role: "user", Blocks: []*v2.RequestBlock{{
+			Kind: &v2.RequestBlock_ToolResult{ToolResult: &v2.RequestToolResultBlock{
+				ToolCallId: "t1",
+				Content:    []*v2.ToolResultContentBlock{{}},
+			}},
+		}},
 	}}})
 	mustRejectReplacement(t, "nil tool def", &v2.ChatRequest{Tools: []*v2.ToolDef{nil}})
+}
+
+func TestReplacementEmptyBlocks(t *testing.T) {
+	// An explicit empty provider message is ONE text block with text == "";
+	// an empty blocks list is not a second spelling.
+	mustRejectReplacement(t, "no blocks", &v2.ChatRequest{Messages: []*v2.Message{{Role: "user"}}})
+	mustAcceptReplacement(t, "explicit empty text block", &v2.ChatRequest{
+		Messages: []*v2.Message{{Role: "user", Blocks: []*v2.RequestBlock{textBlock("")}}},
+	})
 }
 
 func TestReplacementUnknownFields(t *testing.T) {
 	req := injectUnknown(t, baseRequest(), func() *v2.ChatRequest { return &v2.ChatRequest{} })
 	mustRejectReplacement(t, "request level", req)
 
-	msg := injectUnknown(t, &v2.Message{Role: "user", Content: "hi"}, func() *v2.Message { return &v2.Message{} })
+	msg := injectUnknown(t, &v2.Message{Role: "user", Blocks: []*v2.RequestBlock{textBlock("hi")}},
+		func() *v2.Message { return &v2.Message{} })
 	mustRejectReplacement(t, "message level", &v2.ChatRequest{Messages: []*v2.Message{msg}})
 
-	tc := injectUnknown(t, &v2.ToolCall{Id: "t1", Name: "read", ArgumentsJson: []byte(`{}`)}, func() *v2.ToolCall { return &v2.ToolCall{} })
-	mustRejectReplacement(t, "tool-call level", &v2.ChatRequest{Messages: []*v2.Message{{
-		Role: "assistant", ToolCalls: []*v2.ToolCall{tc},
+	blk := injectUnknown(t, textBlock("hi"), func() *v2.RequestBlock { return &v2.RequestBlock{} })
+	mustRejectReplacement(t, "block level", &v2.ChatRequest{Messages: []*v2.Message{{
+		Role: "user", Blocks: []*v2.RequestBlock{blk},
+	}}})
+
+	leaf := injectUnknown(t, &v2.RequestTextBlock{Text: "hi"}, func() *v2.RequestTextBlock { return &v2.RequestTextBlock{} })
+	mustRejectReplacement(t, "leaf level", &v2.ChatRequest{Messages: []*v2.Message{{
+		Role: "user", Blocks: []*v2.RequestBlock{{Kind: &v2.RequestBlock_Text{Text: leaf}}},
+	}}})
+
+	nested := injectUnknown(t, &v2.ToolResultTextBlock{Text: "ok"}, func() *v2.ToolResultTextBlock { return &v2.ToolResultTextBlock{} })
+	mustRejectReplacement(t, "nested leaf level", &v2.ChatRequest{Messages: []*v2.Message{{
+		Role: "user", Blocks: []*v2.RequestBlock{{
+			Kind: &v2.RequestBlock_ToolResult{ToolResult: &v2.RequestToolResultBlock{
+				ToolCallId: "t1",
+				Content:    []*v2.ToolResultContentBlock{{Kind: &v2.ToolResultContentBlock_Text{Text: nested}}},
+			}},
+		}},
 	}}})
 
 	td := injectUnknown(t, &v2.ToolDef{Name: "read", ParametersJson: []byte(`{}`)}, func() *v2.ToolDef { return &v2.ToolDef{} })
@@ -92,7 +147,7 @@ func TestReplacementUnknownFields(t *testing.T) {
 
 // TestReplacementMaxTokens: when present, max_tokens must be strictly
 // positive (zero and negatives are invalid on every provider surface; absent
-// is fine). Written before the enforcement existed.
+// is fine).
 func TestReplacementMaxTokens(t *testing.T) {
 	zero := int32(0)
 	neg := int32(-1)
@@ -150,31 +205,134 @@ func TestReplacementNonFiniteFloats(t *testing.T) {
 	mustAcceptReplacement(t, "finite out-of-natural-range values accepted", req)
 }
 
-func TestReplacementIdentityFields(t *testing.T) {
-	// Request-context tool calls: non-empty id, name, and object arguments.
+// --- block identity and placement rules ------------------------------------
+
+// fullBlocks returns a valid assistant message exercising every block kind.
+func fullBlocks() *v2.Message {
+	return &v2.Message{Role: "assistant", Blocks: []*v2.RequestBlock{
+		{Kind: &v2.RequestBlock_Thinking{Thinking: &v2.RequestThinkingBlock{Text: "reasoning", Signature: "SIG"}}},
+		textBlock("hello"),
+		{Kind: &v2.RequestBlock_RedactedThinking{RedactedThinking: &v2.RequestRedactedThinkingBlock{Data: "..."}}},
+		{Kind: &v2.RequestBlock_ToolUse{ToolUse: &v2.RequestToolUseBlock{
+			Id: "t1", Name: "read", ArgumentsJson: []byte(`{"path":"x"}`), Signature: "CALLSIG",
+		}}},
+		{Kind: &v2.RequestBlock_CacheBreakpoint{CacheBreakpoint: &v2.RequestCacheBreakpoint{
+			MarkerJson: []byte(`{"type":"ephemeral"}`),
+		}}},
+		{Kind: &v2.RequestBlock_Unknown{Unknown: &v2.RequestUnknownBlock{
+			Kind: "custom", PayloadJson: []byte(`{"v":1e999}`),
+		}}},
+	}}
+}
+
+func TestReplacementBlockIdentityAndPlacement(t *testing.T) {
+	// Tool-use identity is required.
 	req := baseRequest()
-	req.Messages[0] = &v2.Message{Role: "assistant", ToolCalls: []*v2.ToolCall{
-		{Name: "read", ArgumentsJson: []byte(`{}`)}, // missing id
-	}}
-	mustRejectReplacement(t, "tool call missing id", req)
+	req.Messages[0] = &v2.Message{Role: "assistant", Blocks: []*v2.RequestBlock{{
+		Kind: &v2.RequestBlock_ToolUse{ToolUse: &v2.RequestToolUseBlock{Name: "read", ArgumentsJson: []byte(`{}`)}},
+	}}}
+	mustRejectReplacement(t, "tool_use missing id", req)
 
 	req = baseRequest()
-	req.Messages[0] = &v2.Message{Role: "assistant", ToolCalls: []*v2.ToolCall{
-		{Id: "t1", ArgumentsJson: []byte(`{}`)}, // missing name
-	}}
-	mustRejectReplacement(t, "tool call missing name", req)
+	req.Messages[0] = &v2.Message{Role: "assistant", Blocks: []*v2.RequestBlock{{
+		Kind: &v2.RequestBlock_ToolUse{ToolUse: &v2.RequestToolUseBlock{Id: "t1", ArgumentsJson: []byte(`{}`)}},
+	}}}
+	mustRejectReplacement(t, "tool_use missing name", req)
 
 	req = baseRequest()
-	req.Tools = []*v2.ToolDef{{ParametersJson: []byte(`{}`)}} // missing name
-	mustRejectReplacement(t, "tool def missing name", req)
+	req.Messages[0] = &v2.Message{Role: "assistant", Blocks: []*v2.RequestBlock{{
+		Kind: &v2.RequestBlock_ToolUse{ToolUse: &v2.RequestToolUseBlock{Id: "t1", Name: "read"}},
+	}}}
+	mustRejectReplacement(t, "tool_use missing arguments", req)
 
-	// Valid identity fields accepted.
+	// Tool-result identity is required.
 	req = baseRequest()
-	req.Messages[0] = &v2.Message{Role: "assistant", ToolCalls: []*v2.ToolCall{
-		{Id: "t1", Name: "read", ArgumentsJson: []byte(`{}`)},
+	req.Messages[0] = &v2.Message{Role: "user", Blocks: []*v2.RequestBlock{{
+		Kind: &v2.RequestBlock_ToolResult{ToolResult: &v2.RequestToolResultBlock{}},
+	}}}
+	mustRejectReplacement(t, "tool_result missing tool_call_id", req)
+
+	// Unknown kind is required; payload must be an object.
+	req = baseRequest()
+	req.Messages[0] = &v2.Message{Role: "user", Blocks: []*v2.RequestBlock{{
+		Kind: &v2.RequestBlock_Unknown{Unknown: &v2.RequestUnknownBlock{PayloadJson: []byte(`{}`)}},
+	}}}
+	mustRejectReplacement(t, "unknown missing kind", req)
+
+	req = baseRequest()
+	req.Messages[0] = &v2.Message{Role: "user", Blocks: []*v2.RequestBlock{{
+		Kind: &v2.RequestBlock_Unknown{Unknown: &v2.RequestUnknownBlock{Kind: "custom"}},
+	}}}
+	mustRejectReplacement(t, "unknown missing payload", req)
+
+	// Trailing signature: non-empty, assistant-only, final.
+	req = baseRequest()
+	req.Messages[0] = &v2.Message{Role: "assistant", Blocks: []*v2.RequestBlock{
+		textBlock("hi"),
+		{Kind: &v2.RequestBlock_TrailingSignature{TrailingSignature: &v2.RequestTrailingSignatureBlock{Signature: ""}}},
 	}}
-	req.Tools = []*v2.ToolDef{{Name: "read", ParametersJson: []byte(`{}`)}}
-	mustAcceptReplacement(t, "complete identity fields", req)
+	mustRejectReplacement(t, "trailing signature empty", req)
+
+	req = baseRequest()
+	req.Messages[0] = &v2.Message{Role: "user", Blocks: []*v2.RequestBlock{
+		textBlock("hi"),
+		{Kind: &v2.RequestBlock_TrailingSignature{TrailingSignature: &v2.RequestTrailingSignatureBlock{Signature: "SIG"}}},
+	}}
+	mustRejectReplacement(t, "trailing signature non-assistant", req)
+
+	req = baseRequest()
+	req.Messages[0] = &v2.Message{Role: "assistant", Blocks: []*v2.RequestBlock{
+		{Kind: &v2.RequestBlock_TrailingSignature{TrailingSignature: &v2.RequestTrailingSignatureBlock{Signature: "SIG"}}},
+		textBlock("hi"),
+	}}
+	mustRejectReplacement(t, "trailing signature not final", req)
+
+	req = baseRequest()
+	req.Messages[0] = &v2.Message{Role: "assistant", Blocks: []*v2.RequestBlock{
+		textBlock("hi"),
+		{Kind: &v2.RequestBlock_TrailingSignature{TrailingSignature: &v2.RequestTrailingSignatureBlock{Signature: "SIG"}}},
+	}}
+	mustAcceptReplacement(t, "trailing signature final assistant", req)
+
+	// Every block kind in one message is valid (provider-independent
+	// grammar: no closed global role/kind matrix).
+	mustAcceptReplacement(t, "full block set", &v2.ChatRequest{Messages: []*v2.Message{fullBlocks()}})
+
+	// Tool results nest text/unknown/cache only — nested tool use/results/
+	// thinking/signatures are impossible at the type level (dedicated oneof).
+	req = baseRequest()
+	req.Messages[0] = &v2.Message{Role: "user", Blocks: []*v2.RequestBlock{{
+		Kind: &v2.RequestBlock_ToolResult{ToolResult: &v2.RequestToolResultBlock{
+			ToolCallId: "t1",
+			Content: []*v2.ToolResultContentBlock{
+				{Kind: &v2.ToolResultContentBlock_Text{Text: &v2.ToolResultTextBlock{Text: "ok"}}},
+				{Kind: &v2.ToolResultContentBlock_Unknown{Unknown: &v2.ToolResultUnknownBlock{
+					Kind: "json", PayloadJson: []byte(`{"score":42}`),
+				}}},
+				{Kind: &v2.ToolResultContentBlock_CacheBreakpoint{CacheBreakpoint: &v2.ToolResultCacheBreakpoint{
+					MarkerJson: []byte(`{"type":"ephemeral"}`),
+				}}},
+			},
+		}},
+	}}}
+	mustAcceptReplacement(t, "nested result content kinds", req)
+
+	req = baseRequest()
+	req.Messages[0] = &v2.Message{Role: "user", Blocks: []*v2.RequestBlock{{
+		Kind: &v2.RequestBlock_ToolResult{ToolResult: &v2.RequestToolResultBlock{
+			ToolCallId: "t1",
+			Content: []*v2.ToolResultContentBlock{{
+				Kind: &v2.ToolResultContentBlock_Unknown{Unknown: &v2.ToolResultUnknownBlock{PayloadJson: []byte(`{}`)}},
+			}},
+		}},
+	}}}
+	mustRejectReplacement(t, "nested unknown missing kind", req)
+
+	// Unmodelled non-empty roles with text blocks stay representable (the
+	// ir.messages.write.other catch-all).
+	req = baseRequest()
+	req.Messages[0] = &v2.Message{Role: "clippy", Blocks: []*v2.RequestBlock{textBlock("hi")}}
+	mustAcceptReplacement(t, "unmodelled role with text block", req)
 }
 
 // --- JSON field table ------------------------------------------------------
@@ -188,9 +346,6 @@ func TestReplacementJSONFieldMatrix(t *testing.T) {
 	badUTF8 := "{\"a\":\"\xff\"}"
 	malformed := `{"a":`
 
-	// badRow is one invalid sample with its failure family. The family maps
-	// to a stable substring of the validator's error so a wrong-shape
-	// rejection cannot satisfy a duplicate/surrogate/utf8 row.
 	type badRow struct {
 		name   string
 		sample string
@@ -207,49 +362,12 @@ func TestReplacementJSONFieldMatrix(t *testing.T) {
 		bad      []badRow
 	}{
 		{
-			name:     "content_parts_json array",
-			absentOK: true,
+			name: "tool_use arguments_json object required",
 			absent: func(r *v2.ChatRequest) {
-				r.Messages[0].ContentPartsJson = nil
+				r.Messages[0].Blocks[0].GetToolUse().ArgumentsJson = nil
 			},
-			mutate: func(r *v2.ChatRequest, b []byte) { r.Messages[0].ContentPartsJson = b },
-			valid:  []string{`[]`, `[{"type":"text","text":"x"}]`},
-			bad: []badRow{
-				{"malformed", malformed, "jsontext:"},
-				{"wrong-shape-object", `{}`, "must be a JSON array"},
-				{"wrong-shape-string", `"str"`, "must be a JSON array"},
-				{"duplicate", `[{"a":1,"a":2}]`, "duplicate"},
-				{"surrogate", `[{"a":"\ud800"}]`, "surrogate"},
-				{"utf8", `["` + "\xff" + `"]`, "UTF-8"},
-				{"null", `null`, "must be a JSON array"},
-			},
-		},
-		{
-			name:     "message cache_control_json object",
-			absentOK: true,
-			absent: func(r *v2.ChatRequest) {
-				r.Messages[0].CacheControlJson = nil
-			},
-			mutate: func(r *v2.ChatRequest, b []byte) { r.Messages[0].CacheControlJson = b },
-			valid:  []string{`{}`, `{"type":"ephemeral"}`},
-			bad: []badRow{
-				{"malformed", malformed, "jsontext:"},
-				{"wrong-shape-array", `[]`, "must be a JSON object"},
-				{"wrong-shape-string", `"str"`, "must be a JSON object"},
-				{"duplicate", dup, "duplicate"},
-				{"surrogate", surrogate, "surrogate"},
-				{"utf8", badUTF8, "UTF-8"},
-				{"null", `null`, "must be a JSON object"},
-			},
-		},
-		{
-			name: "tool call arguments_json object required",
-			absent: func(r *v2.ChatRequest) {
-				r.Messages[0].ToolCalls[0].ArgumentsJson = nil
-			},
-			mutate: func(r *v2.ChatRequest, b []byte) { r.Messages[0].ToolCalls[0].ArgumentsJson = b },
-			// absentOK deliberately false: arguments are required.
-			valid: []string{`{}`, `{"path":"server.go"}`, `{"big":1e999,"neg":-1e999}`},
+			mutate: func(r *v2.ChatRequest, b []byte) { r.Messages[0].Blocks[0].GetToolUse().ArgumentsJson = b },
+			valid:  []string{`{}`, `{"path":"server.go"}`, `{"big":1e999,"neg":-1e999}`},
 			bad: []badRow{
 				{"malformed", malformed, "jsontext:"},
 				{"wrong-shape-array", `[]`, "must be a JSON object"},
@@ -261,13 +379,76 @@ func TestReplacementJSONFieldMatrix(t *testing.T) {
 			},
 		},
 		{
+			name: "cache_breakpoint marker_json object required",
+			absent: func(r *v2.ChatRequest) {
+				r.Messages[0].Blocks[1].GetCacheBreakpoint().MarkerJson = nil
+			},
+			mutate: func(r *v2.ChatRequest, b []byte) { r.Messages[0].Blocks[1].GetCacheBreakpoint().MarkerJson = b },
+			valid:  []string{`{}`, `{"type":"ephemeral","ttl":9007199254740993}`},
+			bad: []badRow{
+				{"malformed", malformed, "jsontext:"},
+				{"wrong-shape-array", `[]`, "must be a JSON object"},
+				{"wrong-shape-string", `"str"`, "must be a JSON object"},
+				{"duplicate", dup, "duplicate"},
+				{"surrogate", surrogate, "surrogate"},
+				{"utf8", badUTF8, "UTF-8"},
+				{"null", `null`, "must be a JSON object"},
+			},
+		},
+		{
+			name: "unknown payload_json object required",
+			absent: func(r *v2.ChatRequest) {
+				r.Messages[0].Blocks[2].GetUnknown().PayloadJson = nil
+			},
+			mutate: func(r *v2.ChatRequest, b []byte) { r.Messages[0].Blocks[2].GetUnknown().PayloadJson = b },
+			valid:  []string{`{}`, `{"vendor":1e999}`},
+			bad: []badRow{
+				{"malformed", malformed, "jsontext:"},
+				{"wrong-shape-array", `[]`, "must be a JSON object"},
+				{"wrong-shape-string", `"str"`, "must be a JSON object"},
+				{"duplicate", dup, "duplicate"},
+				{"surrogate", surrogate, "surrogate"},
+				{"utf8", badUTF8, "UTF-8"},
+				{"null", `null`, "must be a JSON object"},
+			},
+		},
+		{
+			name: "nested unknown payload_json object required",
+			absent: func(r *v2.ChatRequest) {
+				r.Messages[0].Blocks[3].GetToolResult().Content[0].GetUnknown().PayloadJson = nil
+			},
+			mutate: func(r *v2.ChatRequest, b []byte) {
+				r.Messages[0].Blocks[3].GetToolResult().Content[0].GetUnknown().PayloadJson = b
+			},
+			valid: []string{`{}`, `{"json":{"score":42}}`},
+			bad: []badRow{
+				{"malformed", malformed, "jsontext:"},
+				{"wrong-shape-array", `[]`, "must be a JSON object"},
+				{"null", `null`, "must be a JSON object"},
+			},
+		},
+		{
+			name: "nested cache marker_json object required",
+			absent: func(r *v2.ChatRequest) {
+				r.Messages[0].Blocks[3].GetToolResult().Content[1].GetCacheBreakpoint().MarkerJson = nil
+			},
+			mutate: func(r *v2.ChatRequest, b []byte) {
+				r.Messages[0].Blocks[3].GetToolResult().Content[1].GetCacheBreakpoint().MarkerJson = b
+			},
+			valid: []string{`{}`, `{"type":"ephemeral"}`},
+			bad: []badRow{
+				{"malformed", malformed, "jsontext:"},
+				{"wrong-shape-array", `[]`, "must be a JSON object"},
+				{"null", `null`, "must be a JSON object"},
+			},
+		},
+		{
 			name: "tool def parameters_json object required",
 			absent: func(r *v2.ChatRequest) {
 				r.Tools[0].ParametersJson = nil
 			},
 			mutate: func(r *v2.ChatRequest, b []byte) { r.Tools[0].ParametersJson = b },
-			// absentOK deliberately false: parameters are required.
-			valid: []string{`{}`, `{"type":"object","properties":{}}`},
+			valid:  []string{`{}`, `{"type":"object","properties":{}}`},
 			bad: []badRow{
 				{"malformed", malformed, "jsontext:"},
 				{"wrong-shape-array", `[]`, "must be a JSON object"},
@@ -328,7 +509,7 @@ func TestReplacementJSONFieldMatrix(t *testing.T) {
 				{"wrong-shape-string", `"str"`, "must be a JSON array"},
 				{"duplicate", `[{"a":1,"a":2}]`, "duplicate"},
 				{"surrogate", `[{"a":"\ud800"}]`, "surrogate"},
-				{"utf8", `["` + "\xff" + `"]`, "UTF-8"},
+				{"utf8", "[\"" + "\xff" + "\"]", "UTF-8"},
 				{"null", `null`, "must be a JSON array"},
 			},
 		},
@@ -352,11 +533,30 @@ func TestReplacementJSONFieldMatrix(t *testing.T) {
 		},
 	}
 
-	// A base request with the identity fields required by the table.
+	// A base request with the block fields the table mutates.
 	validBase := func() *v2.ChatRequest {
 		r := baseRequest()
-		r.Messages[0] = &v2.Message{Role: "assistant", ToolCalls: []*v2.ToolCall{
-			{Id: "t1", Name: "read", ArgumentsJson: []byte(`{}`)},
+		r.Messages[0] = &v2.Message{Role: "assistant", Blocks: []*v2.RequestBlock{
+			{Kind: &v2.RequestBlock_ToolUse{ToolUse: &v2.RequestToolUseBlock{
+				Id: "t1", Name: "read", ArgumentsJson: []byte(`{}`),
+			}}},
+			{Kind: &v2.RequestBlock_CacheBreakpoint{CacheBreakpoint: &v2.RequestCacheBreakpoint{
+				MarkerJson: []byte(`{}`),
+			}}},
+			{Kind: &v2.RequestBlock_Unknown{Unknown: &v2.RequestUnknownBlock{
+				Kind: "custom", PayloadJson: []byte(`{}`),
+			}}},
+			{Kind: &v2.RequestBlock_ToolResult{ToolResult: &v2.RequestToolResultBlock{
+				ToolCallId: "t1",
+				Content: []*v2.ToolResultContentBlock{
+					{Kind: &v2.ToolResultContentBlock_Unknown{Unknown: &v2.ToolResultUnknownBlock{
+						Kind: "json", PayloadJson: []byte(`{}`),
+					}}},
+					{Kind: &v2.ToolResultContentBlock_CacheBreakpoint{CacheBreakpoint: &v2.ToolResultCacheBreakpoint{
+						MarkerJson: []byte(`{}`),
+					}}},
+				},
+			}}},
 		}}
 		r.Tools = []*v2.ToolDef{{Name: "read", ParametersJson: []byte(`{}`)}}
 		return r
@@ -400,30 +600,36 @@ func TestReplacementJSONFieldMatrix(t *testing.T) {
 // empty bytes are absence only for absent-capable fields.
 func TestReplacementJSONNullIsNotAbsence(t *testing.T) {
 	req := baseRequest()
-	req.Messages[0] = &v2.Message{Role: "assistant", ToolCalls: []*v2.ToolCall{
-		{Id: "t1", Name: "read", ArgumentsJson: []byte(`null`)},
-	}}
+	req.Messages[0] = &v2.Message{Role: "assistant", Blocks: []*v2.RequestBlock{{
+		Kind: &v2.RequestBlock_ToolUse{ToolUse: &v2.RequestToolUseBlock{
+			Id: "t1", Name: "read", ArgumentsJson: []byte(`null`),
+		}},
+	}}}
 	mustRejectReplacement(t, "arguments null", req)
 
 	req = baseRequest()
-	req.Messages[0].ContentPartsJson = []byte(`null`)
-	mustRejectReplacement(t, "content parts null", req)
+	req.Messages[0] = &v2.Message{Role: "user", Blocks: []*v2.RequestBlock{{
+		Kind: &v2.RequestBlock_Unknown{Unknown: &v2.RequestUnknownBlock{Kind: "c", PayloadJson: []byte(`null`)}},
+	}}}
+	mustRejectReplacement(t, "unknown payload null", req)
 }
 
 // TestHookResultValidateForReplaceRequest: HookResult.ValidateFor(BEFORE_REQUEST)
 // invokes the normative replacement validator on the nested ReplaceRequest;
 // other actions are unaffected.
 func TestHookResultValidateForReplaceRequest(t *testing.T) {
-	valid := &v2.ChatRequest{Model: "m", Messages: []*v2.Message{{Role: "user", Content: "hi"}}}
+	valid := &v2.ChatRequest{Model: "m", Messages: []*v2.Message{{Role: "user", Blocks: []*v2.RequestBlock{textBlock("hi")}}}}
 	hr := &v2.HookResult{Action: &v2.HookResult_ReplaceRequest{ReplaceRequest: valid}}
 	if err := hr.ValidateFor(v2.Hook_HOOK_BEFORE_REQUEST); err != nil {
 		t.Fatalf("valid replacement rejected: %v", err)
 	}
 
-	bad := &v2.ChatRequest{Model: "m", Messages: []*v2.Message{{Role: "user", Content: "hi", ContentPartsJson: []byte(`{}`)}}}
+	bad := &v2.ChatRequest{Model: "m", Messages: []*v2.Message{{Role: "assistant", Blocks: []*v2.RequestBlock{{
+		Kind: &v2.RequestBlock_ToolUse{ToolUse: &v2.RequestToolUseBlock{Name: "read", ArgumentsJson: []byte(`{}`)}},
+	}}}}}
 	hr = &v2.HookResult{Action: &v2.HookResult_ReplaceRequest{ReplaceRequest: bad}}
 	err := hr.ValidateFor(v2.Hook_HOOK_BEFORE_REQUEST)
-	if err == nil || !strings.Contains(err.Error(), "content_parts_json") {
+	if err == nil || !strings.Contains(err.Error(), "tool_use.id") {
 		t.Fatalf("invalid replacement accepted or wrong error: %v", err)
 	}
 
@@ -444,7 +650,7 @@ func TestHookResultValidateForReplaceRequest(t *testing.T) {
 	}
 
 	// A valid Unicode replacement passes the same gate.
-	uni := &v2.ChatRequest{Model: "héllo 日本語", Messages: []*v2.Message{{Role: "user", Content: "雪"}}}
+	uni := &v2.ChatRequest{Model: "héllo 日本語", Messages: []*v2.Message{{Role: "user", Blocks: []*v2.RequestBlock{textBlock("雪")}}}}
 	hr = &v2.HookResult{Action: &v2.HookResult_ReplaceRequest{ReplaceRequest: uni}}
 	if err := hr.ValidateFor(v2.Hook_HOOK_BEFORE_REQUEST); err != nil {
 		t.Fatalf("valid unicode replacement rejected: %v", err)
@@ -468,29 +674,30 @@ func TestReplacementMessageRoleNonEmpty(t *testing.T) {
 	if err := proto.Unmarshal(raw, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if len(decoded.Messages) != 1 || decoded.Messages[0] == nil || decoded.Messages[0].Role != "" {
-		t.Fatalf("decoded = %+v; want one non-nil empty message (the nil survived as zero-length)", decoded.Messages)
-	}
-	if err := decoded.ValidateReplacement(); err == nil {
-		t.Fatal("decoded zero-length message accepted")
+	mustRejectReplacement(t, "wire-decoded empty message", &decoded)
+
+	// Explicitly empty and known roles are accepted; any NON-EMPTY
+	// unmodelled role is accepted too (the catch-all stays open).
+	empty := &v2.ChatRequest{Messages: []*v2.Message{{Role: ""}}}
+	mustRejectReplacement(t, "empty role", empty)
+
+	for _, role := range []string{"user", "assistant", "system", "tool", "developer", "clippy-2000"} {
+		m := &v2.ChatRequest{Messages: []*v2.Message{{Role: role, Blocks: []*v2.RequestBlock{textBlock("x")}}}}
+		mustAcceptReplacement(t, "role "+role, m)
 	}
 
-	// Explicitly empty Message{} rejected.
-	empty := &v2.ChatRequest{Messages: []*v2.Message{{}}}
-	if err := empty.ValidateReplacement(); err == nil {
-		t.Fatal("explicitly empty message accepted")
+	// A nil Message element is refused on the wire-visible decoding path
+	// exactly like a zero-length message: the role rule catches both.
+	wire := &v2.ChatRequest{Messages: []*v2.Message{{Role: "user", Blocks: []*v2.RequestBlock{textBlock("hi")}}}}
+	raw, err = proto.Marshal(wire)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	// Valid known roles accepted.
-	for _, role := range []string{"user", "assistant", "system", "tool"} {
-		r := &v2.ChatRequest{Messages: []*v2.Message{{Role: role, Content: "hi"}}}
-		if err := r.ValidateReplacement(); err != nil {
-			t.Fatalf("known role %q rejected: %v", role, err)
-		}
+	var back v2.ChatRequest
+	if err := proto.Unmarshal(raw, &back); err != nil {
+		t.Fatal(err)
 	}
-	// Valid NON-EMPTY unmodelled role accepted (the catch-all stays open).
-	other := &v2.ChatRequest{Messages: []*v2.Message{{Role: "developer-plus", Content: "hi"}}}
-	if err := other.ValidateReplacement(); err != nil {
-		t.Fatalf("unmodelled non-empty role rejected: %v", err)
+	if err := back.ValidateReplacement(); err != nil {
+		t.Fatalf("valid wire round trip rejected: %v", err)
 	}
 }

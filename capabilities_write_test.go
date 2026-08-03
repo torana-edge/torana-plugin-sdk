@@ -140,26 +140,31 @@ func TestWritePermissionsAreSorted(t *testing.T) {
 	}
 }
 
-// TestCacheControlWriteFieldInventory anchors the two SDK-documented
-// descriptor fields of the ir.cache_control.write grant: it proves
-// Message.cache_control_json and ToolDef.cache_control_json exist as bytes
-// fields, so a future proto rename or doc drift forces a deliberate update.
-// It does NOT prove the host maps no third field — that positive-and-negative
-// enforcement inventory is the Edge verifier PR's job.
+// TestCacheControlWriteFieldInventory anchors the request-body fields of the
+// ir.cache_control.write grant: RequestCacheBreakpoint.marker_json and
+// ToolResultCacheBreakpoint.marker_json are the ONLY request message-body
+// cache carriers (message-level cache_control_json is gone), and
+// ToolDef.cache_control_json remains the tool-definition carrier. The block
+// oneof makes any third carrier a deliberate proto change.
 func TestCacheControlWriteFieldInventory(t *testing.T) {
-	msgFields := (&pbv2.Message{}).ProtoReflect().Descriptor().Fields()
+	blkFields := (&pbv2.RequestCacheBreakpoint{}).ProtoReflect().Descriptor().Fields()
+	nestedFields := (&pbv2.ToolResultCacheBreakpoint{}).ProtoReflect().Descriptor().Fields()
 	toolFields := (&pbv2.ToolDef{}).ProtoReflect().Descriptor().Fields()
 
-	msgCC := msgFields.ByName("cache_control_json")
-	if msgCC == nil || msgCC.Kind() != protoreflect.BytesKind {
-		t.Fatalf("Message.cache_control_json missing or not bytes: %v", msgCC)
+	marker := blkFields.ByName("marker_json")
+	if marker == nil || marker.Kind() != protoreflect.BytesKind {
+		t.Fatalf("RequestCacheBreakpoint.marker_json missing or not bytes: %v", marker)
+	}
+	nested := nestedFields.ByName("marker_json")
+	if nested == nil || nested.Kind() != protoreflect.BytesKind {
+		t.Fatalf("ToolResultCacheBreakpoint.marker_json missing or not bytes: %v", nested)
 	}
 	toolCC := toolFields.ByName("cache_control_json")
 	if toolCC == nil || toolCC.Kind() != protoreflect.BytesKind {
 		t.Fatalf("ToolDef.cache_control_json missing or not bytes: %v", toolCC)
 	}
 
-	// The grant names exactly these two fields; the vocabulary constant and
+	// The grant names exactly these carriers; the vocabulary constant and
 	// the permission list agree.
 	if SectionCacheControl != "ir.cache_control.write" {
 		t.Fatalf("SectionCacheControl=%q", SectionCacheControl)

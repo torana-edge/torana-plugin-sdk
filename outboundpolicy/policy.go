@@ -447,45 +447,48 @@ func (d SignatureDomain) valid() bool {
 }
 
 // requestSignatureContracts pins the COMPLETE request-domain binding shapes:
-// token field, its scope, and the exact set of same-message content fields it
-// covers. edge treats Validate() as its startup proof that the policy table is
-// coherent, so a new request token requires deliberately extending this table
-// — never silently widening what a scope name means. Content sets are compared
-// as sets, so declaration order is irrelevant.
+// token message + field, its scope, and the exact set of covered content
+// refs (fields on the token's own block for SameMessage scopes; the
+// preceding closed text/thinking block fields for the TrailingStandalone
+// scope). edge treats Validate() as its startup proof that the policy table
+// is coherent, so a new request token requires deliberately extending this
+// table — never silently widening what a scope name means. Content sets are
+// compared as sets, so declaration order is irrelevant.
 var requestSignatureContracts = []struct {
+	message string
 	field   string
 	scope   SignatureScope
-	content []string
+	content []string // "message.field" refs; message omitted = the token's own
 }{
-	{field: "thinking_signature", scope: SignatureScopeSameMessage, content: []string{"thinking", "redacted_thinking"}},
-	{field: "content_signature", scope: SignatureScopeSameMessage, content: []string{"content"}},
-	{field: "trailing_signature", scope: SignatureScopeTrailingStandalone, content: []string{"thinking", "content"}},
+	{message: "torana.v2.RequestThinkingBlock", field: "signature", scope: SignatureScopeSameMessage, content: []string{"text"}},
+	{message: "torana.v2.RequestTextBlock", field: "signature", scope: SignatureScopeSameMessage, content: []string{"text"}},
+	{message: "torana.v2.RequestTrailingSignatureBlock", field: "signature", scope: SignatureScopeTrailingStandalone,
+		content: []string{"torana.v2.RequestTextBlock.text", "torana.v2.RequestThinkingBlock.text"}},
 }
 
-// validateRequestBindingShape enforces the complete request-domain contract for
-// a torana.v2.Message binding: the token must be one of the pinned fields with
-// its pinned scope, and the content refs must be EXACTLY the pinned set — no
-// missing, extra, duplicated, swapped, wrong-scope, or cross-message refs. A
-// corrupted table must not be able to rebind a token to different content and
-// still pass the host's startup check.
+// validateRequestBindingShape enforces the complete request-domain contract:
+// the token must be the pinned message+field with its pinned scope, and the
+// content refs must be EXACTLY the pinned set — no missing, extra,
+// duplicated, swapped, wrong-scope, or cross-message refs (the trailing
+// standalone legitimately crosses to the covered block kinds). A corrupted
+// table must not be able to rebind a token to different content and still
+// pass the host's startup check.
 func validateRequestBindingShape(b SignatureBinding) error {
-	if b.Message != "torana.v2.Message" {
-		return fmt.Errorf("%s.%s: request-domain signatures are pinned to torana.v2.Message",
-			b.Message, b.SignatureField)
-	}
 	var contract *struct {
+		message string
 		field   string
 		scope   SignatureScope
 		content []string
 	}
 	for i := range requestSignatureContracts {
-		if requestSignatureContracts[i].field == b.SignatureField {
+		if requestSignatureContracts[i].message == string(b.Message) && requestSignatureContracts[i].field == b.SignatureField {
 			contract = &requestSignatureContracts[i]
 			break
 		}
 	}
 	if contract == nil {
-		return fmt.Errorf("%s.%s: request-domain signature field is not pinned", b.Message, b.SignatureField)
+		return fmt.Errorf("%s.%s: request-domain signature is not pinned (message+field must match a contract)",
+			b.Message, b.SignatureField)
 	}
 	got := make([]string, 0, len(b.Content))
 	for i, c := range b.Content {
@@ -493,11 +496,14 @@ func validateRequestBindingShape(b SignatureBinding) error {
 			return fmt.Errorf("%s.%s content[%d]: scope %v does not match the pinned %v",
 				b.Message, b.SignatureField, i, c.Scope, contract.scope)
 		}
+		ref := c.Field
 		if c.Message != "" {
-			return fmt.Errorf("%s.%s content[%d]: request-domain refs must stay on the same message",
-				b.Message, b.SignatureField, i)
+			ref = string(c.Message) + "." + c.Field
+		} else if contract.scope != SignatureScopeSameMessage {
+			return fmt.Errorf("%s.%s content[%d]: scope %v refs must name the covered block message",
+				b.Message, b.SignatureField, i, c.Scope)
 		}
-		got = append(got, c.Field)
+		got = append(got, ref)
 	}
 	for i, f := range got {
 		for j := range i {
@@ -585,9 +591,9 @@ func (b SignatureBinding) validateShape() error {
 			// the loop by validateRequestBindingShape.
 		}
 	}
-	// Request-domain torana.v2.Message bindings are pinned holistically: the
-	// token field, its scope, and the exact signed content set must all match
-	// the contract table. Validate() is the host's startup proof, so a
+	// Request-domain block bindings are pinned holistically: the token
+	// message+field, its scope, and the exact signed content set must all
+	// match the contract table. Validate() is the host's startup proof, so a
 	// corrupted registry cannot rebind a token to different content.
 	if b.Domain == SignatureDomainRequest {
 		if err := validateRequestBindingShape(b); err != nil {
@@ -599,42 +605,39 @@ func (b SignatureBinding) validateShape() error {
 
 var signatureBindings = []SignatureBinding{
 	{
-		// Request-side only: ChatRequest.messages still use Message. An
-		// assistant-writing plugin may rewrite historical thinking; the
-		// provider token must clear or the mutation must reject. Not on
-		// ResponseMessage — that shape deliberately omits thinking.
+		// A thinking block's provider token binds that block's own text.
+		// An assistant-writing plugin may rewrite historical thinking; the
+		// token must clear or the mutation must reject.
 		Domain:         SignatureDomainRequest,
-		Message:        "torana.v2.Message",
-		SignatureField: "thinking_signature",
+		Message:        "torana.v2.RequestThinkingBlock",
+		SignatureField: "signature",
 		Content: []SignatureContentRef{
-			{Scope: SignatureScopeSameMessage, Field: "thinking"},
-			{Scope: SignatureScopeSameMessage, Field: "redacted_thinking"},
+			{Scope: SignatureScopeSameMessage, Field: "text"},
 		},
 	},
 	{
 		// Code Assist's trailing signature-only empty-text part. TrailingStandalone
-		// binds the preceding closed text/thinking content of this same message;
-		// it does not bind tool-call blocks. The host must clear the token when
+		// binds the preceding CLOSED text/thinking blocks of this message; it
+		// does not bind tool-call blocks. The host must clear the token when
 		// the covered content changes, or reject the mutation.
 		Domain:         SignatureDomainRequest,
-		Message:        "torana.v2.Message",
-		SignatureField: "trailing_signature",
+		Message:        "torana.v2.RequestTrailingSignatureBlock",
+		SignatureField: "signature",
 		Content: []SignatureContentRef{
-			{Scope: SignatureScopeTrailingStandalone, Field: "thinking"},
-			{Scope: SignatureScopeTrailingStandalone, Field: "content"},
+			{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.RequestTextBlock", Field: "text"},
+			{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.RequestThinkingBlock", Field: "text"},
 		},
 	},
 	{
-		// A signature carried on an ordinary text part (Gemini/Code Assist
-		// thoughtSignature beside non-thought text) covers that part's content.
-		// Distinct from thinking_signature (thinking blocks) and trailing_signature
-		// (standalone final part). The verifier must classify a content mutation
-		// with the token retained as stale.
+		// A signature carried on an ordinary text block (Gemini/Code Assist
+		// thoughtSignature beside non-thought text) covers that block's text.
+		// The verifier must classify a content mutation with the token
+		// retained as stale.
 		Domain:         SignatureDomainRequest,
-		Message:        "torana.v2.Message",
-		SignatureField: "content_signature",
+		Message:        "torana.v2.RequestTextBlock",
+		SignatureField: "signature",
 		Content: []SignatureContentRef{
-			{Scope: SignatureScopeSameMessage, Field: "content"},
+			{Scope: SignatureScopeSameMessage, Field: "text"},
 		},
 	},
 	{
@@ -952,31 +955,33 @@ func Validate() error {
 // exactly equal: each contract has exactly one binding, no extra request token
 // exists, and neither table may declare a field twice.
 func validateRequestBindingCompleteness(bindings []SignatureBinding) error {
+	key := func(b SignatureBinding) string { return string(b.Message) + "/" + b.SignatureField }
 	declared := map[string]bool{}
 	for _, b := range bindings {
 		if b.Domain != SignatureDomainRequest {
 			continue
 		}
-		if declared[b.SignatureField] {
-			return fmt.Errorf("request-domain binding %s is declared more than once", b.SignatureField)
+		if declared[key(b)] {
+			return fmt.Errorf("request-domain binding %s is declared more than once", key(b))
 		}
-		declared[b.SignatureField] = true
+		declared[key(b)] = true
 	}
 	required := map[string]bool{}
 	for i := range requestSignatureContracts {
-		if required[requestSignatureContracts[i].field] {
-			return fmt.Errorf("request signature contract %s is declared more than once", requestSignatureContracts[i].field)
+		k := requestSignatureContracts[i].message + "/" + requestSignatureContracts[i].field
+		if required[k] {
+			return fmt.Errorf("request signature contract %s is declared more than once", k)
 		}
-		required[requestSignatureContracts[i].field] = true
+		required[k] = true
 	}
-	for field := range required {
-		if !declared[field] {
-			return fmt.Errorf("request-domain binding for %s is missing: nothing defines what content the token covers", field)
+	for k := range required {
+		if !declared[k] {
+			return fmt.Errorf("request-domain binding for %s is missing: nothing defines what content the token covers", k)
 		}
 	}
-	for field := range declared {
-		if !required[field] {
-			return fmt.Errorf("request-domain binding %s is not a pinned contract", field)
+	for k := range declared {
+		if !required[k] {
+			return fmt.Errorf("request-domain binding %s is not a pinned contract", k)
 		}
 	}
 	return nil

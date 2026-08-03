@@ -1,0 +1,437 @@
+package plugin_sdk
+
+// Request message-body helpers: the sanctioned mutation surface for plugins.
+//
+// The request message body is the ordered RequestBlock sequence (pb/v2
+// Message.blocks) — the SOLE authority for every content fact. Plugins do
+// not parse provider-shaped raw arrays and do not manipulate oneof internals
+// for their ordinary tasks; these helpers read and mutate blocks with
+// explicit errors, out-of-range/wrong-kind rejection, and the
+// signature-clearing rules they own:
+//
+//   - changing the text of a text/thinking block clears that block's
+//     provenance-governed signature token;
+//   - changing ANY text/thinking content clears a trailing-signature block
+//     whose TrailingStandalone scope covers it (the final standalone token
+//     binds the preceding closed text/thinking content);
+//   - replacing a tool-use block's id/name/arguments clears the call-bound
+//     signature token (its covered content changed);
+//   - cache-breakpoint mutations never touch signature tokens.
+//
+// All reads return COPIED views (never internal pointers into the message).
+// All writes mutate the message in place and return an explicit error; a
+// write is never "refused" by returning nil.
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+
+	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	"github.com/torana-edge/torana-plugin-sdk/pb/v2/jsontext"
+)
+
+// TextSegment is a copied view of one text block's text.
+type TextSegment struct {
+	// Block is the block index inside Message.blocks.
+	Block int
+	Text  string
+}
+
+// TextSegments returns the text blocks' texts in wire order (copied views).
+// A nil message or nil blocks list yields nil.
+func TextSegments(msg *pbv2.Message) []TextSegment {
+	if msg == nil {
+		return nil
+	}
+	var out []TextSegment
+	for i, b := range msg.Blocks {
+		if t := b.GetText(); t != nil {
+			out = append(out, TextSegment{Block: i, Text: t.Text})
+		}
+	}
+	return out
+}
+
+// Text returns the concatenation of every text block's text in wire order.
+// Documented as a plain concatenation: no separators, no semantic inference.
+func Text(msg *pbv2.Message) string {
+	var out bytes.Buffer
+	for _, seg := range TextSegments(msg) {
+		out.WriteString(seg.Text)
+	}
+	return out.String()
+}
+
+// SetTextAt replaces the text of the text block at block with text. A block
+// that is not a text block, or an out-of-range index, is an error. The
+// block's signature token is cleared when the text actually changes (the
+// token is provenance-governed), and a trailing-signature block whose
+// covered content changed is cleared too.
+func SetTextAt(msg *pbv2.Message, block int, text string) error {
+	if msg == nil {
+		return fmt.Errorf("set text: nil message")
+	}
+	if block < 0 || block >= len(msg.Blocks) {
+		return fmt.Errorf("set text: block %d out of range (0..%d)", block, len(msg.Blocks)-1)
+	}
+	tb, ok := msg.Blocks[block].Kind.(*pbv2.RequestBlock_Text)
+	if !ok || tb.Text == nil {
+		return fmt.Errorf("set text: block %d is not a text block", block)
+	}
+	if tb.Text.Text != text {
+		tb.Text.Text = text
+		tb.Text.Signature = "" // stale: changed covered content
+		clearTrailingSignature(msg)
+	}
+	return nil
+}
+
+// ReplaceAllText collapses the message's text to exactly text:
+//
+//   - the FIRST text block keeps its position and receives text;
+//   - every other text block is REMOVED from the body;
+//   - a message with no text block gets one APPENDED at the end;
+//   - signature tokens on every touched block are cleared (stale), and a
+//     trailing-signature block whose covered content changed is cleared.
+func ReplaceAllText(msg *pbv2.Message, text string) error {
+	if msg == nil {
+		return fmt.Errorf("replace all text: nil message")
+	}
+	first := -1
+	for i, b := range msg.Blocks {
+		if tb := b.GetText(); tb != nil {
+			if first < 0 {
+				first = i
+				if tb.Text != text {
+					tb.Text = text
+					tb.Signature = ""
+				}
+			} else {
+				tb.Text = ""
+				tb.Signature = ""
+			}
+		}
+	}
+	if first < 0 {
+		msg.Blocks = append(msg.Blocks, &pbv2.RequestBlock{
+			Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: text}},
+		})
+	} else {
+		// Drop every text block after the first (collapse semantics).
+		kept := msg.Blocks[:0]
+		seen := 0
+		for _, b := range msg.Blocks {
+			if tb := b.GetText(); tb != nil {
+				seen++
+				if seen > 1 {
+					continue
+				}
+			}
+			kept = append(kept, b)
+		}
+		msg.Blocks = kept
+	}
+	if first >= 0 {
+		clearTrailingSignature(msg)
+	}
+	return nil
+}
+
+// clearTrailingSignature removes a final trailing-signature block whose
+// TrailingStandalone scope covered the changed content.
+func clearTrailingSignature(msg *pbv2.Message) {
+	if len(msg.Blocks) == 0 {
+		return
+	}
+	last := msg.Blocks[len(msg.Blocks)-1]
+	if ts := last.GetTrailingSignature(); ts != nil {
+		msg.Blocks = msg.Blocks[:len(msg.Blocks)-1]
+	}
+}
+
+// ToolCallView is a copied view of one tool-use block.
+type ToolCallView struct {
+	// Block is the block index inside Message.blocks.
+	Block     int
+	Id        string
+	Name      string
+	Arguments []byte // exact authoritative raw bytes (verbatim)
+	Signature string
+}
+
+// ToolCalls returns the tool-use blocks' views in wire order.
+func ToolCalls(msg *pbv2.Message) []ToolCallView {
+	if msg == nil {
+		return nil
+	}
+	var out []ToolCallView
+	for i, b := range msg.Blocks {
+		if tu := b.GetToolUse(); tu != nil {
+			out = append(out, ToolCallView{
+				Block:     i,
+				Id:        tu.Id,
+				Name:      tu.Name,
+				Arguments: append([]byte(nil), tu.ArgumentsJson...),
+				Signature: tu.Signature,
+			})
+		}
+	}
+	return out
+}
+
+// ToolResultView is a copied view of one tool-result block.
+type ToolResultView struct {
+	// Block is the block index inside Message.blocks.
+	Block      int
+	ToolCallId string
+	ToolName   string
+	Content    []ToolResultContentView // ordered nested content, copied
+}
+
+// ToolResultContentView is a copied view of one nested tool-result content
+// element.
+type ToolResultContentView struct {
+	Text        string // when the element is a text arm
+	UnknownKind string // when the element is an unknown/provider arm
+	UnknownData []byte // exact authoritative raw payload bytes
+	CacheMarker []byte // when the element is a nested cache breakpoint
+}
+
+// ToolResults returns the tool-result blocks' views in wire order.
+func ToolResults(msg *pbv2.Message) []ToolResultView {
+	if msg == nil {
+		return nil
+	}
+	var out []ToolResultView
+	for i, b := range msg.Blocks {
+		if tr := b.GetToolResult(); tr != nil {
+			v := ToolResultView{Block: i, ToolCallId: tr.ToolCallId, ToolName: tr.ToolName}
+			for _, c := range tr.Content {
+				v.Content = append(v.Content, toolResultContentView(c))
+			}
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func toolResultContentView(c *pbv2.ToolResultContentBlock) ToolResultContentView {
+	var v ToolResultContentView
+	switch k := c.Kind.(type) {
+	case *pbv2.ToolResultContentBlock_Text:
+		if k.Text != nil {
+			v.Text = k.Text.Text
+		}
+	case *pbv2.ToolResultContentBlock_Unknown:
+		if k.Unknown != nil {
+			v.UnknownKind = k.Unknown.Kind
+			v.UnknownData = append([]byte(nil), k.Unknown.PayloadJson...)
+		}
+	case *pbv2.ToolResultContentBlock_CacheBreakpoint:
+		if k.CacheBreakpoint != nil {
+			v.CacheMarker = append([]byte(nil), k.CacheBreakpoint.MarkerJson...)
+		}
+	}
+	return v
+}
+
+// ToolCallInput is a copied-value tool-use description for AddToolCall and
+// ReplaceToolCall.
+type ToolCallInput struct {
+	Id        string
+	Name      string
+	Arguments []byte // exact authoritative raw bytes; must be a JSON object
+}
+
+// validateCallInput checks the structural leaf contract of a tool call.
+func validateCallInput(call ToolCallInput) error {
+	if call.Id == "" {
+		return fmt.Errorf("tool call id must be non-empty")
+	}
+	if call.Name == "" {
+		return fmt.Errorf("tool call name must be non-empty")
+	}
+	if err := validJSONObject(call.Arguments); err != nil {
+		return fmt.Errorf("tool call arguments: %w", err)
+	}
+	return nil
+}
+
+// AddToolCall inserts a tool-use block at position at (0..len(blocks)).
+// Out-of-range positions are an error.
+func AddToolCall(msg *pbv2.Message, at int, call ToolCallInput) error {
+	if msg == nil {
+		return fmt.Errorf("add tool call: nil message")
+	}
+	if at < 0 || at > len(msg.Blocks) {
+		return fmt.Errorf("add tool call: position %d out of range (0..%d)", at, len(msg.Blocks))
+	}
+	if err := validateCallInput(call); err != nil {
+		return err
+	}
+	block := &pbv2.RequestBlock{
+		Kind: &pbv2.RequestBlock_ToolUse{ToolUse: &pbv2.RequestToolUseBlock{
+			Id:            call.Id,
+			Name:          call.Name,
+			ArgumentsJson: append([]byte(nil), call.Arguments...),
+		}},
+	}
+	msg.Blocks = append(msg.Blocks, nil)
+	copy(msg.Blocks[at+1:], msg.Blocks[at:])
+	msg.Blocks[at] = block
+	return nil
+}
+
+// ReplaceToolCall replaces the tool-use block at block with call (identity,
+// arguments). The block must be a tool-use block; its call-bound signature
+// token is cleared (its covered content changed).
+func ReplaceToolCall(msg *pbv2.Message, block int, call ToolCallInput) error {
+	if msg == nil {
+		return fmt.Errorf("replace tool call: nil message")
+	}
+	if block < 0 || block >= len(msg.Blocks) {
+		return fmt.Errorf("replace tool call: block %d out of range (0..%d)", block, len(msg.Blocks)-1)
+	}
+	tu, ok := msg.Blocks[block].Kind.(*pbv2.RequestBlock_ToolUse)
+	if !ok || tu.ToolUse == nil {
+		return fmt.Errorf("replace tool call: block %d is not a tool-use block", block)
+	}
+	if err := validateCallInput(call); err != nil {
+		return err
+	}
+	tu.ToolUse.Id = call.Id
+	tu.ToolUse.Name = call.Name
+	tu.ToolUse.ArgumentsJson = append([]byte(nil), call.Arguments...)
+	tu.ToolUse.Signature = "" // stale: changed covered content
+	return nil
+}
+
+// CacheBreakpointView is a copied view of one cache-breakpoint block.
+type CacheBreakpointView struct {
+	// Block is the block index inside Message.blocks.
+	Block  int
+	Marker []byte // exact authoritative raw marker bytes (verbatim)
+}
+
+// CacheBreakpoints returns the cache-breakpoint blocks' views in wire
+// order. A breakpoint CLOSES the cached prefix at its position; multiple
+// markers per message are naturally representable.
+func CacheBreakpoints(msg *pbv2.Message) []CacheBreakpointView {
+	if msg == nil {
+		return nil
+	}
+	var out []CacheBreakpointView
+	for i, b := range msg.Blocks {
+		if cb := b.GetCacheBreakpoint(); cb != nil {
+			out = append(out, CacheBreakpointView{Block: i, Marker: append([]byte(nil), cb.MarkerJson...)})
+		}
+	}
+	return out
+}
+
+// CacheControl returns the marker of the LAST cache-breakpoint block of the
+// message — the prefix-closing boundary — or nil when the message carries no
+// breakpoint. The marker bytes are decoded for the caller's convenience; the
+// raw bytes remain available via CacheBreakpoints.
+func CacheControl(msg *pbv2.Message) map[string]any {
+	if msg == nil {
+		return nil
+	}
+	var last []byte
+	for i, b := range msg.Blocks {
+		if cb := b.GetCacheBreakpoint(); cb != nil {
+			last = cb.MarkerJson
+			_ = i
+		}
+	}
+	if len(last) == 0 {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(last, &m); err != nil {
+		return nil
+	}
+	return m
+}
+
+// SetCacheBreakpoint replaces the marker of the cache-breakpoint block at
+// block. The block must be a cache-breakpoint block and marker a valid JSON
+// object (raw bytes preserved verbatim).
+func SetCacheBreakpoint(msg *pbv2.Message, block int, marker []byte) error {
+	if msg == nil {
+		return fmt.Errorf("set cache breakpoint: nil message")
+	}
+	if block < 0 || block >= len(msg.Blocks) {
+		return fmt.Errorf("set cache breakpoint: block %d out of range (0..%d)", block, len(msg.Blocks)-1)
+	}
+	cb, ok := msg.Blocks[block].Kind.(*pbv2.RequestBlock_CacheBreakpoint)
+	if !ok || cb.CacheBreakpoint == nil {
+		return fmt.Errorf("set cache breakpoint: block %d is not a cache-breakpoint block", block)
+	}
+	if err := validJSONObject(marker); err != nil {
+		return fmt.Errorf("set cache breakpoint: %w", err)
+	}
+	cb.CacheBreakpoint.MarkerJson = append([]byte(nil), marker...)
+	return nil
+}
+
+// AddCacheBreakpoint inserts a cache-breakpoint block at position at
+// (0..len(blocks)), closing the cached prefix at that position.
+func AddCacheBreakpoint(msg *pbv2.Message, at int, marker []byte) error {
+	if msg == nil {
+		return fmt.Errorf("add cache breakpoint: nil message")
+	}
+	if at < 0 || at > len(msg.Blocks) {
+		return fmt.Errorf("add cache breakpoint: position %d out of range (0..%d)", at, len(msg.Blocks))
+	}
+	if err := validJSONObject(marker); err != nil {
+		return fmt.Errorf("add cache breakpoint: %w", err)
+	}
+	block := &pbv2.RequestBlock{
+		Kind: &pbv2.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.RequestCacheBreakpoint{
+			MarkerJson: append([]byte(nil), marker...),
+		}},
+	}
+	msg.Blocks = append(msg.Blocks, nil)
+	copy(msg.Blocks[at+1:], msg.Blocks[at:])
+	msg.Blocks[at] = block
+	return nil
+}
+
+// DeleteCacheBreakpoint removes the cache-breakpoint block at block.
+func DeleteCacheBreakpoint(msg *pbv2.Message, block int) error {
+	if msg == nil {
+		return fmt.Errorf("delete cache breakpoint: nil message")
+	}
+	if block < 0 || block >= len(msg.Blocks) {
+		return fmt.Errorf("delete cache breakpoint: block %d out of range (0..%d)", block, len(msg.Blocks)-1)
+	}
+	if _, ok := msg.Blocks[block].Kind.(*pbv2.RequestBlock_CacheBreakpoint); !ok {
+		return fmt.Errorf("delete cache breakpoint: block %d is not a cache-breakpoint block", block)
+	}
+	msg.Blocks = append(msg.Blocks[:block], msg.Blocks[block+1:]...)
+	return nil
+}
+
+// validJSONObject reports whether raw is a strict single JSON object (the
+// shared jsontext rules; shape discrimination via a UseNumber decode so
+// large numerics never fail a shape check).
+func validJSONObject(raw []byte) error {
+	if len(raw) == 0 {
+		return fmt.Errorf("must be a non-empty JSON object")
+	}
+	if err := jsontext.Validate(raw); err != nil {
+		return err
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return err
+	}
+	if _, ok := v.(map[string]any); !ok {
+		return fmt.Errorf("must be a JSON object")
+	}
+	return nil
+}

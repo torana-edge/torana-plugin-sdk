@@ -8,7 +8,9 @@ import (
 )
 
 func TestToolNamesByCallID(t *testing.T) {
-	names := ToolNamesByCallID([]*pbv2.Message{{Role: "assistant", ToolCalls: []*pbv2.ToolCall{{Id: "call-1", Name: "read_file"}}}})
+	names := ToolNamesByCallID([]*pbv2.Message{{Role: "assistant", Blocks: []*pbv2.RequestBlock{{
+		Kind: &pbv2.RequestBlock_ToolUse{ToolUse: &pbv2.RequestToolUseBlock{Id: "call-1", Name: "read_file", ArgumentsJson: []byte(`{}`)}},
+	}}}})
 	if names["call-1"] != "read_file" {
 		t.Fatalf("tool name not recovered: %v", names)
 	}
