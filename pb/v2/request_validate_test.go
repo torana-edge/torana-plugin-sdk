@@ -450,3 +450,47 @@ func TestHookResultValidateForReplaceRequest(t *testing.T) {
 		t.Fatalf("valid unicode replacement rejected: %v", err)
 	}
 }
+
+// TestReplacementMessageRoleNonEmpty: the request-domain Message.role is
+// non-empty UTF-8 — a nil Message element survives protobuf transport as a
+// zero-length message that decodes to an empty non-nil Message{}, so the
+// decoded form must be rejected. The catch-all role decision stays open:
+// any NON-EMPTY role (known or unmodelled) is accepted.
+func TestReplacementMessageRoleNonEmpty(t *testing.T) {
+	// Decisive wire round trip: nil element -> zero-length wire -> empty
+	// non-nil Message{} on decode -> rejected by the shared contract.
+	req := &v2.ChatRequest{Messages: []*v2.Message{nil}}
+	raw, err := proto.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded v2.ChatRequest
+	if err := proto.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Messages) != 1 || decoded.Messages[0] == nil || decoded.Messages[0].Role != "" {
+		t.Fatalf("decoded = %+v; want one non-nil empty message (the nil survived as zero-length)", decoded.Messages)
+	}
+	if err := decoded.ValidateReplacement(); err == nil {
+		t.Fatal("decoded zero-length message accepted")
+	}
+
+	// Explicitly empty Message{} rejected.
+	empty := &v2.ChatRequest{Messages: []*v2.Message{{}}}
+	if err := empty.ValidateReplacement(); err == nil {
+		t.Fatal("explicitly empty message accepted")
+	}
+
+	// Valid known roles accepted.
+	for _, role := range []string{"user", "assistant", "system", "tool"} {
+		r := &v2.ChatRequest{Messages: []*v2.Message{{Role: role, Content: "hi"}}}
+		if err := r.ValidateReplacement(); err != nil {
+			t.Fatalf("known role %q rejected: %v", role, err)
+		}
+	}
+	// Valid NON-EMPTY unmodelled role accepted (the catch-all stays open).
+	other := &v2.ChatRequest{Messages: []*v2.Message{{Role: "developer-plus", Content: "hi"}}}
+	if err := other.ValidateReplacement(); err != nil {
+		t.Fatalf("unmodelled non-empty role rejected: %v", err)
+	}
+}
