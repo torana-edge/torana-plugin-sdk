@@ -482,3 +482,95 @@ func TestSyntheticFullLineConsumptionPins(t *testing.T) {
 		t.Fatal("malformed json_name accepted")
 	}
 }
+
+// TestSyntheticRound5TailPins (finding round 5): opening-line tails,
+// mandatory semicolons, and comment normalization.
+func TestSyntheticRound5TailPins(t *testing.T) {
+	partOf := func(t *testing.T, full string) string {
+		t.Helper()
+		body, ok, err := extractMessage(full, "Part")
+		if err != nil || !ok {
+			t.Fatalf("synthetic: ok=%v err=%v", ok, err)
+		}
+		return body
+	}
+
+	// (a) A oneof OPENING line with a declaration tail must error — the
+	// tail cannot disappear (`oneof data { invented_field = 9;`).
+	openTail := `message Part {
+  oneof data { invented_field = 9;
+    string text = 1;
+  }
+}`
+	if _, err := partNodes(SurfaceGemini, partOf(t, openTail)); err == nil {
+		t.Fatal("oneof open line with a declaration tail accepted")
+	}
+
+	// (b) A field WITHOUT a terminator is an error — empty tail and
+	// comment-only tail both fail.
+	noSemi := `message Part {
+  string x = 1
+  string y = 2;
+}`
+	if _, err := partNodes(SurfaceGemini, partOf(t, noSemi)); err == nil {
+		t.Fatal("semicolon-less field accepted")
+	}
+	commentOnly := `message Part {
+  string x = 1 // comment
+  string y = 2;
+}`
+	if _, err := partNodes(SurfaceGemini, partOf(t, commentOnly)); err == nil {
+		t.Fatal("comment-only tail without ';' accepted")
+	}
+
+	// (c) A trailing comment AFTER the terminator is legal.
+	withComment := `message Part {
+  string x = 1; // comment
+  string y = 2;
+}`
+	ns, err := partNodes(SurfaceGemini, partOf(t, withComment))
+	if err != nil {
+		t.Fatalf("semicolon+comment tail refused: %v", err)
+	}
+	if len(ns) != 2 {
+		t.Fatalf("semicolon+comment fields: %d nodes, want 2", len(ns))
+	}
+
+	// (d) An inline option with a trailing comment is normalized ONCE:
+	// parsed correctly AND the following line is not consumed.
+	optComment := `message Part {
+  string x = 1 [json_name = "xw"]; // note
+  string y = 2;
+}`
+	ns, err = partNodes(SurfaceGemini, partOf(t, optComment))
+	if err != nil {
+		t.Fatalf("inline option + comment refused: %v", err)
+	}
+	if len(ns) != 2 {
+		t.Fatalf("inline option + comment consumed the next line: %d nodes", len(ns))
+	}
+	for _, n := range ns {
+		if n.Member == "xw" && n.ID != "part.ancillary.xw" {
+			t.Fatalf("json_name not honored with comment: %+v", n)
+		}
+	}
+
+	// (e) `//` INSIDE a quoted option string is not a comment delimiter
+	// (supported); an unterminated string is a stable error.
+	slashInString := `message Part {
+  string x = 1 [json_name = "a//b"];
+}`
+	ns, err = partNodes(SurfaceGemini, partOf(t, slashInString))
+	if err != nil {
+		t.Fatalf("// inside a quoted option string refused: %v", err)
+	}
+	if len(ns) != 1 || ns[0].Member != "a//b" {
+		t.Fatalf("// inside the json_name not honored: %+v", ns)
+	}
+	unterminated := `message Part {
+  string x = 1 [json_name = "a//b];
+}`
+	if _, err := partNodes(SurfaceGemini, partOf(t, unterminated)); err == nil {
+		t.Fatal("unterminated quoted string in an option accepted")
+	}
+}

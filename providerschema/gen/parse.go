@@ -98,7 +98,11 @@ func LoadManifestFrom(path string) (*Manifest, error) {
 // proto text parsing (constrained to the pinned artifacts)
 // ---------------------------------------------------------------------------
 
-var oneofRe = regexp.MustCompile(`(?m)^\s*oneof (\w+) \{`)
+// oneofRe is the FULL-LINE oneof-open rule (optional whitespace/comment
+// after `{` only). The interval pass and the line scanner share it, so a
+// `oneof data { invented_field = 9;` line matches neither and the scanner
+// rejects it — an opening-line tail can never disappear.
+var oneofRe = regexp.MustCompile(`(?m)^\s*oneof (\w+) \{\s*(//.*)?$`)
 
 // extractMessage returns the BODY of the first top-level `message NAME {`
 // in s. Missing and unbalanced inputs are errors, never empty results.
@@ -156,7 +160,7 @@ var fieldHeadRe = regexp.MustCompile(`^\s*(repeated\s+|optional\s+)?([\w.]+)\s+(
 var mapFieldRe = regexp.MustCompile(`^\s*map<\s*([\w.]+)\s*,\s*([\w.]+)\s*>\s+(\w+)\s*=\s*(-?\d+)\s*`)
 
 // Option continuation line (wrapped field options end with `;`).
-var optionLineRe = regexp.MustCompile(`^\s*(\[[^\]]*\])\s*;?\s*$`)
+var optionLineRe = regexp.MustCompile(`^\s*(\[[^\]]*\])\s*;?\s*(//.*)?$`)
 
 // closeLineRe is the FULL-LINE oneof/message close rule: a line that is
 // not exactly `}` (plus optional trailing comment) is NOT a close — a
@@ -377,24 +381,40 @@ func parseFieldLine(line string, tail string, rest []string, name, number, typ, 
 	optText := ""
 	restOf := strings.TrimSpace(tail)
 	switch {
-	case restOf == "" || restOf == ";" || isCommentTail(restOf):
-		// No options on the head line — but a WRAPPED option may begin on
-		// the next line (`= 6\n    [(google.api.field_behavior) = ...];`).
-		if len(rest) > 0 && optionLineRe.MatchString(strings.TrimSpace(rest[0])) {
-			c := strings.TrimSpace(rest[0])
-			consumed = 1
-			optText = c
-			if !strings.HasSuffix(c, ";") {
-				return fieldDesc{}, 0, fmt.Errorf("field %s: wrapped option not terminated on one line", name)
-			}
+	case restOf == ";" || semiCommentRe.MatchString(restOf):
+		// Terminated field (a trailing comment after `;` is legal).
+	case restOf == "":
+		// An EMPTY tail is legal ONLY when the immediately following line
+		// is a complete wrapped option ending in `;` (the pinned files use
+		// this for `= 6\n    [(google.api.field_behavior) = OPTIONAL];`).
+		// Otherwise the field REQUIRES a semicolon.
+		if len(rest) == 0 || !optionLineRe.MatchString(strings.TrimSpace(rest[0])) {
+			return fieldDesc{}, 0, fmt.Errorf("field %s: requires ';'", name)
 		}
+		c := strings.TrimSpace(rest[0])
+		consumed = 1
+		norm, err := stripTrailingComment(c)
+		if err != nil {
+			return fieldDesc{}, 0, fmt.Errorf("field %s: %w", name, err)
+		}
+		if !strings.HasSuffix(strings.TrimSpace(norm), ";") {
+			return fieldDesc{}, 0, fmt.Errorf("field %s: wrapped option must end with ';'", name)
+		}
+		if !isCompleteOptionTail(norm) {
+			return fieldDesc{}, 0, fmt.Errorf("field %s: structurally incomplete wrapped option %q", name, c)
+		}
+		optText = norm
+	case strings.HasPrefix(restOf, "//"):
+		// A trailing comment is legal ONLY after the terminator.
+		return fieldDesc{}, 0, fmt.Errorf("field %s: requires ';' before the trailing comment", name)
 	case strings.HasPrefix(restOf, "["):
-		// Structural completeness: the option must be a BALANCED bracket
-		// group ending with `];` (a trailing comment after `;` is fine).
-		if !isCompleteOptionTail(restOf) {
-			return fieldDesc{}, 0, fmt.Errorf("field %s: structurally incomplete option tail %q", name, restOf)
+		// Normalize the trailing comment ONCE; completeness, termination,
+		// and option parsing all use the same comment-free structural tail.
+		norm, err := stripTrailingComment(restOf)
+		if err != nil {
+			return fieldDesc{}, 0, fmt.Errorf("field %s: %w", name, err)
 		}
-		optText = restOf
+		optText = norm
 		if !strings.HasSuffix(strings.TrimSpace(optText), ";") {
 			// Wrapped option list: consume continuation lines until one
 			// ends with ';'.
@@ -405,13 +425,26 @@ func parseFieldLine(line string, tail string, rest []string, name, number, typ, 
 					return fieldDesc{}, 0, fmt.Errorf("field %s: malformed wrapped option %q", name, c)
 				}
 				optText += c
-				if strings.HasSuffix(c, ";") {
+				norm, err := stripTrailingComment(optText)
+				if err != nil {
+					return fieldDesc{}, 0, fmt.Errorf("field %s: %w", name, err)
+				}
+				if strings.HasSuffix(strings.TrimSpace(norm), ";") {
+					optText = norm
 					break
 				}
 			}
-			if !strings.HasSuffix(strings.TrimSpace(optText), ";") {
+			norm, err := stripTrailingComment(optText)
+			if err != nil {
+				return fieldDesc{}, 0, fmt.Errorf("field %s: %w", name, err)
+			}
+			if !strings.HasSuffix(strings.TrimSpace(norm), ";") {
 				return fieldDesc{}, 0, fmt.Errorf("field %s: unterminated wrapped option", name)
 			}
+			optText = norm
+		}
+		if !isCompleteOptionTail(optText) {
+			return fieldDesc{}, 0, fmt.Errorf("field %s: structurally incomplete option tail %q", name, restOf)
 		}
 	default:
 		return fieldDesc{}, 0, fmt.Errorf("field %s: unrecognized construct after the number: %q", name, restOf)
@@ -887,26 +920,72 @@ func SyntheticPartArms(full string) (map[string]bool, error) {
 	return out, nil
 }
 
-// isCompleteOptionTail checks that an inline option tail is structurally
-// complete: a BALANCED bracket group ending with `];` (a trailing comment
-// is allowed). An unclosed `[json_name = "x";` or a missing `;` fails.
+// semiCommentRe matches `;` followed by an optional comment.
+var semiCommentRe = regexp.MustCompile(`^;\s*(//.*)?$`)
+
+// stripTrailingComment removes a trailing `//` comment from an option
+// tail. `//` INSIDE a quoted string is NOT a comment delimiter (quoted
+// strings are supported); an unterminated string is a stable error.
+func stripTrailingComment(text string) (string, error) {
+	inString := false
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		if inString {
+			if c == '\\' {
+				i++
+			} else if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '/':
+			if i+1 < len(text) && text[i+1] == '/' {
+				return strings.TrimSpace(text[:i]), nil
+			}
+		}
+	}
+	if inString {
+		return "", fmt.Errorf("unterminated quoted string in option tail %q", text)
+	}
+	return text, nil
+}
+
+// isCompleteOptionTail checks that a comment-free option tail is
+// structurally complete: a BALANCED bracket group (strings skipped, so a
+// `]` inside a quoted value is legal) ending with `];`. An unclosed
+// `[json_name = "x";` or a missing `;` fails.
 func isCompleteOptionTail(tail string) bool {
 	t := strings.TrimSpace(tail)
-	// Strip a trailing comment first.
-	if i := strings.Index(t, "//"); i >= 0 {
-		t = strings.TrimSpace(t[:i])
-	}
 	if !strings.HasSuffix(t, ";") {
 		return false
 	}
 	t = strings.TrimSpace(t[:len(t)-1])
-	if !strings.HasPrefix(t, "[") || !strings.HasSuffix(t, "]") {
+	if !strings.HasPrefix(t, "[") {
 		return false
 	}
-	return strings.Count(t, "[") == 1 && strings.Count(t, "]") == 1
-}
-
-// isCommentTail reports a tail that is only whitespace + a comment.
-func isCommentTail(tail string) bool {
-	return commentLineRe.MatchString(strings.TrimSpace(tail))
+	depth := 0
+	inString := false
+	for i := 0; i < len(t); i++ {
+		c := t[i]
+		if inString {
+			if c == '\\' {
+				i++
+			} else if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '[':
+			depth++
+		case ']':
+			depth--
+		}
+	}
+	return !inString && depth == 0
 }
