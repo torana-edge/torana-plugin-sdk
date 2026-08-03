@@ -3,6 +3,7 @@ package outboundpolicy
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	plugin_sdk "github.com/torana-edge/torana-plugin-sdk"
 	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
@@ -446,27 +447,84 @@ func (d SignatureDomain) valid() bool {
 	return false
 }
 
-// requestSignatureContracts pins the COMPLETE request-domain binding shapes:
-// token message + field, its scope, and the exact set of covered content
-// refs (fields on the token's own block for SameMessage scopes; the
-// preceding closed text/thinking block fields for the TrailingStandalone
-// scope). edge treats Validate() as its startup proof that the policy table
-// is coherent, so a new request token requires deliberately extending this
-// table — never silently widening what a scope name means. Content sets are
-// compared as sets, so declaration order is irrelevant.
+// requestSignatureContracts pins the COMPLETE request-domain binding shapes
+// as TYPED ALLOWED-REF SETS: for every token message+field, each content ref
+// declares its own scope class, so a contract may deliberately mix scopes
+// (the trailing token covers its own SameMessage metadata AND the preceding
+// TrailingStandalone text/thinking content) while arbitrary mixed scopes
+// remain impossible elsewhere. Edge treats Validate() as its startup proof
+// that the policy table is coherent, so a new request token requires
+// deliberately extending this table. Sets are compared as sets, so
+// declaration order is irrelevant.
+//
+// Covered-field kinds are descriptor-derived (no boolean modes): plain
+// singular string/bytes refs frame the value with no fabricated presence;
+// the pinned proto3-optional refs (will_continue, scheduling) frame
+// presence + value; the ONE pinned repeated-message ref
+// (RequestToolResultBlock.content) uses the SDK nested digest. Any other
+// field-kind/cardinality/presence combination fails startup.
+type requestContractRef struct {
+	scope SignatureScope
+	ref   string // "message.field"; message omitted = the token's own
+}
+
 var requestSignatureContracts = []struct {
 	message string
 	field   string
-	scope   SignatureScope
-	content []string // "message.field" refs; message omitted = the token's own
+	content []requestContractRef
 }{
-	{message: "torana.v2.RequestThinkingBlock", field: "signature", scope: SignatureScopeSameMessage, content: []string{"text"}},
-	{message: "torana.v2.RequestTextBlock", field: "signature", scope: SignatureScopeSameMessage, content: []string{"text"}},
-	{message: "torana.v2.RequestToolUseBlock", field: "signature", scope: SignatureScopeSameMessage,
-		content: []string{"id", "name", "arguments_json"}},
-	{message: "torana.v2.RequestTrailingSignatureBlock", field: "signature", scope: SignatureScopeTrailingStandalone,
-		content: []string{"torana.v2.RequestTextBlock.text", "torana.v2.RequestThinkingBlock.text"}},
+	{message: "torana.v2.RequestThinkingBlock", field: "signature", content: []requestContractRef{
+		{scope: SignatureScopeSameMessage, ref: "text"},
+		{scope: SignatureScopeSameMessage, ref: "part_metadata_json"},
+	}},
+	{message: "torana.v2.RequestTextBlock", field: "signature", content: []requestContractRef{
+		{scope: SignatureScopeSameMessage, ref: "text"},
+		{scope: SignatureScopeSameMessage, ref: "part_metadata_json"},
+	}},
+	{message: "torana.v2.RequestToolUseBlock", field: "signature", content: []requestContractRef{
+		{scope: SignatureScopeSameMessage, ref: "id"},
+		{scope: SignatureScopeSameMessage, ref: "name"},
+		{scope: SignatureScopeSameMessage, ref: "arguments_json"},
+		{scope: SignatureScopeSameMessage, ref: "part_metadata_json"},
+	}},
+	{message: "torana.v2.RequestUnknownBlock", field: "signature", content: []requestContractRef{
+		{scope: SignatureScopeSameMessage, ref: "kind"},
+		{scope: SignatureScopeSameMessage, ref: "payload_json"},
+		{scope: SignatureScopeSameMessage, ref: "part_metadata_json"},
+	}},
+	{message: "torana.v2.RequestToolResultBlock", field: "signature", content: []requestContractRef{
+		{scope: SignatureScopeSameMessage, ref: "tool_call_id"},
+		{scope: SignatureScopeSameMessage, ref: "tool_name"},
+		{scope: SignatureScopeSameMessage, ref: "part_metadata_json"},
+		{scope: SignatureScopeSameMessage, ref: "will_continue"},
+		{scope: SignatureScopeSameMessage, ref: "scheduling"},
+		{scope: SignatureScopeSameMessage, ref: "content"},
+	}},
+	{message: "torana.v2.RequestTrailingSignatureBlock", field: "signature", content: []requestContractRef{
+		{scope: SignatureScopeSameMessage, ref: "part_metadata_json"},
+		{scope: SignatureScopeTrailingStandalone, ref: "torana.v2.RequestTextBlock.text"},
+		{scope: SignatureScopeTrailingStandalone, ref: "torana.v2.RequestThinkingBlock.text"},
+	}},
 }
+
+// requestCoveredFieldKinds pins the descriptor-derived covered-field rules:
+// the exact field-kind/cardinality/presence class every pinned ref must
+// satisfy. A plain string/bytes ref is the default (framed value); the
+// optional refs and the single repeated-message target are explicit pins;
+// anything else fails startup.
+var requestCoveredFieldKinds = map[string]requestCoveredFieldKind{
+	"torana.v2.RequestToolResultBlock.will_continue": {kind: protoreflect.BoolKind, optional: true},
+	"torana.v2.RequestToolResultBlock.scheduling":    {kind: protoreflect.StringKind, optional: true},
+}
+
+// requestCoveredFieldKind is one pinned covered-field class.
+type requestCoveredFieldKind struct {
+	kind     protoreflect.Kind
+	optional bool
+}
+
+// pinnedRepeatedContentTarget is the ONLY repeated-message covered ref.
+const pinnedRepeatedContentTarget = "torana.v2.RequestToolResultBlock.content"
 
 // validateRequestBindingShape enforces the complete request-domain contract:
 // the token must be the pinned message+field with its pinned scope, and the
@@ -479,8 +537,7 @@ func validateRequestBindingShape(b SignatureBinding) error {
 	var contract *struct {
 		message string
 		field   string
-		scope   SignatureScope
-		content []string
+		content []requestContractRef
 	}
 	for i := range requestSignatureContracts {
 		if requestSignatureContracts[i].message == string(b.Message) && requestSignatureContracts[i].field == b.SignatureField {
@@ -492,25 +549,22 @@ func validateRequestBindingShape(b SignatureBinding) error {
 		return fmt.Errorf("%s.%s: request-domain signature is not pinned (message+field must match a contract)",
 			b.Message, b.SignatureField)
 	}
-	got := make([]string, 0, len(b.Content))
-	for i, c := range b.Content {
-		if c.Scope != contract.scope {
-			return fmt.Errorf("%s.%s content[%d]: scope %v does not match the pinned %v",
-				b.Message, b.SignatureField, i, c.Scope, contract.scope)
-		}
+	// Each ref carries its OWN scope class (the typed allowed-ref set): the
+	// trailing contract deliberately mixes SameMessage metadata with
+	// TrailingStandalone content; every other contract is uniformly
+	// SameMessage, and a ref whose scope differs from its pinned class fails.
+	got := make([]requestContractRef, 0, len(b.Content))
+	for _, c := range b.Content {
 		ref := c.Field
 		if c.Message != "" {
 			ref = string(c.Message) + "." + c.Field
-		} else if contract.scope != SignatureScopeSameMessage {
-			return fmt.Errorf("%s.%s content[%d]: scope %v refs must name the covered block message",
-				b.Message, b.SignatureField, i, c.Scope)
 		}
-		got = append(got, ref)
+		got = append(got, requestContractRef{scope: c.Scope, ref: ref})
 	}
 	for i, f := range got {
 		for j := range i {
 			if got[j] == f {
-				return fmt.Errorf("%s.%s content[%d]: duplicate content ref %q", b.Message, b.SignatureField, i, f)
+				return fmt.Errorf("%s.%s content[%d]: duplicate content ref %q", b.Message, b.SignatureField, i, f.ref)
 			}
 		}
 	}
@@ -518,7 +572,7 @@ func validateRequestBindingShape(b SignatureBinding) error {
 		return fmt.Errorf("%s.%s: signed content set %v does not match the pinned set %v",
 			b.Message, b.SignatureField, got, contract.content)
 	}
-	wanted := make(map[string]bool, len(contract.content))
+	wanted := make(map[requestContractRef]bool, len(contract.content))
 	for _, f := range contract.content {
 		wanted[f] = true
 	}
@@ -526,6 +580,76 @@ func validateRequestBindingShape(b SignatureBinding) error {
 		if !wanted[f] {
 			return fmt.Errorf("%s.%s: signed content set %v does not match the pinned set %v",
 				b.Message, b.SignatureField, got, contract.content)
+		}
+	}
+	if err := validateRequestCoveredFieldKinds(b, contract); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateRequestCoveredFieldKinds pins the descriptor-derived covered-field
+// classes: every ref must resolve to a field whose kind/cardinality/presence
+// matches the pinned rules — plain singular string/bytes (framed value, no
+// fabricated presence), the two pinned proto3-optional refs (presence +
+// value), and the ONE pinned repeated-message ref (the SDK nested digest).
+// A new optional/bool/enum/repeated field cannot be added as a covered ref
+// without a deliberate contract decision.
+func validateRequestCoveredFieldKinds(b SignatureBinding, contract *struct {
+	message string
+	field   string
+	content []requestContractRef
+}) error {
+	descs := outboundDescriptors()
+	for i, ref := range contract.content {
+		// Full-name refs are "torana.v2.Message.field" — split at the LAST
+		// dot so the package prefix survives; a bare ref is a SameMessage
+		// field on the token's own message.
+		msgName := b.Message
+		fieldName := ref.ref
+		if dot := strings.LastIndex(ref.ref, "."); dot >= 0 {
+			msgName = protoreflect.FullName(ref.ref[:dot])
+			fieldName = ref.ref[dot+1:]
+		} else if ref.scope != SignatureScopeSameMessage {
+			return fmt.Errorf("%s.%s content[%d]: %v ref %q must name the covered block message",
+				b.Message, b.SignatureField, i, ref.scope, ref.ref)
+		}
+		desc, ok := descs[msgName]
+		if !ok {
+			return fmt.Errorf("%s.%s content[%d]: message %s unknown to proto inventory",
+				b.Message, b.SignatureField, i, msgName)
+		}
+		fd := desc.Fields().ByName(protoreflect.Name(fieldName))
+		if fd == nil {
+			return fmt.Errorf("%s.%s content[%d]: %s has no field %s",
+				b.Message, b.SignatureField, i, msgName, fieldName)
+		}
+		full := string(msgName) + "." + fieldName
+		pinned := requestCoveredFieldKinds[full]
+		switch {
+		case full == pinnedRepeatedContentTarget:
+			if fd.Cardinality() != protoreflect.Repeated || fd.Kind() != protoreflect.MessageKind {
+				return fmt.Errorf("%s.%s content[%d]: the pinned repeated target %s changed kind/cardinality",
+					b.Message, b.SignatureField, i, full)
+			}
+		case fd.Cardinality() == protoreflect.Repeated || fd.Kind() == protoreflect.MessageKind:
+			return fmt.Errorf("%s.%s content[%d]: %s is repeated/message but not the pinned repeated target",
+				b.Message, b.SignatureField, i, full)
+		case pinned.optional:
+			if !fd.HasOptionalKeyword() {
+				return fmt.Errorf("%s.%s content[%d]: %s must be a proto3-optional field (presence-aware)",
+					b.Message, b.SignatureField, i, full)
+			}
+			if fd.Kind() != pinned.kind {
+				return fmt.Errorf("%s.%s content[%d]: %s has kind %v, want pinned %v",
+					b.Message, b.SignatureField, i, full, fd.Kind(), pinned.kind)
+			}
+		case fd.HasOptionalKeyword() || fd.Kind() == protoreflect.BoolKind:
+			return fmt.Errorf("%s.%s content[%d]: %s is optional/bool but not pinned as presence-aware",
+				b.Message, b.SignatureField, i, full)
+		case fd.Kind() != protoreflect.StringKind && fd.Kind() != protoreflect.BytesKind:
+			return fmt.Errorf("%s.%s content[%d]: %s has kind %v, want a plain string/bytes field",
+				b.Message, b.SignatureField, i, full, fd.Kind())
 		}
 	}
 	return nil
@@ -615,6 +739,7 @@ var signatureBindings = []SignatureBinding{
 		SignatureField: "signature",
 		Content: []SignatureContentRef{
 			{Scope: SignatureScopeSameMessage, Field: "text"},
+			{Scope: SignatureScopeSameMessage, Field: "part_metadata_json"},
 		},
 	},
 	{
@@ -629,6 +754,38 @@ var signatureBindings = []SignatureBinding{
 			{Scope: SignatureScopeSameMessage, Field: "id"},
 			{Scope: SignatureScopeSameMessage, Field: "name"},
 			{Scope: SignatureScopeSameMessage, Field: "arguments_json"},
+			{Scope: SignatureScopeSameMessage, Field: "part_metadata_json"},
+		},
+	},
+	{
+		// An unknown/media/future arm's provider token binds the
+		// reconstruction kind, the exact payload bytes, AND the provider
+		// part metadata — retaining the token while changing any of them
+		// is stale.
+		Domain:         SignatureDomainRequest,
+		Message:        "torana.v2.RequestUnknownBlock",
+		SignatureField: "signature",
+		Content: []SignatureContentRef{
+			{Scope: SignatureScopeSameMessage, Field: "kind"},
+			{Scope: SignatureScopeSameMessage, Field: "payload_json"},
+			{Scope: SignatureScopeSameMessage, Field: "part_metadata_json"},
+		},
+	},
+	{
+		// A tool-result (Gemini functionResponse) token binds the COMPLETE
+		// signed Part: identity, provider part metadata, willContinue and
+		// scheduling presence+value, and the SDK-owned ordered nested
+		// content digest.
+		Domain:         SignatureDomainRequest,
+		Message:        "torana.v2.RequestToolResultBlock",
+		SignatureField: "signature",
+		Content: []SignatureContentRef{
+			{Scope: SignatureScopeSameMessage, Field: "tool_call_id"},
+			{Scope: SignatureScopeSameMessage, Field: "tool_name"},
+			{Scope: SignatureScopeSameMessage, Field: "part_metadata_json"},
+			{Scope: SignatureScopeSameMessage, Field: "will_continue"},
+			{Scope: SignatureScopeSameMessage, Field: "scheduling"},
+			{Scope: SignatureScopeSameMessage, Field: "content"},
 		},
 	},
 	{
@@ -640,6 +797,7 @@ var signatureBindings = []SignatureBinding{
 		Message:        "torana.v2.RequestTrailingSignatureBlock",
 		SignatureField: "signature",
 		Content: []SignatureContentRef{
+			{Scope: SignatureScopeSameMessage, Field: "part_metadata_json"},
 			{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.RequestTextBlock", Field: "text"},
 			{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.RequestThinkingBlock", Field: "text"},
 		},
@@ -654,6 +812,7 @@ var signatureBindings = []SignatureBinding{
 		SignatureField: "signature",
 		Content: []SignatureContentRef{
 			{Scope: SignatureScopeSameMessage, Field: "text"},
+			{Scope: SignatureScopeSameMessage, Field: "part_metadata_json"},
 		},
 	},
 	{

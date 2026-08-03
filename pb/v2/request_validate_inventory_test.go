@@ -134,6 +134,14 @@ func checkRuleMatchesDescriptor(t *testing.T, fd protoreflect.FieldDescriptor, r
 		if fd.IsList() || fd.Kind() != protoreflect.BoolKind {
 			t.Fatalf("field %s: rule %s requires a bool field", full, rule)
 		}
+	case rule == "bool-optional":
+		if fd.IsList() || fd.Kind() != protoreflect.BoolKind || !fd.HasOptionalKeyword() {
+			t.Fatalf("field %s: rule %s requires an optional bool field (presence-aware)", full, rule)
+		}
+	case rule == "text-utf8-optional":
+		if fd.IsList() || fd.Kind() != protoreflect.StringKind || !fd.HasOptionalKeyword() {
+			t.Fatalf("field %s: rule %s requires an optional string field (presence-aware)", full, rule)
+		}
 	case rule == "int32-positive-optional":
 		if fd.IsList() || fd.Kind() != protoreflect.Int32Kind || !fd.HasOptionalKeyword() {
 			t.Fatalf("field %s: rule %s requires an optional int32 field", full, rule)

@@ -343,8 +343,42 @@ sdk.DeleteCacheBreakpoint(msg, pos)           // remove
 cc := sdk.CacheControl(msg)                   // the prefix-closing marker (nil if none)
 ```
 
-`RequestBlocksFingerprint(msg)` is the canonical message-body fingerprint
-(kind, presence, order, identities, exact raw bytes, signatures, nested
-content, cache positions — typed length framing). The host's `CachePrefixKey`
-and the cache-tier stickiness mirror share this implementation; the plugin
-fingerprint never claims to reproduce host-only envelope topology.
+`RequestBlocksFingerprint(msg) (string, error)` is the canonical
+message-body fingerprint (kind, presence, order, identities, exact raw
+bytes, signatures, nested content, cache positions — typed length framing).
+It is ERROR-RETURNING and requires an ALREADY-VALIDATED message: the
+documented precondition is `ChatRequest.ValidateReplacement`, which the
+host runs before fingerprinting. The exported fingerprint itself
+defensively revalidates only the nested tool-result content (via
+`ToolResultContentFingerprint`); top-level arguments, metadata, unknown
+payloads, and markers are NOT locally re-parsed — a caller fingerprinting
+a non-validated message with an invalid top-level JSON field does NOT get
+a local error, and must not assume it does. Errors it does report: a nil
+message, a nil block element, a typed-nil block arm, an arm-less kind, and
+the nested primitive's own object/marker failures — never a usable hash.
+Callers (the host's `CachePrefixKey`, the cache-tier stickiness mirror,
+write-grant digests) fail closed on unrepresentable input. The host's
+`CachePrefixKey` and the cache-tier stickiness mirror share this
+implementation; the plugin fingerprint never claims to reproduce
+host-only envelope topology.
+
+`ToolResultContentFingerprint(blocks) ([32]byte, error)` is the total,
+versioned fingerprint of one `RequestToolResultBlock.content` element
+sequence (`toolResultContentDomainFrame = "torana/tool-result-content/v1"`
+heads the hash input): kind, presence, order, exact raw bytes, and the
+marker/payload strict-object check. The host's write-grant digest uses it
+so a nested-content mutation is a verifiable grant breach.
+
+Signature tokens are now first-class carriers: `RequestTextBlock.signature`,
+`RequestThinkingBlock.signature`, `RequestUnknownBlock.signature` (a signed
+unknown part's provenance), and `RequestToolResultBlock.signature`. The
+trailing standalone Gemini part (`text:""` + `thoughtSignature`) is
+`RequestTrailingSignatureBlock` (`signature` required, `part_metadata_json`
+optional). Presence semantics are typed: `will_continue` and `scheduling`
+are proto3 optional (`scheduling` is the exact provider wire enum string —
+`SILENT`, `WHEN_IDLE`, `INTERRUPT`; `SCHEDULING_UNSPECIFIED` and any other
+value are rejected with a value-free 400 at the adapter boundary; absence
+is the provider default `WHEN_IDLE`). All six Part-mapped messages carry
+`part_metadata_json` (strict JSON object when present; the provider's
+`partMetadata` struct, which is legal on ANY Part, is preserved on text,
+thinking, tool-use, tool-result, unknown, and the trailing standalone).

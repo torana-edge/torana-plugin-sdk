@@ -442,9 +442,13 @@ type RequestTextBlock struct {
 	// thoughtSignature beside non-thought text). Provenance-governed: the host
 	// verifier rejects a retained token over changed text (stale), requires a
 	// cleared token over changed text, and rejects added/changed/reused tokens.
-	Signature     string `protobuf:"bytes,2,opt,name=signature,proto3" json:"signature,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Signature string `protobuf:"bytes,2,opt,name=signature,proto3" json:"signature,omitempty"`
+	// Provider Part-level custom metadata (Gemini partMetadata), absent or a
+	// strict JSON object. Governed by the containing role's write grant and
+	// covered by this block's signature binding.
+	PartMetadataJson []byte `protobuf:"bytes,3,opt,name=part_metadata_json,json=partMetadataJson,proto3" json:"part_metadata_json,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *RequestTextBlock) Reset() {
@@ -491,15 +495,25 @@ func (x *RequestTextBlock) GetSignature() string {
 	return ""
 }
 
+func (x *RequestTextBlock) GetPartMetadataJson() []byte {
+	if x != nil {
+		return x.PartMetadataJson
+	}
+	return nil
+}
+
 // Extended thinking / reasoning text.
 type RequestThinkingBlock struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Text  string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
 	// Opaque provider token bound to this thinking block (current-block
 	// signature). Provenance-governed exactly like RequestTextBlock.signature.
-	Signature     string `protobuf:"bytes,2,opt,name=signature,proto3" json:"signature,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Signature string `protobuf:"bytes,2,opt,name=signature,proto3" json:"signature,omitempty"`
+	// Provider Part-level custom metadata (Gemini partMetadata), absent or a
+	// strict JSON object; covered by this block's signature binding.
+	PartMetadataJson []byte `protobuf:"bytes,3,opt,name=part_metadata_json,json=partMetadataJson,proto3" json:"part_metadata_json,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *RequestThinkingBlock) Reset() {
@@ -544,6 +558,13 @@ func (x *RequestThinkingBlock) GetSignature() string {
 		return x.Signature
 	}
 	return ""
+}
+
+func (x *RequestThinkingBlock) GetPartMetadataJson() []byte {
+	if x != nil {
+		return x.PartMetadataJson
+	}
+	return nil
 }
 
 // A redacted reasoning block: the provider replaced the reasoning payload
@@ -607,9 +628,12 @@ type RequestToolUseBlock struct {
 	// cacheable prefix). "{}" is the canonical empty arguments shape.
 	ArgumentsJson []byte `protobuf:"bytes,3,opt,name=arguments_json,json=argumentsJson,proto3" json:"arguments_json,omitempty"`
 	// Opaque provider token bound to this call (e.g. Gemini thoughtSignature).
-	Signature     string `protobuf:"bytes,4,opt,name=signature,proto3" json:"signature,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Signature string `protobuf:"bytes,4,opt,name=signature,proto3" json:"signature,omitempty"`
+	// Provider Part-level custom metadata (Gemini partMetadata), absent or a
+	// strict JSON object; covered by this block's signature binding.
+	PartMetadataJson []byte `protobuf:"bytes,5,opt,name=part_metadata_json,json=partMetadataJson,proto3" json:"part_metadata_json,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *RequestToolUseBlock) Reset() {
@@ -670,6 +694,13 @@ func (x *RequestToolUseBlock) GetSignature() string {
 	return ""
 }
 
+func (x *RequestToolUseBlock) GetPartMetadataJson() []byte {
+	if x != nil {
+		return x.PartMetadataJson
+	}
+	return nil
+}
+
 // A tool result at its exact wire position inside a (usually user-role)
 // message. Provider message boundaries stay intact: one provider message
 // with [text, tool_result, text] stays ONE Message with three blocks.
@@ -684,7 +715,24 @@ type RequestToolResultBlock struct {
 	// tool uses/results/thinking/signatures are impossible at the type level.
 	// A present provider result is either a non-empty list or one explicit
 	// empty ToolResultTextBlock — never an empty list masquerading as "absent".
-	Content       []*ToolResultContentBlock `protobuf:"bytes,3,rep,name=content,proto3" json:"content,omitempty"`
+	Content []*ToolResultContentBlock `protobuf:"bytes,3,rep,name=content,proto3" json:"content,omitempty"`
+	// Provider Part-level custom metadata (Gemini partMetadata), absent or a
+	// strict JSON object; covered by this block's signature binding.
+	PartMetadataJson []byte `protobuf:"bytes,4,opt,name=part_metadata_json,json=partMetadataJson,proto3" json:"part_metadata_json,omitempty"`
+	// Gemini functionResponse willContinue: presence is meaningful (an
+	// explicitly supplied false differs from absent). Only applicable to
+	// NON_BLOCKING function calls.
+	WillContinue *bool `protobuf:"varint,5,opt,name=will_continue,json=willContinue,proto3,oneof" json:"will_continue,omitempty"`
+	// Gemini functionResponse scheduling: the exact wire enum string
+	// (SILENT / WHEN_IDLE / INTERRUPT) or absent (provider default WHEN_IDLE).
+	// Presence is meaningful; the vocabulary is the provider adapter's
+	// boundary rule (unknown values are the value-free 400).
+	Scheduling *string `protobuf:"bytes,6,opt,name=scheduling,proto3,oneof" json:"scheduling,omitempty"`
+	// Opaque provider token bound to this result (Gemini thoughtSignature on
+	// a functionResponse part): the complete signed Part — identity, provider
+	// metadata, willContinue/scheduling, and the ordered nested content.
+	// Provenance-governed exactly like the other request tokens.
+	Signature     string `protobuf:"bytes,7,opt,name=signature,proto3" json:"signature,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -738,6 +786,34 @@ func (x *RequestToolResultBlock) GetContent() []*ToolResultContentBlock {
 		return x.Content
 	}
 	return nil
+}
+
+func (x *RequestToolResultBlock) GetPartMetadataJson() []byte {
+	if x != nil {
+		return x.PartMetadataJson
+	}
+	return nil
+}
+
+func (x *RequestToolResultBlock) GetWillContinue() bool {
+	if x != nil && x.WillContinue != nil {
+		return *x.WillContinue
+	}
+	return false
+}
+
+func (x *RequestToolResultBlock) GetScheduling() string {
+	if x != nil && x.Scheduling != nil {
+		return *x.Scheduling
+	}
+	return ""
+}
+
+func (x *RequestToolResultBlock) GetSignature() string {
+	if x != nil {
+		return x.Signature
+	}
+	return ""
 }
 
 // A provider cache breakpoint at an explicit position in the ordered body:
@@ -802,7 +878,16 @@ type RequestUnknownBlock struct {
 	// marshal validator, which must reject a returned payload duplicating
 	// them before marshal (an executable edge obligation, not an SDK rule: the
 	// SDK has no provider vocabulary).
-	PayloadJson   []byte `protobuf:"bytes,2,opt,name=payload_json,json=payloadJson,proto3" json:"payload_json,omitempty"`
+	PayloadJson []byte `protobuf:"bytes,2,opt,name=payload_json,json=payloadJson,proto3" json:"payload_json,omitempty"`
+	// Provider Part-level custom metadata (Gemini partMetadata), absent or a
+	// strict JSON object; covered by this block's signature binding.
+	PartMetadataJson []byte `protobuf:"bytes,3,opt,name=part_metadata_json,json=partMetadataJson,proto3" json:"part_metadata_json,omitempty"`
+	// Opaque provider token bound to this media/future arm (Gemini
+	// thoughtSignature on inlineData/fileData/toolCall/toolResponse and other
+	// unmodelled parts). Binds the reconstruction kind AND the payload AND
+	// the provider metadata. Provenance-governed exactly like the other
+	// request tokens.
+	Signature     string `protobuf:"bytes,4,opt,name=signature,proto3" json:"signature,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -851,15 +936,34 @@ func (x *RequestUnknownBlock) GetPayloadJson() []byte {
 	return nil
 }
 
+func (x *RequestUnknownBlock) GetPartMetadataJson() []byte {
+	if x != nil {
+		return x.PartMetadataJson
+	}
+	return nil
+}
+
+func (x *RequestUnknownBlock) GetSignature() string {
+	if x != nil {
+		return x.Signature
+	}
+	return ""
+}
+
 // Code Assist's trailing signature-only empty-text part: the standalone
 // provider token binding the preceding CLOSED text/thinking content of this
 // message (never tool-call blocks). Assistant-only, singular, and FINAL.
 type RequestTrailingSignatureBlock struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Required, non-empty.
-	Signature     string `protobuf:"bytes,1,opt,name=signature,proto3" json:"signature,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Signature string `protobuf:"bytes,1,opt,name=signature,proto3" json:"signature,omitempty"`
+	// Provider Part-level custom metadata (Gemini partMetadata) on the
+	// trailing standalone Part, absent or a strict JSON object. Covered by
+	// this token's binding (SameMessage metadata + the preceding
+	// TrailingStandalone text/thinking content).
+	PartMetadataJson []byte `protobuf:"bytes,2,opt,name=part_metadata_json,json=partMetadataJson,proto3" json:"part_metadata_json,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *RequestTrailingSignatureBlock) Reset() {
@@ -897,6 +1001,13 @@ func (x *RequestTrailingSignatureBlock) GetSignature() string {
 		return x.Signature
 	}
 	return ""
+}
+
+func (x *RequestTrailingSignatureBlock) GetPartMetadataJson() []byte {
+	if x != nil {
+		return x.PartMetadataJson
+	}
+	return nil
 }
 
 // One ordered element of a tool result's nested content. Dedicated oneof:
@@ -4212,33 +4323,47 @@ const file_proto_torana_v2_torana_proto_rawDesc = "" +
 	"\x10cache_breakpoint\x18\x06 \x01(\v2!.torana.v2.RequestCacheBreakpointH\x00R\x0fcacheBreakpoint\x12:\n" +
 	"\aunknown\x18\a \x01(\v2\x1e.torana.v2.RequestUnknownBlockH\x00R\aunknown\x12Y\n" +
 	"\x12trailing_signature\x18\b \x01(\v2(.torana.v2.RequestTrailingSignatureBlockH\x00R\x11trailingSignatureB\x06\n" +
-	"\x04kind\"D\n" +
+	"\x04kind\"r\n" +
 	"\x10RequestTextBlock\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x1c\n" +
-	"\tsignature\x18\x02 \x01(\tR\tsignature\"H\n" +
+	"\tsignature\x18\x02 \x01(\tR\tsignature\x12,\n" +
+	"\x12part_metadata_json\x18\x03 \x01(\fR\x10partMetadataJson\"v\n" +
 	"\x14RequestThinkingBlock\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x1c\n" +
-	"\tsignature\x18\x02 \x01(\tR\tsignature\"2\n" +
+	"\tsignature\x18\x02 \x01(\tR\tsignature\x12,\n" +
+	"\x12part_metadata_json\x18\x03 \x01(\fR\x10partMetadataJson\"2\n" +
 	"\x1cRequestRedactedThinkingBlock\x12\x12\n" +
-	"\x04data\x18\x01 \x01(\tR\x04data\"~\n" +
+	"\x04data\x18\x01 \x01(\tR\x04data\"\xac\x01\n" +
 	"\x13RequestToolUseBlock\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12%\n" +
 	"\x0earguments_json\x18\x03 \x01(\fR\rargumentsJson\x12\x1c\n" +
-	"\tsignature\x18\x04 \x01(\tR\tsignature\"\x94\x01\n" +
+	"\tsignature\x18\x04 \x01(\tR\tsignature\x12,\n" +
+	"\x12part_metadata_json\x18\x05 \x01(\fR\x10partMetadataJson\"\xd0\x02\n" +
 	"\x16RequestToolResultBlock\x12 \n" +
 	"\ftool_call_id\x18\x01 \x01(\tR\n" +
 	"toolCallId\x12\x1b\n" +
 	"\ttool_name\x18\x02 \x01(\tR\btoolName\x12;\n" +
-	"\acontent\x18\x03 \x03(\v2!.torana.v2.ToolResultContentBlockR\acontent\"9\n" +
+	"\acontent\x18\x03 \x03(\v2!.torana.v2.ToolResultContentBlockR\acontent\x12,\n" +
+	"\x12part_metadata_json\x18\x04 \x01(\fR\x10partMetadataJson\x12(\n" +
+	"\rwill_continue\x18\x05 \x01(\bH\x00R\fwillContinue\x88\x01\x01\x12#\n" +
+	"\n" +
+	"scheduling\x18\x06 \x01(\tH\x01R\n" +
+	"scheduling\x88\x01\x01\x12\x1c\n" +
+	"\tsignature\x18\a \x01(\tR\tsignatureB\x10\n" +
+	"\x0e_will_continueB\r\n" +
+	"\v_scheduling\"9\n" +
 	"\x16RequestCacheBreakpoint\x12\x1f\n" +
 	"\vmarker_json\x18\x01 \x01(\fR\n" +
-	"markerJson\"L\n" +
+	"markerJson\"\x98\x01\n" +
 	"\x13RequestUnknownBlock\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12!\n" +
-	"\fpayload_json\x18\x02 \x01(\fR\vpayloadJson\"=\n" +
+	"\fpayload_json\x18\x02 \x01(\fR\vpayloadJson\x12,\n" +
+	"\x12part_metadata_json\x18\x03 \x01(\fR\x10partMetadataJson\x12\x1c\n" +
+	"\tsignature\x18\x04 \x01(\tR\tsignature\"k\n" +
 	"\x1dRequestTrailingSignatureBlock\x12\x1c\n" +
-	"\tsignature\x18\x01 \x01(\tR\tsignature\"\xe8\x01\n" +
+	"\tsignature\x18\x01 \x01(\tR\tsignature\x12,\n" +
+	"\x12part_metadata_json\x18\x02 \x01(\fR\x10partMetadataJson\"\xe8\x01\n" +
 	"\x16ToolResultContentBlock\x124\n" +
 	"\x04text\x18\x01 \x01(\v2\x1e.torana.v2.ToolResultTextBlockH\x00R\x04text\x12=\n" +
 	"\aunknown\x18\x02 \x01(\v2!.torana.v2.ToolResultUnknownBlockH\x00R\aunknown\x12Q\n" +
@@ -4588,6 +4713,7 @@ func file_proto_torana_v2_torana_proto_init() {
 		(*RequestBlock_Unknown)(nil),
 		(*RequestBlock_TrailingSignature)(nil),
 	}
+	file_proto_torana_v2_torana_proto_msgTypes[6].OneofWrappers = []any{}
 	file_proto_torana_v2_torana_proto_msgTypes[10].OneofWrappers = []any{
 		(*ToolResultContentBlock_Text)(nil),
 		(*ToolResultContentBlock_Unknown)(nil),

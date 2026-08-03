@@ -83,6 +83,10 @@ message RequestTextBlock {
   // verifier rejects a retained token over changed text (stale), requires a
   // cleared token over changed text, and rejects added/changed/reused tokens.
   string signature = 2;
+  // Provider Part-level custom metadata (Gemini partMetadata), absent or a
+  // strict JSON object. Governed by the containing role's write grant and
+  // covered by this block's signature binding.
+  bytes part_metadata_json = 3;
 }
 
 // Extended thinking / reasoning text.
@@ -91,6 +95,9 @@ message RequestThinkingBlock {
   // Opaque provider token bound to this thinking block (current-block
   // signature). Provenance-governed exactly like RequestTextBlock.signature.
   string signature = 2;
+  // Provider Part-level custom metadata (Gemini partMetadata), absent or a
+  // strict JSON object; covered by this block's signature binding.
+  bytes part_metadata_json = 3;
 }
 
 // A redacted reasoning block: the provider replaced the reasoning payload
@@ -114,6 +121,9 @@ message RequestToolUseBlock {
   bytes arguments_json = 3;
   // Opaque provider token bound to this call (e.g. Gemini thoughtSignature).
   string signature = 4;
+  // Provider Part-level custom metadata (Gemini partMetadata), absent or a
+  // strict JSON object; covered by this block's signature binding.
+  bytes part_metadata_json = 5;
 }
 
 // A tool result at its exact wire position inside a (usually user-role)
@@ -130,6 +140,23 @@ message RequestToolResultBlock {
   // A present provider result is either a non-empty list or one explicit
   // empty ToolResultTextBlock — never an empty list masquerading as "absent".
   repeated ToolResultContentBlock content = 3;
+  // Provider Part-level custom metadata (Gemini partMetadata), absent or a
+  // strict JSON object; covered by this block's signature binding.
+  bytes part_metadata_json = 4;
+  // Gemini functionResponse willContinue: presence is meaningful (an
+  // explicitly supplied false differs from absent). Only applicable to
+  // NON_BLOCKING function calls.
+  optional bool will_continue = 5;
+  // Gemini functionResponse scheduling: the exact wire enum string
+  // (SILENT / WHEN_IDLE / INTERRUPT) or absent (provider default WHEN_IDLE).
+  // Presence is meaningful; the vocabulary is the provider adapter's
+  // boundary rule (unknown values are the value-free 400).
+  optional string scheduling = 6;
+  // Opaque provider token bound to this result (Gemini thoughtSignature on
+  // a functionResponse part): the complete signed Part — identity, provider
+  // metadata, willContinue/scheduling, and the ordered nested content.
+  // Provenance-governed exactly like the other request tokens.
+  string signature = 7;
 }
 
 // A provider cache breakpoint at an explicit position in the ordered body:
@@ -154,6 +181,15 @@ message RequestUnknownBlock {
   // them before marshal (an executable edge obligation, not an SDK rule: the
   // SDK has no provider vocabulary).
   bytes payload_json = 2;
+  // Provider Part-level custom metadata (Gemini partMetadata), absent or a
+  // strict JSON object; covered by this block's signature binding.
+  bytes part_metadata_json = 3;
+  // Opaque provider token bound to this media/future arm (Gemini
+  // thoughtSignature on inlineData/fileData/toolCall/toolResponse and other
+  // unmodelled parts). Binds the reconstruction kind AND the payload AND
+  // the provider metadata. Provenance-governed exactly like the other
+  // request tokens.
+  string signature = 4;
 }
 
 // Code Assist's trailing signature-only empty-text part: the standalone
@@ -162,6 +198,11 @@ message RequestUnknownBlock {
 message RequestTrailingSignatureBlock {
   // Required, non-empty.
   string signature = 1;
+  // Provider Part-level custom metadata (Gemini partMetadata) on the
+  // trailing standalone Part, absent or a strict JSON object. Covered by
+  // this token's binding (SameMessage metadata + the preceding
+  // TrailingStandalone text/thinking content).
+  bytes part_metadata_json = 2;
 }
 
 // One ordered element of a tool result's nested content. Dedicated oneof:

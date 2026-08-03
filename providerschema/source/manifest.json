@@ -1,0 +1,36 @@
+{
+  "fetched_at": "2026-08-03",
+  "license": "Apache-2.0 (googleapis)",
+  "upstream": "https://github.com/googleapis/googleapis",
+  "files": [
+    {
+      "local": "generativelanguage-v1beta-content.proto",
+      "upstream_commit_sha": "bc7e3baa28fbb223fa93782e130260fab8205bfc",
+      "upstream_commit_date": "2025-12-18T08:25:06Z",
+      "path": "google/ai/generativelanguage/v1beta/content.proto",
+      "url": "https://raw.githubusercontent.com/googleapis/googleapis/bc7e3baa28fbb223fa93782e130260fab8205bfc/google/ai/generativelanguage/v1beta/content.proto",
+      "sha256": "8c01c50c6d6795bf9bc0d4036386fe031feaf67e560ae17e1fbc6c5b47b625e7"
+    },
+    {
+      "local": "aiplatform-v1-content.proto",
+      "upstream_commit_sha": "fb6e47ad850029fd0c4deb96815550bd47bb42f2",
+      "upstream_commit_date": "2026-07-20T19:22:08Z",
+      "path": "google/cloud/aiplatform/v1/content.proto",
+      "url": "https://raw.githubusercontent.com/googleapis/googleapis/fb6e47ad850029fd0c4deb96815550bd47bb42f2/google/cloud/aiplatform/v1/content.proto",
+      "sha256": "3a3250f3ece784bfaf9bb8dbe7be44f476a68a1cfb890d670f3c079d2e634eb8"
+    },
+    {
+      "local": "aiplatform-v1-tool.proto",
+      "upstream_commit_sha": "fb6e47ad850029fd0c4deb96815550bd47bb42f2",
+      "upstream_commit_date": "2026-07-20T19:22:08Z",
+      "path": "google/cloud/aiplatform/v1/tool.proto",
+      "url": "https://raw.githubusercontent.com/googleapis/googleapis/fb6e47ad850029fd0c4deb96815550bd47bb42f2/google/cloud/aiplatform/v1/tool.proto",
+      "sha256": "dac244e69b8d71a58cb86a4248fec3ef63dd7c3fc951669060c2256b79524053"
+    }
+  ],
+  "notes": [
+    "The vertex-compatible FunctionResponse family (FunctionResponse, FunctionResponsePart, FunctionResponseBlob, FunctionResponseFileData) is declared in google/cloud/aiplatform/v1/tool.proto, not content.proto; the generator reads both files for the aiplatform surface.",
+    "agent-platform arms (toolCall/toolResponse) are NOT present in any vendored artifact; they are a reviewed non-descriptor decision (see AgentPlatformArms in snapshot.go).",
+    "Regeneration: ./generate.sh (deterministic; snapshot.gen.go must be byte-identical across runs)."
+  ]
+}
