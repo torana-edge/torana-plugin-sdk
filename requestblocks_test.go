@@ -5,7 +5,6 @@ package plugin_sdk
 // that forces a decision for additive block fields.
 
 import (
-	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -110,10 +109,11 @@ func TestRequestBlocksFingerprintSensitive(t *testing.T) {
 	})
 }
 
-// TestRequestFingerprintCoverageExact: the reflection-backed inventory — the
-// declared coverage set and the request-body descriptor field set must be
-// exactly equal, so an additive block field fails until it is hashed (or
-// explicitly excluded with a documented reason).
+// TestRequestFingerprintCoverageExact: the reflection-backed inventory is
+// BIDIRECTIONAL — the declared coverage set and the set of fields actually
+// visited by the descriptor walk must be exactly equal, so an additive block
+// field fails until it is hashed, and a stale or misspelled declaration fails
+// even when it shares the body prefix.
 func TestRequestFingerprintCoverageExact(t *testing.T) {
 	declared := map[string]bool{}
 	for _, f := range fingerprintFieldCoverage {
@@ -123,19 +123,13 @@ func TestRequestFingerprintCoverageExact(t *testing.T) {
 		declared[f] = true
 	}
 
-	roots := []protoreflect.MessageDescriptor{
-		(&pbv2.Message{}).ProtoReflect().Descriptor(),
-	}
-	// Walk the whole request-body tree.
+	visited := map[string]bool{}
 	var walk func(md protoreflect.MessageDescriptor)
 	walk = func(md protoreflect.MessageDescriptor) {
 		fields := md.Fields()
 		for i := 0; i < fields.Len(); i++ {
 			fd := fields.Get(i)
-			full := string(fd.FullName())
-			if !declared[full] {
-				t.Fatalf("request-body field %s has no fingerprint coverage decision", full)
-			}
+			visited[string(fd.FullName())] = true
 			if fd.Kind() == protoreflect.MessageKind {
 				sub := fd.Message()
 				if sub != nil && sub.FullName() != "torana.v2.Message" {
@@ -144,23 +138,55 @@ func TestRequestFingerprintCoverageExact(t *testing.T) {
 			}
 		}
 	}
-	walk(roots[0])
-	for f := range declared {
-		if !strings.HasPrefix(f, "torana.v2.Message") &&
-			!strings.HasPrefix(f, "torana.v2.RequestBlock") &&
-			!strings.HasPrefix(f, "torana.v2.RequestTextBlock") &&
-			!strings.HasPrefix(f, "torana.v2.RequestThinkingBlock") &&
-			!strings.HasPrefix(f, "torana.v2.RequestRedactedThinkingBlock") &&
-			!strings.HasPrefix(f, "torana.v2.RequestToolUseBlock") &&
-			!strings.HasPrefix(f, "torana.v2.RequestToolResultBlock") &&
-			!strings.HasPrefix(f, "torana.v2.RequestCacheBreakpoint") &&
-			!strings.HasPrefix(f, "torana.v2.RequestUnknownBlock") &&
-			!strings.HasPrefix(f, "torana.v2.RequestTrailingSignatureBlock") &&
-			!strings.HasPrefix(f, "torana.v2.ToolResultContentBlock") &&
-			!strings.HasPrefix(f, "torana.v2.ToolResultTextBlock") &&
-			!strings.HasPrefix(f, "torana.v2.ToolResultUnknownBlock") &&
-			!strings.HasPrefix(f, "torana.v2.ToolResultCacheBreakpoint") {
-			t.Fatalf("coverage declares a non-body field %s", f)
+	walk((&pbv2.Message{}).ProtoReflect().Descriptor())
+
+	// Direction 1: descriptor minus declared empty — every visited field has
+	// a decision.
+	for f := range visited {
+		if !declared[f] {
+			t.Fatalf("request-body field %s has no fingerprint coverage decision", f)
 		}
 	}
+	// Direction 2: declared minus descriptor empty — a stale or misspelled
+	// declaration (even one sharing the body prefix) fails.
+	for f := range declared {
+		if !visited[f] {
+			t.Fatalf("fingerprint coverage declares %s which is not a request-body field", f)
+		}
+	}
+}
+
+// TestRequestFingerprintCoverageRejectsStaleField: a plausible same-prefix
+// stale declaration must fail the exact inventory (the reverse direction of
+// the check above).
+func TestRequestFingerprintCoverageRejectsStaleField(t *testing.T) {
+	original := fingerprintFieldCoverage
+	t.Cleanup(func() { fingerprintFieldCoverage = original })
+	fingerprintFieldCoverage = append(append([]string{}, original...), "torana.v2.RequestTextBlock.removed_field")
+
+	declared := map[string]bool{}
+	for _, f := range fingerprintFieldCoverage {
+		declared[f] = true
+	}
+	visited := map[string]bool{}
+	var walk func(md protoreflect.MessageDescriptor)
+	walk = func(md protoreflect.MessageDescriptor) {
+		fields := md.Fields()
+		for i := 0; i < fields.Len(); i++ {
+			fd := fields.Get(i)
+			visited[string(fd.FullName())] = true
+			if fd.Kind() == protoreflect.MessageKind {
+				if sub := fd.Message(); sub != nil && sub.FullName() != "torana.v2.Message" {
+					walk(sub)
+				}
+			}
+		}
+	}
+	walk((&pbv2.Message{}).ProtoReflect().Descriptor())
+	for f := range declared {
+		if !visited[f] {
+			return // the stale declaration was caught
+		}
+	}
+	t.Fatal("stale same-prefix fingerprint declaration was not caught")
 }

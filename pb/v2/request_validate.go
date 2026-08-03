@@ -30,15 +30,24 @@ package v2
 //	                                 arguments_json REQUIRED non-empty JSON object ({} canonical),
 //	                                 optional provenance-governed signature
 //	RequestToolResultBlock            non-empty tool_call_id, optional tool_name,
-//	                                 ordered NESTED ToolResultContentBlock content
-//	                                 (text/unknown/cache kinds only — nested
-//	                                 tool use/result/thinking/signature is
-//	                                 unrepresentable at the type level)
+//	                                 NON-EMPTY ordered NESTED
+//	                                 ToolResultContentBlock content (one
+//	                                 explicit empty text element is the
+//	                                 canonical empty-result spelling; an empty
+//	                                 list is refused — text/unknown/cache kinds
+//	                                 only, nested tool use/result/thinking/
+//	                                 signature is unrepresentable at the type
+//	                                 level)
 //	RequestCacheBreakpoint            marker_json REQUIRED JSON object;
 //	                                 positional: closes the cached prefix
 //	RequestUnknownBlock               non-empty provider kind,
-//	                                 payload_json REQUIRED JSON object with the
-//	                                 discriminant + canonical cache member removed
+//	                                 payload_json REQUIRED strict JSON object.
+//	                                 The kind-specific projection invariant
+//	                                 (no discriminant / canonical cache member
+//	                                 inside the payload) is the PROVIDER
+//	                                 ADAPTER's marshal validator — an
+//	                                 executable edge obligation; the SDK has
+//	                                 no provider vocabulary to prove it
 //	RequestTrailingSignatureBlock     non-empty token, ASSISTANT-ONLY, FINAL
 //	ToolResultContentBlock            oneof text | unknown | cache_breakpoint
 //	ToolDef                           non-empty name,
@@ -109,7 +118,8 @@ var requestJSONFields = map[string]jsonFieldRule{
 }
 
 // requestScalarRules declares a rule class for every non-JSON field of the
-// four request-visible messages. The inventory test forces additive fields
+// request-visible messages (the ChatRequest tree: messages, blocks, leaves,
+// nested tool-result content, tools). The inventory test forces additive fields
 // to be declared here, and each class is either ENFORCED by the validator or
 // documented as inherent/unconstrained:
 //
@@ -430,6 +440,13 @@ func validateRequestBlock(b *RequestBlock, mi string, bi, blockCount int, role s
 		}
 		if tr.ToolCallId == "" {
 			return fmt.Errorf("%s.tool_result.tool_call_id must be non-empty", what)
+		}
+		if len(tr.Content) == 0 {
+			// The canonical spelling of a present-but-empty provider result
+			// is ONE explicit empty ToolResultTextBlock; an empty list is
+			// the second spelling the ABI exists to remove.
+			return fmt.Errorf("%s.tool_result.content must contain at least one element "+
+				"(use one explicit empty text element for an empty result)", what)
 		}
 		for c, cb := range tr.Content {
 			if cb == nil {

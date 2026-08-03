@@ -462,6 +462,8 @@ var requestSignatureContracts = []struct {
 }{
 	{message: "torana.v2.RequestThinkingBlock", field: "signature", scope: SignatureScopeSameMessage, content: []string{"text"}},
 	{message: "torana.v2.RequestTextBlock", field: "signature", scope: SignatureScopeSameMessage, content: []string{"text"}},
+	{message: "torana.v2.RequestToolUseBlock", field: "signature", scope: SignatureScopeSameMessage,
+		content: []string{"id", "name", "arguments_json"}},
 	{message: "torana.v2.RequestTrailingSignatureBlock", field: "signature", scope: SignatureScopeTrailingStandalone,
 		content: []string{"torana.v2.RequestTextBlock.text", "torana.v2.RequestThinkingBlock.text"}},
 }
@@ -613,6 +615,20 @@ var signatureBindings = []SignatureBinding{
 		SignatureField: "signature",
 		Content: []SignatureContentRef{
 			{Scope: SignatureScopeSameMessage, Field: "text"},
+		},
+	},
+	{
+		// A tool-use block's provider token binds the call's identity and
+		// arguments: id, name, and the exact arguments bytes. A plugin
+		// rewriting any of them must clear the token or the mutation must
+		// reject; an unchanged call keeps the token.
+		Domain:         SignatureDomainRequest,
+		Message:        "torana.v2.RequestToolUseBlock",
+		SignatureField: "signature",
+		Content: []SignatureContentRef{
+			{Scope: SignatureScopeSameMessage, Field: "id"},
+			{Scope: SignatureScopeSameMessage, Field: "name"},
+			{Scope: SignatureScopeSameMessage, Field: "arguments_json"},
 		},
 	},
 	{
@@ -946,14 +962,44 @@ func Validate() error {
 	return nil
 }
 
+// requestSignatureTokenFields returns the request-visible provenance-token
+// fields: every string field NAMED "signature" reachable from the request
+// message body (Message.blocks -> RequestBlock oneof arms -> leaf blocks).
+// Descriptor-driven, so a NEW request signature field cannot be added while
+// merely omitting it from both the contract and binding tables — the
+// completeness pass below fails until it is deliberately declared.
+func requestSignatureTokenFields(descs map[protoreflect.FullName]protoreflect.MessageDescriptor) []string {
+	var out []string
+	var walk func(md protoreflect.MessageDescriptor)
+	walk = func(md protoreflect.MessageDescriptor) {
+		fields := md.Fields()
+		for i := 0; i < fields.Len(); i++ {
+			fd := fields.Get(i)
+			if fd.Kind() == protoreflect.StringKind && string(fd.Name()) == "signature" {
+				// Same key shape as the binding/contract tables: msg/field.
+				full := string(fd.FullName())
+				out = append(out, full[:len(full)-len(string(fd.Name()))-1]+"/"+string(fd.Name()))
+			}
+			if fd.Kind() == protoreflect.MessageKind {
+				if sub := fd.Message(); sub != nil {
+					walk(sub)
+				}
+			}
+		}
+	}
+	walk(descs["torana.v2.Message"])
+	return out
+}
+
 // validateRequestBindingCompleteness proves every pinned request-domain
 // contract is actually DECLARED. validateRequestBindingShape validates the
 // bindings that exist; this pass proves the required ones are all present —
 // removing a token's binding entirely would otherwise leave Validate() green
 // while the B2 verifier has no definition of what the token covers. The
-// contract-table field set and the declared request-binding field set must be
-// exactly equal: each contract has exactly one binding, no extra request token
-// exists, and neither table may declare a field twice.
+// contract-table token set, the declared request-binding token set, AND the
+// descriptor-driven request-visible signature-token set must all be exactly
+// equal: each contract has exactly one binding, no extra request token
+// exists, and neither table may declare a token twice.
 func validateRequestBindingCompleteness(bindings []SignatureBinding) error {
 	key := func(b SignatureBinding) string { return string(b.Message) + "/" + b.SignatureField }
 	declared := map[string]bool{}
@@ -974,6 +1020,19 @@ func validateRequestBindingCompleteness(bindings []SignatureBinding) error {
 		}
 		required[k] = true
 	}
+	// Reflection-backed: a request-visible "signature" field with no binding
+	// AND no contract entry fails here — an additive provenance token cannot
+	// slip through both tables silently.
+	descs := outboundDescriptors()
+	tokens := map[string]bool{}
+	for _, f := range requestSignatureTokenFields(descs) {
+		if tokens[f] {
+			return fmt.Errorf("request signature token %s appears more than once in the descriptors", f)
+		}
+		tokens[f] = true
+	}
+	// Pairwise: every pinned contract has exactly one binding and every
+	// binding is a pinned contract (removing either side fails).
 	for k := range required {
 		if !declared[k] {
 			return fmt.Errorf("request-domain binding for %s is missing: nothing defines what content the token covers", k)
@@ -982,6 +1041,20 @@ func validateRequestBindingCompleteness(bindings []SignatureBinding) error {
 	for k := range declared {
 		if !required[k] {
 			return fmt.Errorf("request-domain binding %s is not a pinned contract", k)
+		}
+	}
+	// Reflection-backed: the request-visible provenance-token set and the
+	// declared set are exactly equal. An additive signature field omitted
+	// from BOTH tables fails here, as does a declaration that names a
+	// non-token field.
+	for k := range declared {
+		if !tokens[k] {
+			return fmt.Errorf("request signature binding/contract %s does not name a request-visible signature field", k)
+		}
+	}
+	for k := range tokens {
+		if !declared[k] {
+			return fmt.Errorf("request-visible signature token %s has no binding and no contract entry", k)
 		}
 	}
 	return nil

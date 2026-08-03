@@ -582,3 +582,26 @@ func toolStop(index int32) *pbv2.StreamEvent {
 		ContentBlockStop: &pbv2.ContentBlockStop{Index: index},
 	}}
 }
+
+// ExampleBeforeRequest is the compile-checked version of the package
+// documentation snippet: a plugin test drives the hook in-process with the
+// ordered message body.
+func ExampleHarness_BeforeRequest() {
+	req := &pbv2.ChatRequest{Messages: []*pbv2.Message{
+		{Role: "user", Blocks: []*pbv2.RequestBlock{{
+			Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "hi"}},
+		}}},
+		{Role: "tool", Blocks: []*pbv2.RequestBlock{{
+			Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+				ToolCallId: "t1",
+				Content: []*pbv2.ToolResultContentBlock{{
+					Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: "contact: someone@example.com"}},
+				}},
+			}},
+		}}},
+	}}
+	if err := req.ValidateReplacement(); err != nil {
+		panic(err)
+	}
+	// Output:
+}

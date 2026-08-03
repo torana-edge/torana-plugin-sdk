@@ -19,8 +19,18 @@
 //			return sdktest.HostResultValue([]byte(`{"completion":"EMAIL"}`)), nil
 //		})
 //
-//		res := h.BeforeRequest(&pbv2.ChatRequest{Messages: []*pbv2.Message{{Role: "user", Blocks: []*pbv2.RequestBlock{{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "hi"}}}}},
-//			{Role: "tool", Content: "contact: someone@example.com"},
+//		res := h.BeforeRequest(&pbv2.ChatRequest{Messages: []*pbv2.Message{
+//			{Role: "user", Blocks: []*pbv2.RequestBlock{{
+//				Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "hi"}},
+//			}}},
+//			{Role: "tool", Blocks: []*pbv2.RequestBlock{{
+//				Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+//					ToolCallId: "t1",
+//					Content: []*pbv2.ToolResultContentBlock{{
+//						Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: "contact: someone@example.com"}},
+//					}},
+//				}},
+//			}}},
 //		}})
 //
 //		if res.Block == nil {

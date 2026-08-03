@@ -6,9 +6,12 @@ package plugin_sdk
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
+
+	"google.golang.org/protobuf/proto"
 
 	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
@@ -328,4 +331,196 @@ func ExampleCacheBreakpoints_cacheMarkerPlacement() {
 	}
 	// Output:
 	// marker at 1: {"type":"ephemeral"}
+}
+
+// TestHelperPropertyMatrix is the compact reference/property matrix for the
+// body helpers: starting from a valid message, a successful helper call must
+// produce an absolutely valid message; a semantic no-op must preserve every
+// provenance token byte-for-byte; an actual covered-content change must clear
+// exactly the covered token(s); an error must leave the input byte-for-byte
+// unchanged; typed-nil block adversaries must error, not panic; and no
+// helper may break trailing-signature finality.
+func TestHelperPropertyMatrix(t *testing.T) {
+	valid := func(m *pbv2.Message) bool {
+		return (&pbv2.ChatRequest{Messages: []*pbv2.Message{m}}).ValidateReplacement() == nil
+	}
+	snapshot := func(m *pbv2.Message) []byte {
+		b, err := proto.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	expectValid := func(t *testing.T, what string, m *pbv2.Message) {
+		t.Helper()
+		if !valid(m) {
+			t.Fatalf("%s: helper output is not absolutely valid: %v",
+				what, (&pbv2.ChatRequest{Messages: []*pbv2.Message{m}}).ValidateReplacement())
+		}
+	}
+	expectNoopPreserves := func(t *testing.T, what string, m *pbv2.Message, before []byte) {
+		t.Helper()
+		if !bytes.Equal(before, snapshot(m)) {
+			t.Fatalf("%s: semantic no-op changed the message", what)
+		}
+	}
+
+	// 1. No-op SetTextAt preserves the block token AND the trailing token.
+	m := helperMsg()
+	before := snapshot(m)
+	if err := SetTextAt(m, 0, "one"); err != nil {
+		t.Fatal(err)
+	}
+	expectNoopPreserves(t, "SetTextAt unchanged", m, before)
+
+	// 2. Changed SetTextAt clears exactly the covered token + trailing.
+	m = helperMsg()
+	if err := SetTextAt(m, 0, "ONE"); err != nil {
+		t.Fatal(err)
+	}
+	if m.Blocks[0].GetText().Signature != "" {
+		t.Fatal("covered token not cleared on change")
+	}
+	if m.Blocks[1].GetThinking().Signature != "ST" {
+		t.Fatal("uncovered thinking token cleared")
+	}
+	if m.Blocks[2].GetToolUse().Signature != "SC" {
+		t.Fatal("uncovered tool token cleared")
+	}
+	if last := m.Blocks[len(m.Blocks)-1]; last.GetTrailingSignature() != nil {
+		t.Fatal("trailing token survived a covered-content change")
+	}
+	expectValid(t, "SetTextAt changed", m)
+
+	// 3. No-op ReplaceAllText preserves every token (already-collapsed
+	// message with one text block equal to the requested value).
+	m = &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{
+		{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "onetwo", Signature: "S1"}}},
+		{Kind: &pbv2.RequestBlock_Thinking{Thinking: &pbv2.RequestThinkingBlock{Text: "reason", Signature: "ST"}}},
+		{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: &pbv2.RequestTrailingSignatureBlock{Signature: "STRAIL"}}},
+	}}
+	before = snapshot(m)
+	if err := ReplaceAllText(m, "onetwo"); err != nil {
+		t.Fatal(err)
+	}
+	expectNoopPreserves(t, "ReplaceAllText no-op", m, before)
+	expectValid(t, "ReplaceAllText no-op", m)
+
+	// 4. No-op ReplaceToolCall preserves the call token (exact bytes).
+	m = helperMsg()
+	before = snapshot(m)
+	if err := ReplaceToolCall(m, 2, ToolCallInput{Id: "t1", Name: "read", Arguments: []byte(`{"path":"x"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	expectNoopPreserves(t, "ReplaceToolCall identical", m, before)
+
+	// 5. Changed ReplaceToolCall clears exactly the call token.
+	m = helperMsg()
+	if err := ReplaceToolCall(m, 2, ToolCallInput{Id: "t1", Name: "read", Arguments: []byte(`{"path":"y"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if m.Blocks[2].GetToolUse().Signature != "" {
+		t.Fatal("call token not cleared on argument change")
+	}
+	if m.Blocks[0].GetText().Signature != "S1" || m.Blocks[1].GetThinking().Signature != "ST" {
+		t.Fatal("uncovered tokens cleared")
+	}
+	expectValid(t, "ReplaceToolCall changed", m)
+
+	// 6. Trailing-final safety: insertions after the final trailing block
+	// are refused; insertions AT its position are fine.
+	m = helperMsg() // trailing at index 5
+	if err := AddToolCall(m, 6, ToolCallInput{Id: "t9", Name: "w", Arguments: []byte(`{}`)}); err == nil {
+		t.Fatal("AddToolCall after trailing accepted")
+	}
+	if err := AddCacheBreakpoint(m, 6, []byte(`{}`)); err == nil {
+		t.Fatal("AddCacheBreakpoint after trailing accepted")
+	}
+	before = snapshot(m)
+	if err := AddToolCall(m, 5, ToolCallInput{Id: "t9", Name: "w", Arguments: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if last := m.Blocks[len(m.Blocks)-1]; last.GetTrailingSignature() == nil {
+		t.Fatal("trailing signature lost its finality after a legal insert")
+	}
+	expectValid(t, "AddToolCall before trailing", m)
+	_ = before
+
+	// 7. ReplaceAllText with no text block and a trailing signature: the
+	// stale token is removed, the text is appended, and the result is valid.
+	none := &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{
+		{Kind: &pbv2.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.RequestCacheBreakpoint{MarkerJson: []byte(`{}`)}}},
+		{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: &pbv2.RequestTrailingSignatureBlock{Signature: "S"}}},
+	}}
+	if err := ReplaceAllText(none, "added"); err != nil {
+		t.Fatal(err)
+	}
+	expectValid(t, "ReplaceAllText append with trailing", none)
+	last := none.Blocks[len(none.Blocks)-1]
+	if last.GetText() == nil || last.GetText().Text != "added" {
+		t.Fatalf("text not appended: %+v", none.Blocks)
+	}
+
+	// 8. Errors leave the input byte-for-byte unchanged.
+	for _, tc := range []struct {
+		name string
+		call func(*pbv2.Message) error
+	}{
+		{"SetTextAt wrong kind", func(m *pbv2.Message) error { return SetTextAt(m, 1, "x") }},
+		{"SetTextAt nil block", func(m *pbv2.Message) error { return SetTextAt(m, 2, "x") }},
+		{"ReplaceToolCall nil block", func(m *pbv2.Message) error {
+			return ReplaceToolCall(m, 2, ToolCallInput{Id: "a", Name: "b", Arguments: []byte(`{}`)})
+		}},
+		{"SetCacheBreakpoint nil block", func(m *pbv2.Message) error { return SetCacheBreakpoint(m, 2, []byte(`{}`)) }},
+		{"DeleteCacheBreakpoint nil block", func(m *pbv2.Message) error { return DeleteCacheBreakpoint(m, 2) }},
+		{"AddToolCall after trailing", func(m *pbv2.Message) error {
+			return AddToolCall(m, 6, ToolCallInput{Id: "a", Name: "b", Arguments: []byte(`{}`)})
+		}},
+	} {
+		m = helperMsg()
+		// Inject a nil block at index 2 for the nil adversaries BEFORE the
+		// snapshot, so the invariance check covers the helper call itself.
+		if tc.name == "SetTextAt nil block" || tc.name == "ReplaceToolCall nil block" ||
+			tc.name == "SetCacheBreakpoint nil block" || tc.name == "DeleteCacheBreakpoint nil block" {
+			m.Blocks[2] = nil
+		}
+		before := snapshot(m)
+		if err := tc.call(m); err == nil {
+			t.Fatalf("%s: expected an error", tc.name)
+		}
+		if !bytes.Equal(before, snapshot(m)) {
+			t.Fatalf("%s: error mutated the input", tc.name)
+		}
+	}
+
+	// 9. Typed-nil arm adversaries: wrong-kind errors, never panics.
+	m = helperMsg()
+	m.Blocks = append(m.Blocks, &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_Text{}})
+	before = snapshot(m)
+	if err := SetTextAt(m, 6, "x"); err == nil {
+		t.Fatal("typed-nil text arm accepted")
+	}
+	if !bytes.Equal(before, snapshot(m)) {
+		t.Fatal("typed-nil error mutated the input")
+	}
+}
+
+// TestCacheControlUseNumber: contract-valid numeric markers must not vanish
+// through the convenience decode.
+func TestCacheControlUseNumber(t *testing.T) {
+	m := &pbv2.Message{Role: "user", Blocks: []*pbv2.RequestBlock{{
+		Kind: &pbv2.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.RequestCacheBreakpoint{
+			MarkerJson: []byte(`{"n":1e999,"big":18446744073709551615}`),
+		}},
+	}}}
+	cc := CacheControl(m)
+	if cc == nil {
+		t.Fatal("marker vanished through the decode")
+	}
+	if _, ok := cc["n"].(json.Number); !ok {
+		t.Fatalf("1e999 must decode as json.Number, got %T", cc["n"])
+	}
+	if _, ok := cc["big"].(json.Number); !ok {
+		t.Fatalf("uint64-sized member must decode as json.Number, got %T", cc["big"])
+	}
 }

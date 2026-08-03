@@ -53,20 +53,30 @@ var WritePermissions = []string{
 type WriteSection string
 
 const (
-	// SectionCacheControl covers the cache_control_json marker on messages and
-	// on tool definitions — and ONLY those two fields. Changing a breakpoint
-	// marker changes the provider's cached prefix bytes (and buys a different
-	// cache lifetime), so it is a write, but it is NOT a content, role, tool
-	// identity/schema, model, params, stream, topology, or signature mutation.
-	// A cache-economics plugin therefore needs this one grant, not a role's
-	// message grant or ir.tools.write — the approval UI must describe it as
-	// what it is, not as a universal prompt rewriter.
+	// SectionCacheControl covers the cache-breakpoint carriers of the
+	// ordered message body — and ONLY those three carriers:
 	//
-	// FIELD INVENTORY (pinned by TestCacheControlWriteFieldInventory):
-	//   - pbv2.Message.cache_control_json
-	//   - pbv2.ToolDef.cache_control_json
-	// Nothing else is authorised by this grant. Enforcement lives in the host
-	// verifier (edge); the SDK pins the documented contract.
+	//   - RequestCacheBreakpoint.marker_json   (positional message-body block)
+	//   - ToolResultCacheBreakpoint.marker_json (nested tool-result marker)
+	//   - ToolDef.cache_control_json           (tool-definition marker)
+	//
+	// Changing a breakpoint MARKER's value — or adding/removing/moving a
+	// cache block (a cache-position mutation) — changes the provider's
+	// cached prefix bytes and is governed by this grant ALONE when no other
+	// content changes. It is NOT a content, role, tool identity/schema,
+	// model, params, stream, or signature mutation. A cache-economics plugin
+	// therefore needs this one grant for marker work, not a role's message
+	// grant or ir.tools.write — the approval UI must describe it as what it
+	// is, not as a universal prompt rewriter.
+	//
+	// The grant does NOT authorise surrounding content: editing a text or
+	// tool block is the containing message-role grant's business, and a
+	// content/topology change that alters an existing cached prefix needs
+	// the UNION of the role grant and this grant (host enforcement in edge).
+	//
+	// FIELD INVENTORY (pinned by TestCacheControlWriteFieldInventory): the
+	// three carriers above, no others. The message-level flat
+	// cache_control_json field no longer exists in the ABI.
 	SectionCacheControl WriteSection = "ir.cache_control.write"
 
 	// SectionMessagesUser and friends cover one message role each. A change at

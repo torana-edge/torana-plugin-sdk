@@ -795,9 +795,13 @@ type RequestUnknownBlock struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Required, non-empty provider wire kind/type name.
 	Kind string `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
-	// Required validated JSON object: the block's payload with the
-	// discriminant and any canonical cache member REMOVED (the block kinds are
-	// the single authority for those facts).
+	// Required validated JSON object. The SDK proves kind + strict object;
+	// the kind-specific projection invariant — the payload must NOT carry the
+	// canonical discriminant or a canonical cache member (the block kinds are
+	// the single authority for those facts) — is the PROVIDER ADAPTER's
+	// marshal validator, which must reject a returned payload duplicating
+	// them before marshal (an executable edge obligation, not an SDK rule: the
+	// SDK has no provider vocabulary).
 	PayloadJson   []byte `protobuf:"bytes,2,opt,name=payload_json,json=payloadJson,proto3" json:"payload_json,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1380,10 +1384,6 @@ type ChatRequest struct {
 	SafetySettingsJson     []byte `protobuf:"bytes,10,opt,name=safety_settings_json,json=safetySettingsJson,proto3" json:"safety_settings_json,omitempty"`
 	// Proxy-internal metadata the host publishes to plugins: the routed provider,
 	// the conversation id, the request path. Never serialized to the wire.
-	//
-	// In v1 this doubled as the channel plugins used to return verdicts, which is
-	// why a plugin could block a request without holding the capability to block
-	// — the host read the key long after it had lost track of who wrote it.
 	// Verdicts are host calls in v2, so this is host-owned: a plugin changing it
 	// is a protocol violation, not a grantable edit.
 	ToranaMetaJson []byte `protobuf:"bytes,11,opt,name=torana_meta_json,json=toranaMetaJson,proto3" json:"torana_meta_json,omitempty"`
@@ -1500,9 +1500,9 @@ func (x *ChatRequest) GetToranaMetaJson() []byte {
 
 // The assistant's reply on the non-streaming response path.
 //
-// Deliberately narrower than Message. Request-only and currently-unobserved
-// fields (role, thinking, content_parts, cache control, tool-result fields)
-// are omitted so the authoring API cannot autocomplete silent no-ops. When the
+// Deliberately narrower than Message. The request-only ordered-body fields
+// (blocks and every block kind, cache breakpoints, tool-result identity) are
+// omitted so the authoring API cannot autocomplete silent no-ops. When the
 // host later observes and can write those back, add them as additive fields
 // with deliberate policies — do not reuse Message here.
 type ResponseMessage struct {

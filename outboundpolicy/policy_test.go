@@ -320,6 +320,46 @@ func TestSignatureBindingsPinned(t *testing.T) {
 		t.Fatal("request block must not re-enter the outbound field registry")
 	}
 
+	tu := byMsg["torana.v2.RequestToolUseBlock/signature"]
+	if tu.Domain != SignatureDomainRequest || tu.Message != "torana.v2.RequestToolUseBlock" {
+		t.Fatal("RequestToolUseBlock.signature must be a request-domain binding")
+	}
+	want := map[string]bool{"id": true, "name": true, "arguments_json": true}
+	if len(tu.Content) != len(want) {
+		t.Fatalf("tool-use signature must cover exactly id/name/arguments_json, got %d refs", len(tu.Content))
+	}
+	for _, r := range tu.Content {
+		if r.Scope != SignatureScopeSameMessage || r.Message != "" || !want[r.Field] {
+			t.Fatalf("tool-use signature ref %+v outside the pinned set", r)
+		}
+	}
+	if _, ok := OutboundFieldPolicy("torana.v2.RequestToolUseBlock", "signature"); ok {
+		t.Fatal("request block must not re-enter the outbound field registry")
+	}
+
+	// Reflection-backed completeness: the request-visible signature tokens
+	// and the declared set are exactly equal — the four block tokens, and
+	// nothing else.
+	descs := outboundDescriptors()
+	tokens := map[string]bool{}
+	for _, f := range requestSignatureTokenFields(descs) {
+		tokens[f] = true
+	}
+	for _, key := range []string{
+		"torana.v2.RequestThinkingBlock/signature",
+		"torana.v2.RequestTextBlock/signature",
+		"torana.v2.RequestToolUseBlock/signature",
+		"torana.v2.RequestTrailingSignatureBlock/signature",
+	} {
+		if !tokens[key] {
+			t.Fatalf("reflection inventory missing request token %s", key)
+		}
+		delete(tokens, key)
+	}
+	if len(tokens) != 0 {
+		t.Fatalf("unexpected request-visible signature tokens: %v", keysOf(tokens))
+	}
+
 	ref := byMsg["torana.v2.ToolCallRef/signature"]
 	var sawSameID, sawArgs bool
 	for _, c := range ref.Content {
@@ -447,6 +487,14 @@ func TestRequestContentSignatureMutationClassifies(t *testing.T) {
 	if got := ClassifySignatureMutation("tok", "", false); got != SignatureDropped || got.Allowed() {
 		t.Fatalf("drop without content change: got %v allowed=%v", got, got.Allowed())
 	}
+}
+
+func keysOf(m map[string]bool) []string {
+	var out []string
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
 
 func TestSignatureBindingRejectsBadScopes(t *testing.T) {
@@ -589,8 +637,8 @@ func TestRequestBindingCompletenessRequiresEveryToken(t *testing.T) {
 	// An extra, unpinned request token is equally a broken registry.
 	bindings := append([]SignatureBinding{}, signatureBindings...)
 	bindings = append(bindings, SignatureBinding{
-		Domain: SignatureDomainRequest, Message: "torana.v2.Message", SignatureField: "invented_signature",
-		Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "content"}},
+		Domain: SignatureDomainRequest, Message: "torana.v2.RequestTextBlock", SignatureField: "invented_signature",
+		Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "text"}},
 	})
 	if err := validateRequestBindingCompleteness(bindings); err == nil {
 		t.Fatal("an unpinned request token must fail the completeness pass")

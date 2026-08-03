@@ -75,6 +75,9 @@ func SetTextAt(msg *pbv2.Message, block int, text string) error {
 	if block < 0 || block >= len(msg.Blocks) {
 		return fmt.Errorf("set text: block %d out of range (0..%d)", block, len(msg.Blocks)-1)
 	}
+	if msg.Blocks[block] == nil {
+		return fmt.Errorf("set text: block %d is nil", block)
+	}
 	tb, ok := msg.Blocks[block].Kind.(*pbv2.RequestBlock_Text)
 	if !ok || tb.Text == nil {
 		return fmt.Errorf("set text: block %d is not a text block", block)
@@ -94,11 +97,24 @@ func SetTextAt(msg *pbv2.Message, block int, text string) error {
 //   - a message with no text block gets one APPENDED at the end;
 //   - signature tokens on every touched block are cleared (stale), and a
 //     trailing-signature block whose covered content changed is cleared.
+//
+// ReplaceAllText collapses the message's text to exactly text:
+//
+//   - the FIRST text block keeps its position and receives text;
+//   - every other text block is REMOVED from the body;
+//   - a message with no text block gets one APPENDED at the end (after any
+//     final trailing-signature block is removed — appending content after
+//     the token's covered scope makes it stale and breaks finality);
+//   - a semantic NO-OP (one text block already equal to text, nothing to
+//     collapse) leaves every provenance token byte-for-byte untouched;
+//   - a real change clears the signature token on every touched text block
+//     and removes a trailing-signature block whose scope was invalidated.
 func ReplaceAllText(msg *pbv2.Message, text string) error {
 	if msg == nil {
 		return fmt.Errorf("replace all text: nil message")
 	}
 	first := -1
+	changed := false
 	for i, b := range msg.Blocks {
 		if tb := b.GetText(); tb != nil {
 			if first < 0 {
@@ -106,34 +122,62 @@ func ReplaceAllText(msg *pbv2.Message, text string) error {
 				if tb.Text != text {
 					tb.Text = text
 					tb.Signature = ""
+					changed = true
 				}
 			} else {
-				tb.Text = ""
-				tb.Signature = ""
+				// A further text block is always a collapse -> a change.
+				changed = true
 			}
 		}
 	}
 	if first < 0 {
+		if text == "" {
+			// No text blocks and nothing requested: a semantic no-op.
+			return nil
+		}
+		// A trailing-signature block cannot stay final if content is
+		// appended after it; the appended text is also outside the provider
+		// token's covered scope, so the token is stale.
+		clearTrailingSignature(msg)
 		msg.Blocks = append(msg.Blocks, &pbv2.RequestBlock{
 			Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: text}},
 		})
-	} else {
-		// Drop every text block after the first (collapse semantics).
-		kept := msg.Blocks[:0]
-		seen := 0
-		for _, b := range msg.Blocks {
-			if tb := b.GetText(); tb != nil {
-				seen++
-				if seen > 1 {
-					continue
-				}
-			}
-			kept = append(kept, b)
-		}
-		msg.Blocks = kept
+		return nil
 	}
-	if first >= 0 {
-		clearTrailingSignature(msg)
+	if !changed {
+		// Semantic no-op: one text block already equal to text.
+		return nil
+	}
+	// Drop every text block after the first (collapse semantics).
+	kept := msg.Blocks[:0]
+	seen := 0
+	for _, b := range msg.Blocks {
+		if tb := b.GetText(); tb != nil {
+			seen++
+			if seen > 1 {
+				continue
+			}
+		}
+		kept = append(kept, b)
+	}
+	msg.Blocks = kept
+	clearTrailingSignature(msg)
+	return nil
+}
+
+// checkInsertBeforeTrailing refuses an insertion position after a final
+// trailing-signature block: the token is assistant-only and FINAL, so
+// nothing may be inserted after it.
+func checkInsertBeforeTrailing(msg *pbv2.Message, at int) error {
+	if len(msg.Blocks) == 0 {
+		return nil
+	}
+	last := msg.Blocks[len(msg.Blocks)-1]
+	if last == nil || last.GetTrailingSignature() == nil {
+		return nil
+	}
+	if at > len(msg.Blocks)-1 {
+		return fmt.Errorf("position %d is after the final trailing-signature block", at)
 	}
 	return nil
 }
@@ -259,13 +303,17 @@ func validateCallInput(call ToolCallInput) error {
 }
 
 // AddToolCall inserts a tool-use block at position at (0..len(blocks)).
-// Out-of-range positions are an error.
+// Out-of-range positions and insertion AFTER a final trailing-signature
+// block are errors (the signature must stay final).
 func AddToolCall(msg *pbv2.Message, at int, call ToolCallInput) error {
 	if msg == nil {
 		return fmt.Errorf("add tool call: nil message")
 	}
 	if at < 0 || at > len(msg.Blocks) {
 		return fmt.Errorf("add tool call: position %d out of range (0..%d)", at, len(msg.Blocks))
+	}
+	if err := checkInsertBeforeTrailing(msg, at); err != nil {
+		return fmt.Errorf("add tool call: %w", err)
 	}
 	if err := validateCallInput(call); err != nil {
 		return err
@@ -293,12 +341,22 @@ func ReplaceToolCall(msg *pbv2.Message, block int, call ToolCallInput) error {
 	if block < 0 || block >= len(msg.Blocks) {
 		return fmt.Errorf("replace tool call: block %d out of range (0..%d)", block, len(msg.Blocks)-1)
 	}
+	if msg.Blocks[block] == nil {
+		return fmt.Errorf("replace tool call: block %d is nil", block)
+	}
 	tu, ok := msg.Blocks[block].Kind.(*pbv2.RequestBlock_ToolUse)
 	if !ok || tu.ToolUse == nil {
 		return fmt.Errorf("replace tool call: block %d is not a tool-use block", block)
 	}
 	if err := validateCallInput(call); err != nil {
 		return err
+	}
+	// Exact-change semantics: an identical replacement (id, name, and the
+	// exact argument bytes) is a no-op that PRESERVES the call-bound
+	// provenance token; only a real change clears it (stale).
+	if tu.ToolUse.Id == call.Id && tu.ToolUse.Name == call.Name &&
+		bytes.Equal(tu.ToolUse.ArgumentsJson, call.Arguments) {
+		return nil
 	}
 	tu.ToolUse.Id = call.Id
 	tu.ToolUse.Name = call.Name
@@ -349,7 +407,9 @@ func CacheControl(msg *pbv2.Message) map[string]any {
 		return nil
 	}
 	var m map[string]any
-	if err := json.Unmarshal(last, &m); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(last))
+	dec.UseNumber() // contract-valid markers like {"n":1e999} must not overflow float64
+	if err := dec.Decode(&m); err != nil {
 		return nil
 	}
 	return m
@@ -365,6 +425,9 @@ func SetCacheBreakpoint(msg *pbv2.Message, block int, marker []byte) error {
 	if block < 0 || block >= len(msg.Blocks) {
 		return fmt.Errorf("set cache breakpoint: block %d out of range (0..%d)", block, len(msg.Blocks)-1)
 	}
+	if msg.Blocks[block] == nil {
+		return fmt.Errorf("set cache breakpoint: block %d is nil", block)
+	}
 	cb, ok := msg.Blocks[block].Kind.(*pbv2.RequestBlock_CacheBreakpoint)
 	if !ok || cb.CacheBreakpoint == nil {
 		return fmt.Errorf("set cache breakpoint: block %d is not a cache-breakpoint block", block)
@@ -377,13 +440,17 @@ func SetCacheBreakpoint(msg *pbv2.Message, block int, marker []byte) error {
 }
 
 // AddCacheBreakpoint inserts a cache-breakpoint block at position at
-// (0..len(blocks)), closing the cached prefix at that position.
+// (0..len(blocks)), closing the cached prefix at that position. Insertion
+// AFTER a final trailing-signature block is an error.
 func AddCacheBreakpoint(msg *pbv2.Message, at int, marker []byte) error {
 	if msg == nil {
 		return fmt.Errorf("add cache breakpoint: nil message")
 	}
 	if at < 0 || at > len(msg.Blocks) {
 		return fmt.Errorf("add cache breakpoint: position %d out of range (0..%d)", at, len(msg.Blocks))
+	}
+	if err := checkInsertBeforeTrailing(msg, at); err != nil {
+		return fmt.Errorf("add cache breakpoint: %w", err)
 	}
 	if err := validJSONObject(marker); err != nil {
 		return fmt.Errorf("add cache breakpoint: %w", err)
@@ -406,6 +473,9 @@ func DeleteCacheBreakpoint(msg *pbv2.Message, block int) error {
 	}
 	if block < 0 || block >= len(msg.Blocks) {
 		return fmt.Errorf("delete cache breakpoint: block %d out of range (0..%d)", block, len(msg.Blocks)-1)
+	}
+	if msg.Blocks[block] == nil {
+		return fmt.Errorf("delete cache breakpoint: block %d is nil", block)
 	}
 	if _, ok := msg.Blocks[block].Kind.(*pbv2.RequestBlock_CacheBreakpoint); !ok {
 		return fmt.Errorf("delete cache breakpoint: block %d is not a cache-breakpoint block", block)

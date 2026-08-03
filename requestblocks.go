@@ -20,6 +20,11 @@ package plugin_sdk
 // are part of the fingerprint, exactly as they are part of the provider's
 // cached prefix.
 //
+// PRECONDITION: the message must be absolutely validated (the host runs
+// ChatRequest.ValidateReplacement before fingerprinting). The defensive
+// nil/unknown branches below exist only for totality — hashing a
+// non-validated message must never be mistaken for accepting it.
+//
 // fingerprintFieldCoverage (below) is the executable inventory: the
 // reflection-backed test forces a decision for every additive block field —
 // a new field in the request body fails until it is either hashed here or

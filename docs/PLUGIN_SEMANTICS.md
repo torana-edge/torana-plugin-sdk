@@ -266,9 +266,9 @@ host verifier's layer.
 | `RequestTextBlock.text` | UTF-8; explicit empty is a first-class arm |
 | `RequestTextBlock.signature` / `RequestThinkingBlock.signature` | UTF-8; provenance-governed (unchanged signature over changed covered content = stale, cleared-over-changed = allowed, cleared-over-unchanged = dropped/rejected, added/changed/reused = rejected — the host verifier's matrix) |
 | `RequestToolUseBlock` | non-empty `id`, non-empty `name`, REQUIRED object `arguments_json` (`{}` canonical), provenance-governed `signature` |
-| `RequestToolResultBlock` | non-empty `tool_call_id`, optional `tool_name`, ordered NESTED `content` (`ToolResultContentBlock`: text/unknown/cache only) |
+| `RequestToolResultBlock` | non-empty `tool_call_id`, optional `tool_name`, NON-EMPTY ordered NESTED `content` (one explicit empty text element is the canonical empty-result spelling; an empty list is refused). `ToolResultContentBlock`: text/unknown/cache only |
 | `RequestCacheBreakpoint.marker_json` | REQUIRED JSON object; positional (closes the cached prefix at its position) |
-| `RequestUnknownBlock` | non-empty provider `kind` + REQUIRED JSON object `payload_json` (discriminant and canonical cache members removed) |
+| `RequestUnknownBlock` | non-empty provider `kind` + REQUIRED strict JSON object `payload_json`. The kind-specific projection invariant (no discriminant / canonical cache member inside the payload) is the PROVIDER ADAPTER's marshal validator — an executable edge obligation; the SDK has no provider vocabulary to prove it |
 | `RequestTrailingSignatureBlock` | non-empty token, assistant-only, FINAL block |
 | `ToolDef.parameters_json` | REQUIRED non-empty JSON object per present definition (`{}` is a valid unconstrained schema; empty bytes are not) |
 | `ToolDef.cache_control_json` | absent or JSON object |

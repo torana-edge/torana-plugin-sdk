@@ -148,7 +148,7 @@ func checkRuleMatchesDescriptor(t *testing.T, fd protoreflect.FieldDescriptor, r
 }
 
 // TestReplacementStringUTF8Sweep probes EVERY protobuf string field of the
-// four request-visible messages with invalid UTF-8 and requires
+// request-visible messages (the whole block tree) with invalid UTF-8 and requires
 // ValidateReplacement to reject it, naming the UTF-8 rule. The walk is
 // descriptor-driven (no partial list), and this is the live proof that every
 // string rule class is covered — an additive string field is picked up by

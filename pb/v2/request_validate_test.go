@@ -245,12 +245,29 @@ func TestReplacementBlockIdentityAndPlacement(t *testing.T) {
 	}}}
 	mustRejectReplacement(t, "tool_use missing arguments", req)
 
-	// Tool-result identity is required.
+	// Tool-result identity is required, and the nested content list is
+	// NON-EMPTY: the canonical spelling of a present-but-empty provider
+	// result is ONE explicit empty text element.
 	req = baseRequest()
 	req.Messages[0] = &v2.Message{Role: "user", Blocks: []*v2.RequestBlock{{
 		Kind: &v2.RequestBlock_ToolResult{ToolResult: &v2.RequestToolResultBlock{}},
 	}}}
 	mustRejectReplacement(t, "tool_result missing tool_call_id", req)
+
+	req = baseRequest()
+	req.Messages[0] = &v2.Message{Role: "user", Blocks: []*v2.RequestBlock{{
+		Kind: &v2.RequestBlock_ToolResult{ToolResult: &v2.RequestToolResultBlock{ToolCallId: "t1"}},
+	}}}
+	mustRejectReplacement(t, "tool_result empty content list", req)
+
+	req = baseRequest()
+	req.Messages[0] = &v2.Message{Role: "user", Blocks: []*v2.RequestBlock{{
+		Kind: &v2.RequestBlock_ToolResult{ToolResult: &v2.RequestToolResultBlock{
+			ToolCallId: "t1",
+			Content:    []*v2.ToolResultContentBlock{{Kind: &v2.ToolResultContentBlock_Text{Text: &v2.ToolResultTextBlock{Text: ""}}}},
+		}},
+	}}}
+	mustAcceptReplacement(t, "tool_result explicit empty text element", req)
 
 	// Unknown kind is required; payload must be an object.
 	req = baseRequest()
