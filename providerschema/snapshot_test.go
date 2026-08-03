@@ -321,10 +321,11 @@ func TestAgentPlatformArmsHonest(t *testing.T) {
 	}
 
 	// (b) Tokenized snake_case text guard over the vendored bytes: the
-	// exact proto spellings, word-bounded — a real `tool_call` member
-	// anywhere in a vendored file must trip it (comments cannot, because
-	// the token is the proto member name and the guard scans the raw
-	// bytes for the word).
+	// exact proto spellings, word-bounded. This is CONSERVATIVE by
+	// design: the scan runs over RAW bytes, so a comment mentioning
+	// `tool_call` also trips it — that intentionally forces a human
+	// refresh review instead of risking a silent collision. The parsed-
+	// identity guard above remains the authoritative absence proof.
 	guard := func(raw []byte, protoMember string) bool {
 		return regexp.MustCompile(`\b` + regexp.QuoteMeta(protoMember) + `\b`).Match(raw)
 	}

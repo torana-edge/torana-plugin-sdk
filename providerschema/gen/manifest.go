@@ -7,6 +7,7 @@ package gen
 // silently produce a wrong snapshot.
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // requiredArtifacts is the exact set of vendored files every snapshot is
@@ -46,6 +48,7 @@ type Manifest struct {
 	License   string          `json:"license"`
 	Upstream  string          `json:"upstream"`
 	Files     []ManifestEntry `json:"files"`
+	Notes     []string        `json:"notes,omitempty"`
 }
 
 // manifestFile is the vendored provenance manifest (relative to the
@@ -58,20 +61,109 @@ func LoadManifest() (*Manifest, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read vendored manifest: %w", err)
 	}
-	var m Manifest
-	if err := json.Unmarshal(raw, &m); err != nil {
+	m, err := decodeManifest(raw)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateManifest(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// decodeManifest decodes a manifest byte payload fail-closed: duplicate
+// keys, unknown members, and trailing JSON are all rejected.
+func decodeManifest(raw []byte) (*Manifest, error) {
+	if err := rejectDuplicateKeys(raw); err != nil {
 		return nil, fmt.Errorf("parse vendored manifest: %w", err)
 	}
-	if err := validateManifest(&m); err != nil {
-		return nil, err
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var m Manifest
+	if err := dec.Decode(&m); err != nil {
+		return nil, fmt.Errorf("parse vendored manifest: %w", err)
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err == nil {
+		return nil, fmt.Errorf("parse vendored manifest: trailing JSON after the manifest object")
+	} else if err.Error() != "EOF" {
+		return nil, fmt.Errorf("parse vendored manifest: %w", err)
 	}
 	return &m, nil
 }
 
+// rejectDuplicateKeys walks the JSON token stream and rejects duplicate
+// object keys at any depth (json.Unmarshal would silently keep the last).
+func rejectDuplicateKeys(raw []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			if err.Error() == "EOF" {
+				return nil
+			}
+			return err
+		}
+		if _, ok := tok.(json.Delim); !ok {
+			continue
+		}
+		if delim, ok := tok.(json.Delim); !ok || delim != '{' {
+			continue
+		}
+		seen := map[string]bool{}
+		for dec.More() {
+			keyTok, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			key, ok := keyTok.(string)
+			if !ok {
+				return fmt.Errorf("non-string object key %v", keyTok)
+			}
+			if seen[key] {
+				return fmt.Errorf("duplicate object key %q", key)
+			}
+			seen[key] = true
+			if err := skipValue(dec); err != nil {
+				return err
+			}
+		}
+		if _, err := dec.Token(); err != nil {
+			return err
+		}
+	}
+}
+
+// skipValue consumes one JSON value from the decoder.
+func skipValue(dec *json.Decoder) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if _, ok := tok.(json.Delim); ok {
+		depth := 1
+		for depth > 0 {
+			t, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			if d, ok := t.(json.Delim); ok {
+				if d == '{' || d == '[' {
+					depth++
+				} else {
+					depth--
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // validateManifest enforces the immutable-source declaration rules.
 func validateManifest(m *Manifest) error {
-	if m.FetchedAt == "" {
-		return fmt.Errorf("manifest: fetched_at is empty")
+	if _, err := time.Parse("2006-01-02", m.FetchedAt); err != nil {
+		return fmt.Errorf("manifest: fetched_at %q is not a YYYY-MM-DD date", m.FetchedAt)
 	}
 	if m.License == "" {
 		return fmt.Errorf("manifest: license is empty")
@@ -103,6 +195,9 @@ func validateManifest(m *Manifest) error {
 			return fmt.Errorf("manifest: duplicate upstream path %q", f.Path)
 		}
 		paths[f.Path] = true
+		if _, err := time.Parse(time.RFC3339, f.UpstreamCommitDate); err != nil {
+			return fmt.Errorf("manifest: %s upstream_commit_date %q is not RFC3339", f.Local, f.UpstreamCommitDate)
+		}
 		if !sha40Re.MatchString(f.UpstreamCommitSHA) {
 			return fmt.Errorf("manifest: %s commit SHA %q is not 40 lowercase hex", f.Local, f.UpstreamCommitSHA)
 		}

@@ -184,3 +184,67 @@ func main() {
 		t.Fatal("bootstrapped output differs from the checked-in snapshot.gen.go")
 	}
 }
+
+// TestManifestStrictDecodeRows (finding 2, round 3): provenance dates are
+// structurally validated and the JSON decoding is fail-closed — duplicate
+// keys, unknown members, and trailing JSON are all rejected.
+func TestManifestStrictDecodeRows(t *testing.T) {
+	valid := func() *Manifest { return validManifest() }
+	rows := []struct {
+		name string
+		mut  func(*Manifest)
+	}{
+		{"fetched_at garbage", func(m *Manifest) { m.FetchedAt = "yesterday-ish" }},
+		{"fetched_at wrong shape", func(m *Manifest) { m.FetchedAt = "03-08-2026" }},
+		{"commit date garbage", func(m *Manifest) { m.Files[0].UpstreamCommitDate = "not a date" }},
+		{"commit date wrong tz shape", func(m *Manifest) { m.Files[0].UpstreamCommitDate = "2025-12-18 08:25:06" }},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			m := valid()
+			row.mut(m)
+			p := writeManifest(t, m)
+			if _, err := LoadManifestFrom(p); err == nil {
+				t.Fatalf("malformed provenance accepted: %s", row.name)
+			}
+		})
+	}
+
+	// Raw JSON decode rows: duplicate keys, unknown members, trailing JSON.
+	raw := func(m *Manifest) []byte {
+		b, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	// Duplicate "license" key.
+	dup := string(raw(valid()))
+	dup = strings.Replace(dup, `"license":"Apache-2.0 (googleapis)"`, `"license":"Apache-2.0 (googleapis)","license":"x"`, 1)
+	writeRaw := func(t *testing.T, content string) string {
+		t.Helper()
+		p := filepath.Join(t.TempDir(), "manifest.json")
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	if _, err := LoadManifestFrom(writeRaw(t, dup)); err == nil {
+		t.Fatal("duplicate manifest key accepted")
+	}
+	// Unknown member.
+	unknown := strings.Replace(string(raw(valid())), `"fetched_at"`, `"fetched_on"`, 1)
+	if _, err := LoadManifestFrom(writeRaw(t, unknown)); err == nil {
+		t.Fatal("unknown manifest member accepted")
+	}
+	// Trailing JSON.
+	trailing := string(raw(valid())) + `{"extra":true}`
+	if _, err := LoadManifestFrom(writeRaw(t, trailing)); err == nil {
+		t.Fatal("trailing JSON accepted")
+	}
+	// The valid manifest still passes.
+	p := writeManifest(t, valid())
+	if _, err := LoadManifestFrom(p); err != nil {
+		t.Fatalf("valid manifest rejected: %v", err)
+	}
+}

@@ -22,7 +22,6 @@ package gen
 // incompatible dimension instead of taking the first definition.
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -85,14 +84,14 @@ func LoadManifestFrom(path string) (*Manifest, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read vendored manifest: %w", err)
 	}
-	var m Manifest
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, fmt.Errorf("parse vendored manifest: %w", err)
-	}
-	if err := validateManifest(&m); err != nil {
+	m, err := decodeManifest(raw)
+	if err != nil {
 		return nil, err
 	}
-	return &m, nil
+	if err := validateManifest(m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -145,16 +144,71 @@ type fieldDesc struct {
 	Number        string
 	Oneof         string
 	FieldBehavior FieldBehavior
+	JSONName      string // explicit json_name wire spelling ("" = derive)
 }
 
-var fieldRe = regexp.MustCompile(`(?m)^\s*(repeated\s+|optional\s+)?([\w.]+)\s+(\w+)\s*=\s*(\d+)\s*(\[[^\]]*\])?\s*;`)
+// Field declaration line head: [repeated|optional] TYPE name = NUMBER
+// (the tail — `;` or a bracketed option list, possibly wrapped — is
+// validated by the strict line scanner, not this regex).
+var fieldHeadRe = regexp.MustCompile(`^\s*(repeated\s+|optional\s+)?([\w.]+)\s+(\w+)\s*=\s*(-?\d+)\s*`)
+
+// Map field declaration: map<KEY, VALUE> name = NUMBER.
+var mapFieldRe = regexp.MustCompile(`^\s*map<\s*([\w.]+)\s*,\s*([\w.]+)\s*>\s+(\w+)\s*=\s*(-?\d+)\s*`)
+
+// Option continuation line (wrapped field options end with `;`).
+var optionLineRe = regexp.MustCompile(`^\s*(\[[^\]]*\])\s*;?\s*$`)
+
+var closeBraceRe = regexp.MustCompile(`^\s*}`)
 
 var behaviorRe = regexp.MustCompile(`google\.api\.field_behavior\)\s*=\s*(\w+)`)
+var jsonNameRe = regexp.MustCompile(`json_name\s*=\s*"([^"]+)"`)
+
+// commentLineRe matches blank/comment lines (skipped by the accounting).
+var commentLineRe = regexp.MustCompile(`^\s*(//.*)?$`)
+
+// parseFieldOptions validates the option text affecting the retained
+// contract dimensions and returns the field behavior + explicit json_name.
+// Unsupported field-behavior values are a STABLE ERROR, never a silent
+// collapse to UNSPECIFIED.
+func parseFieldOptions(opt string) (FieldBehavior, string, error) {
+	fb := BehaviorUnspecified
+	behaviors := behaviorRe.FindAllStringSubmatch(opt, -1)
+	for _, b := range behaviors {
+		switch b[1] {
+		case "REQUIRED":
+			if fb != BehaviorUnspecified && fb != BehaviorRequired {
+				return "", "", fmt.Errorf("conflicting field_behavior annotations: %s", opt)
+			}
+			fb = BehaviorRequired
+		case "OPTIONAL":
+			if fb != BehaviorUnspecified && fb != BehaviorOptional {
+				return "", "", fmt.Errorf("conflicting field_behavior annotations: %s", opt)
+			}
+			fb = BehaviorOptional
+		default:
+			return "", "", fmt.Errorf("unsupported google.api.field_behavior %q in options %q (only REQUIRED/OPTIONAL are supported)", b[1], opt)
+		}
+	}
+	jsonName := ""
+	if m := jsonNameRe.FindStringSubmatch(opt); m != nil {
+		jsonName = m[1]
+		if jsonName == "" {
+			return "", "", fmt.Errorf("empty json_name in options %q", opt)
+		}
+	}
+	return fb, jsonName, nil
+}
 
 // messageFields returns the fields declared directly in a message body,
 // INCLUDING fields inside oneof blocks (with their oneof name), EXCLUDING
-// fields of nested messages/enums. Oneof grouping is a schema fact: arms
-// are classified by their oneof membership, not a name list.
+// fields of nested messages/enums.
+//
+// FAIL-CLOSED ACCOUNTING: every non-comment line of the body is consumed
+// by exactly one rule (field head, map field, oneof open/close, wrapped
+// option continuation). An unrecognized construct — a new provider
+// declaration form the parser does not understand — is a STABLE ERROR,
+// never a silent omission; a declaration can never disappear from the
+// inventory.
 func messageFields(body string) ([]fieldDesc, error) {
 	// Strip nested message/enum bodies so their fields cannot leak into
 	// the parent (e.g. Part.MediaResolution.level is NOT a Part field).
@@ -185,17 +239,15 @@ func messageFields(body string) ([]fieldDesc, error) {
 	text := string(stripped)
 
 	// Oneof intervals: each `oneof NAME {` block's [start, end) offset
-	// range (oneofs cannot nest, so a plain interval list is exact). A
-	// field's oneof membership is its containing interval — arms are
-	// classified by the schema source, never a name list.
+	// range (oneofs cannot nest, so a plain interval list is exact).
 	type oneofInterval struct {
 		name  string
-		start int // offset of the opening '{'
-		end   int // offset just past the closing '}'
+		start int
+		end   int
 	}
 	var oneofs []oneofInterval
 	for _, m := range oneofRe.FindAllStringSubmatchIndex(text, -1) {
-		open := m[1] // end of the name match; the '{' is here
+		open := m[1]
 		name := text[m[2]:m[3]]
 		depth := 1
 		j := open
@@ -222,47 +274,163 @@ func messageFields(body string) ([]fieldDesc, error) {
 		return ""
 	}
 
+	// Strict line accounting: every non-comment line must be consumed.
 	var out []fieldDesc
-	for _, m := range fieldRe.FindAllStringSubmatchIndex(text, -1) {
-		fb := BehaviorUnspecified
-		optStart, optEnd := m[10], m[11]
-		if optStart >= 0 {
-			if b := behaviorRe.FindStringSubmatch(text[optStart:optEnd]); b != nil {
-				switch b[1] {
-				case "REQUIRED":
-					fb = BehaviorRequired
-				case "OPTIONAL":
-					fb = BehaviorOptional
-				}
+	lines := strings.Split(text, "\n")
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if commentLineRe.MatchString(line) {
+			continue
+		}
+		if m := oneofRe.FindStringSubmatch(line); m != nil {
+			continue // handled by the interval pass
+		}
+		if closeBraceRe.MatchString(line) {
+			continue // oneof/message close
+		}
+		// Wrapped-option continuation from the previous field line.
+		if optionLineRe.MatchString(line) {
+			// Consumed by the field tail below; a lone continuation with
+			// no pending field is an error.
+			return nil, fmt.Errorf("orphan option continuation line %q", strings.TrimSpace(line))
+		}
+
+		// Field declarations: map first (its type token contains commas
+		// the plain regex cannot parse), then plain fields.
+		if m := mapFieldRe.FindStringSubmatch(line); m != nil {
+			// Maps cannot carry repeated/optional prefixes; the prefix is "".
+			f, consumed, err := parseFieldLine(line, lines[i+1:], m[3], m[4], "map<"+m[1]+","+m[2]+">", "", false)
+			if err != nil {
+				return nil, err
 			}
+			i += consumed
+			f.Oneof = oneofAt(lineOffset(text, lines, i-consumed))
+			out = append(out, f)
+			continue
 		}
-		prefix := ""
-		if m[2] >= 0 {
-			prefix = text[m[2]:m[3]]
+		if m := fieldHeadRe.FindStringSubmatch(line); m != nil {
+			f, consumed, err := parseFieldLine(line, lines[i+1:], m[3], m[4], m[2], m[1], true)
+			if err != nil {
+				return nil, err
+			}
+			i += consumed
+			f.Oneof = oneofAt(lineOffset(text, lines, i-consumed))
+			out = append(out, f)
+			continue
 		}
-		out = append(out, fieldDesc{
-			Repeated:      strings.Contains(prefix, "repeated"),
-			Optional:      strings.Contains(prefix, "optional"),
-			Type:          text[m[4]:m[5]],
-			Name:          text[m[6]:m[7]],
-			Number:        text[m[8]:m[9]],
-			Oneof:         oneofAt(m[0]),
-			FieldBehavior: fb,
-		})
+		return nil, fmt.Errorf("unrecognized construct in message body: %q", strings.TrimSpace(line))
 	}
 	return out, nil
 }
 
-// enumBodyValues extracts the value names directly from an enum BODY.
-func enumBodyValues(enumBody string) []string {
-	var out []string
-	for _, line := range strings.Split(enumBody, "\n") {
-		mm := regexp.MustCompile(`^\s*(\w+)\s*=\s*\d+\s*;`).FindStringSubmatch(line)
-		if mm != nil {
-			out = append(out, mm[1])
+// lineOffset returns the byte offset of lines[idx] within text.
+func lineOffset(text string, lines []string, idx int) int {
+	if idx < 0 || idx >= len(lines) {
+		return len(text)
+	}
+	off := 0
+	for i := 0; i < idx; i++ {
+		off += len(lines[i]) + 1
+	}
+	if off > len(text) {
+		return len(text)
+	}
+	return off
+}
+
+// parseFieldLine parses one field declaration: line is the head line
+// (`[repeated|optional] TYPE name = NUMBER`), rest are the following
+// lines (consumed when the option list is wrapped). prefix carries the
+// repeated/optional token; typ the proto type; name the proto member;
+// number the field number. The tail after the number must be `;`, a
+// bracketed option list, or a wrapped option continuation — anything
+// else is a stable error.
+func parseFieldLine(line string, rest []string, name, number, typ, prefix string, isPlain bool) (fieldDesc, int, error) {
+	f := fieldDesc{
+		Repeated:      strings.Contains(prefix, "repeated"),
+		Optional:      strings.Contains(prefix, "optional"),
+		Type:          typ,
+		Name:          name,
+		Number:        number,
+		FieldBehavior: BehaviorUnspecified,
+	}
+	numIdx := strings.LastIndex(line, number)
+	if numIdx < 0 {
+		return fieldDesc{}, 0, fmt.Errorf("field %s: number %s not found in %q", name, number, line)
+	}
+	restOf := strings.TrimSpace(line[numIdx+len(number):])
+	consumed := 0
+	optText := ""
+	switch {
+	case restOf == "" || restOf == ";":
+		// No options on the head line — but a WRAPPED option may begin on
+		// the next line (`= 6\n    [(google.api.field_behavior) = ...];`).
+		if len(rest) > 0 && optionLineRe.MatchString(strings.TrimSpace(rest[0])) {
+			c := strings.TrimSpace(rest[0])
+			consumed = 1
+			optText = c
+			if !strings.HasSuffix(c, ";") {
+				return fieldDesc{}, 0, fmt.Errorf("field %s: wrapped option not terminated on one line", name)
+			}
+		}
+	case strings.HasPrefix(restOf, "["):
+		optText = restOf
+		if !strings.HasSuffix(optText, ";") {
+			// Wrapped option list: consume continuation lines until one
+			// ends with ';'.
+			for consumed < len(rest) {
+				c := strings.TrimSpace(rest[consumed])
+				consumed++
+				if !optionLineRe.MatchString(c) {
+					return fieldDesc{}, 0, fmt.Errorf("field %s: malformed wrapped option %q", name, c)
+				}
+				optText += c
+				if strings.HasSuffix(c, ";") {
+					break
+				}
+			}
+			if !strings.HasSuffix(optText, ";") {
+				return fieldDesc{}, 0, fmt.Errorf("field %s: unterminated wrapped option", name)
+			}
+		}
+	default:
+		return fieldDesc{}, 0, fmt.Errorf("field %s: unrecognized construct after the number: %q", name, restOf)
+	}
+	if optText != "" {
+		fb, jsonName, err := parseFieldOptions(optText)
+		if err != nil {
+			return fieldDesc{}, 0, fmt.Errorf("field %s: %w", name, err)
+		}
+		f.FieldBehavior = fb
+		if jsonName != "" {
+			f.JSONName = jsonName
 		}
 	}
-	return out
+	return f, consumed, nil
+}
+
+// enumBodyValues extracts the value names directly from an enum BODY.
+// enumValueRe matches a value declaration, including negative numbers
+// and trailing options.
+var enumValueRe = regexp.MustCompile(`^\s*(\w+)\s*=\s*(-?\d+)\s*(\[[^\]]*\])?\s*;\s*$`)
+
+// enumBodyValues extracts the value names directly from an enum BODY with
+// FAIL-CLOSED ACCOUNTING: every non-comment line must be a value
+// declaration (positive or negative number), else a stable error — a
+// syntactically valid but unsupported enum form can never disappear.
+func enumBodyValues(enumBody string) ([]string, error) {
+	var out []string
+	for _, line := range strings.Split(enumBody, "\n") {
+		if commentLineRe.MatchString(line) {
+			continue
+		}
+		mm := enumValueRe.FindStringSubmatch(line)
+		if mm == nil {
+			return nil, fmt.Errorf("unrecognized construct in enum body: %q", strings.TrimSpace(line))
+		}
+		out = append(out, mm[1])
+	}
+	return out, nil
 }
 
 // nestedBlockBody returns the body of `message|enum NAME {` nested
@@ -284,6 +452,16 @@ func nestedBlockBody(body, name string) (string, bool, error) {
 // node extraction
 // ---------------------------------------------------------------------------
 
+// fieldMember is the wire member of a parsed field: the explicit
+// json_name when declared, else the derived camelCase spelling. An
+// explicit json_name is NEVER silently substituted by the default.
+func fieldMember(f fieldDesc) string {
+	if f.JSONName != "" {
+		return f.JSONName
+	}
+	return wireMember(f.Name)
+}
+
 // wireMember converts a proto snake_case member to its camelCase wire
 // spelling (protojson default).
 func wireMember(protoName string) string {
@@ -298,6 +476,9 @@ func wireMember(protoName string) string {
 
 // schemaKind maps a proto field type to the node kind.
 func schemaKind(t string, repeated bool) string {
+	if strings.HasPrefix(t, "map<") {
+		return "map"
+	}
 	if repeated {
 		return "repeated-" + strings.TrimPrefix(t, "google.protobuf.")
 	}
@@ -331,13 +512,13 @@ func partNodes(surface, content string) ([]SchemaNode, error) {
 	}
 	var out []SchemaNode
 	for _, f := range fields {
-		id := "part.ancillary." + wireMember(f.Name)
+		id := "part.ancillary." + fieldMember(f)
 		if f.Oneof == dataOneof {
-			id = "part.arm." + wireMember(f.Name)
+			id = "part.arm." + fieldMember(f)
 		}
 		out = append(out, SchemaNode{
 			ID:            id,
-			Member:        wireMember(f.Name),
+			Member:        fieldMember(f),
 			Kind:          schemaKind(f.Type, f.Repeated),
 			Surfaces:      []string{surface},
 			Oneof:         f.Oneof,
@@ -361,30 +542,20 @@ func memberNodes(idPrefix string, armOneof bool, surface, body string) ([]Schema
 	for _, f := range fields {
 		isArm := armOneof && f.Oneof == dataOneof
 		kind := schemaKind(f.Type, f.Repeated)
+		prefix := ".member."
 		if isArm {
-			out = append(out, SchemaNode{
-				ID:            idPrefix + ".arm." + wireMember(f.Name),
-				Member:        wireMember(f.Name),
-				Kind:          kind,
-				Oneof:         f.Oneof,
-				Repeated:      f.Repeated,
-				Optional:      f.Optional,
-				FieldBehavior: f.FieldBehavior,
-			})
-		} else {
-			out = append(out, SchemaNode{
-				ID:            idPrefix + ".member." + wireMember(f.Name),
-				Member:        wireMember(f.Name),
-				Kind:          kind,
-				Oneof:         f.Oneof,
-				Repeated:      f.Repeated,
-				Optional:      f.Optional,
-				FieldBehavior: f.FieldBehavior,
-			})
+			prefix = ".arm."
 		}
-	}
-	for i := range out {
-		out[i].Surfaces = []string{surface}
+		out = append(out, SchemaNode{
+			ID:            idPrefix + prefix + fieldMember(f),
+			Member:        fieldMember(f),
+			Kind:          kind,
+			Surfaces:      []string{surface},
+			Oneof:         f.Oneof,
+			Repeated:      f.Repeated,
+			Optional:      f.Optional,
+			FieldBehavior: f.FieldBehavior,
+		})
 	}
 	return out, nil
 }
@@ -632,7 +803,10 @@ func ParseVendoredSource() ([]SchemaNode, *EnumOrders, error) {
 	if !ok {
 		return nil, nil, fmt.Errorf("aiplatform content.proto: nested Level enum missing")
 	}
-	orders.MediaResolutionLevel = enumBodyValues(levBody)
+	orders.MediaResolutionLevel, err = enumBodyValues(levBody)
+	if err != nil {
+		return nil, nil, fmt.Errorf("aiplatform content.proto Level enum: %w", err)
+	}
 	for _, v := range orders.MediaResolutionLevel {
 		nodes = append(nodes, SchemaNode{
 			ID:       "media-resolution.level.enum." + v,
@@ -650,7 +824,10 @@ func ParseVendoredSource() ([]SchemaNode, *EnumOrders, error) {
 	if !ok {
 		return nil, nil, fmt.Errorf("generativelanguage content.proto: nested Scheduling enum missing")
 	}
-	orders.Scheduling = enumBodyValues(schBody)
+	orders.Scheduling, err = enumBodyValues(schBody)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generativelanguage content.proto Scheduling enum: %w", err)
+	}
 	for _, v := range orders.Scheduling {
 		nodes = append(nodes, SchemaNode{
 			ID:       "scheduling.enum." + v,

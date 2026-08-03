@@ -283,3 +283,124 @@ func TestWireMemberConversion(t *testing.T) {
 		t.Fatal("wireMember output must be camelCase")
 	}
 }
+
+// TestSyntheticFailClosedRegressions (finding 1, round 3): constructs the
+// strict parser does not understand must either produce the CORRECT fact
+// or a STABLE ERROR — never an incomplete successful inventory.
+func TestSyntheticFailClosedRegressions(t *testing.T) {
+	// (a) A map field is SUPPORTED: it produces a map-kind node (forcing a
+	// carrier decision), it does not disappear.
+	mapBody := `message Part {
+  map<string, string> labels = 2;
+}`
+	body, ok, err := extractMessage(mapBody, "Part")
+	if err != nil || !ok {
+		t.Fatalf("map synthetic: ok=%v err=%v", ok, err)
+	}
+	ns, err := partNodes(SurfaceGemini, body)
+	if err != nil {
+		t.Fatalf("map field must parse, got %v", err)
+	}
+	found := false
+	for _, n := range ns {
+		if n.ID == "part.ancillary.labels" {
+			found = true
+			if n.Kind != "map" {
+				t.Fatalf("map field kind = %q, want map", n.Kind)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("map field vanished from the inventory")
+	}
+
+	// (b) An explicit json_name overrides the wire member — never silently
+	// substituted by the default camelCase spelling.
+	jname := `message FunctionResponse {
+  string request_id = 1 [json_name = "requestID"];
+}`
+	jb, ok, err := extractMessage(jname, "FunctionResponse")
+	if err != nil || !ok {
+		t.Fatalf("json_name synthetic: ok=%v err=%v", ok, err)
+	}
+	jn, err := memberNodes("function-response", false, SurfaceGemini, jb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jn) != 1 || jn[0].Member != "requestID" {
+		t.Fatalf("json_name not honored: %+v", jn)
+	}
+
+	// (c) An unsupported field behavior is a STABLE ERROR, never a silent
+	// collapse to UNSPECIFIED.
+	badBehavior := `message Part {
+  string x = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+}`
+	bb, ok, err := extractMessage(badBehavior, "Part")
+	if err != nil || !ok {
+		t.Fatalf("behavior synthetic: ok=%v err=%v", ok, err)
+	}
+	if _, err := partNodes(SurfaceGemini, bb); err == nil {
+		t.Fatal("unsupported field_behavior accepted")
+	}
+
+	// (d) An unrecognized field form is a stable error, not an omission.
+	unrecognized := `message Part {
+  string x = 1; whatever_this_is y = 2;
+}`
+	ub, ok, err := extractMessage(unrecognized, "Part")
+	if err != nil || !ok {
+		t.Fatalf("unrecognized synthetic: ok=%v err=%v", ok, err)
+	}
+	if _, err := partNodes(SurfaceGemini, ub); err == nil {
+		t.Fatal("unrecognized construct accepted")
+	}
+
+	// (e) A malformed field tail is a stable error.
+	badTail := `message Part {
+  string x = 1 ) ;
+}`
+	tb, ok, err := extractMessage(badTail, "Part")
+	if err != nil || !ok {
+		t.Fatalf("tail synthetic: ok=%v err=%v", ok, err)
+	}
+	if _, err := partNodes(SurfaceGemini, tb); err == nil {
+		t.Fatal("malformed field tail accepted")
+	}
+}
+
+// TestSyntheticEnumFailClosed (finding 1, round 3): enum accounting —
+// negative values are SUPPORTED, unsupported forms are stable errors.
+func TestSyntheticEnumFailClosed(t *testing.T) {
+	// Negative values parse.
+	neg := "\n  POS = 1;\n  NEG = -1;\n"
+	vals, err := enumBodyValues(neg)
+	if err != nil {
+		t.Fatalf("negative enum value rejected: %v", err)
+	}
+	if len(vals) != 2 || vals[1] != "NEG" {
+		t.Fatalf("negative enum values: %v", vals)
+	}
+	// Trailing options parse.
+	opt := "\n  POS = 1 [deprecated = true];\n"
+	vals, err = enumBodyValues(opt)
+	if err != nil || len(vals) != 1 || vals[0] != "POS" {
+		t.Fatalf("enum value with options: %v err=%v", vals, err)
+	}
+	// Comments are skipped.
+	cmt := "\n  // a comment\n  POS = 1;\n"
+	vals, err = enumBodyValues(cmt)
+	if err != nil || len(vals) != 1 {
+		t.Fatalf("commented enum: %v err=%v", vals, err)
+	}
+	// An unsupported form errors rather than disappearing.
+	bad := "\n  POS 42;\n"
+	if _, err := enumBodyValues(bad); err == nil {
+		t.Fatal("unrecognized enum declaration accepted")
+	}
+	// A value without a semicolon errors.
+	noSemi := "\n  POS = 1\n"
+	if _, err := enumBodyValues(noSemi); err == nil {
+		t.Fatal("semicolon-less enum declaration accepted")
+	}
+}
