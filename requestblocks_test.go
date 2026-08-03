@@ -17,14 +17,18 @@ func fingerprintSeed() *pbv2.Message {
 	return &pbv2.Message{
 		Role: "assistant",
 		Blocks: []*pbv2.RequestBlock{
-			{Kind: &pbv2.RequestBlock_Thinking{Thinking: &pbv2.RequestThinkingBlock{Text: "r", Signature: "s"}}},
-			{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "hi", Signature: "s"}}},
+			{Kind: &pbv2.RequestBlock_Thinking{Thinking: &pbv2.RequestThinkingBlock{Text: "r", Signature: "s", PartMetadataJson: []byte(`{"src":"x"}`)}}},
+			{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "hi", Signature: "s", PartMetadataJson: []byte(`{"src":"x"}`)}}},
 			{Kind: &pbv2.RequestBlock_RedactedThinking{RedactedThinking: &pbv2.RequestRedactedThinkingBlock{Data: "d"}}},
 			{Kind: &pbv2.RequestBlock_ToolUse{ToolUse: &pbv2.RequestToolUseBlock{
-				Id: "t1", Name: "read", ArgumentsJson: []byte(`{"z":1,"a":2}`), Signature: "s",
+				Id: "t1", Name: "read", ArgumentsJson: []byte(`{"z":1,"a":2}`), Signature: "s", PartMetadataJson: []byte(`{}`),
 			}}},
 			{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
 				ToolCallId: "t1", ToolName: "read",
+				PartMetadataJson: []byte(`{}`),
+				WillContinue:     boolPtr(true),
+				Scheduling:       strPtr("WHEN_IDLE"),
+				Signature:        "trsig",
 				Content: []*pbv2.ToolResultContentBlock{
 					{Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: "ok"}}},
 					{Kind: &pbv2.ToolResultContentBlock_Unknown{Unknown: &pbv2.ToolResultUnknownBlock{
@@ -39,16 +43,22 @@ func fingerprintSeed() *pbv2.Message {
 				MarkerJson: []byte(`{"type":"ephemeral"}`),
 			}}},
 			{Kind: &pbv2.RequestBlock_Unknown{Unknown: &pbv2.RequestUnknownBlock{
-				Kind: "custom", PayloadJson: []byte(`{"v":1e999}`),
+				Kind: "custom", PayloadJson: []byte(`{"v":1e999}`), PartMetadataJson: []byte(`{}`), Signature: "usig",
 			}}},
-			{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: &pbv2.RequestTrailingSignatureBlock{Signature: "t"}}},
+			{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: &pbv2.RequestTrailingSignatureBlock{Signature: "t", PartMetadataJson: []byte(`{}`)}}},
 		},
 	}
 }
 
 func TestRequestBlocksFingerprintDeterministic(t *testing.T) {
-	a := RequestBlocksFingerprint(fingerprintSeed())
-	b := RequestBlocksFingerprint(fingerprintSeed())
+	a, err := RequestBlocksFingerprint(fingerprintSeed())
+	if err != nil {
+		t.Fatalf("fingerprint: %v", err)
+	}
+	b, err := RequestBlocksFingerprint(fingerprintSeed())
+	if err != nil {
+		t.Fatalf("fingerprint: %v", err)
+	}
 	if a != b {
 		t.Fatalf("fingerprint nondeterministic: %s vs %s", a, b)
 	}
@@ -58,12 +68,19 @@ func TestRequestBlocksFingerprintDeterministic(t *testing.T) {
 }
 
 func TestRequestBlocksFingerprintSensitive(t *testing.T) {
-	base := RequestBlocksFingerprint(fingerprintSeed())
+	base, err := RequestBlocksFingerprint(fingerprintSeed())
+	if err != nil {
+		t.Fatalf("fingerprint: %v", err)
+	}
 	mutate := func(name string, f func(*pbv2.Message)) {
 		t.Helper()
 		m := fingerprintSeed()
 		f(m)
-		if got := RequestBlocksFingerprint(m); got == base {
+		got, err := RequestBlocksFingerprint(m)
+		if err != nil {
+			t.Fatalf("%s: fingerprint error: %v", name, err)
+		}
+		if got == base {
 			t.Fatalf("%s: fingerprint unchanged", name)
 		}
 	}
@@ -100,6 +117,42 @@ func TestRequestBlocksFingerprintSensitive(t *testing.T) {
 	mutate("trailing signature", func(m *pbv2.Message) {
 		m.Blocks[7].GetTrailingSignature().Signature = "t2"
 	})
+	mutate("text part metadata", func(m *pbv2.Message) {
+		m.Blocks[1].GetText().PartMetadataJson = []byte(`{"src":"y"}`)
+	})
+	mutate("thinking part metadata", func(m *pbv2.Message) {
+		m.Blocks[0].GetThinking().PartMetadataJson = []byte(`{"src":"y"}`)
+	})
+	mutate("tool-use part metadata", func(m *pbv2.Message) {
+		m.Blocks[3].GetToolUse().PartMetadataJson = []byte(`{"src":"y"}`)
+	})
+	mutate("result part metadata", func(m *pbv2.Message) {
+		m.Blocks[4].GetToolResult().PartMetadataJson = []byte(`{"src":"y"}`)
+	})
+	mutate("result will_continue false", func(m *pbv2.Message) {
+		m.Blocks[4].GetToolResult().WillContinue = boolPtr(false)
+	})
+	mutate("result will_continue absent", func(m *pbv2.Message) {
+		m.Blocks[4].GetToolResult().WillContinue = nil
+	})
+	mutate("result scheduling value", func(m *pbv2.Message) {
+		m.Blocks[4].GetToolResult().Scheduling = strPtr("SILENT")
+	})
+	mutate("result scheduling absent", func(m *pbv2.Message) {
+		m.Blocks[4].GetToolResult().Scheduling = nil
+	})
+	mutate("result signature", func(m *pbv2.Message) {
+		m.Blocks[4].GetToolResult().Signature = "trsig2"
+	})
+	mutate("unknown part metadata", func(m *pbv2.Message) {
+		m.Blocks[6].GetUnknown().PartMetadataJson = []byte(`{"src":"y"}`)
+	})
+	mutate("unknown signature", func(m *pbv2.Message) {
+		m.Blocks[6].GetUnknown().Signature = "usig2"
+	})
+	mutate("trailing part metadata", func(m *pbv2.Message) {
+		m.Blocks[7].GetTrailingSignature().PartMetadataJson = []byte(`{"src":"y"}`)
+	})
 	mutate("block order", func(m *pbv2.Message) {
 		m.Blocks[0], m.Blocks[1] = m.Blocks[1], m.Blocks[0]
 	})
@@ -108,6 +161,103 @@ func TestRequestBlocksFingerprintSensitive(t *testing.T) {
 		c := m.Blocks[4].GetToolResult().Content
 		c[0], c[1] = c[1], c[0]
 	})
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+func strPtr(v string) *string { return &v }
+
+// TestRequestBlocksFingerprintTotality — invalid input NEVER yields a
+// usable fingerprint: nil message, nil blocks, typed-nil arms, and invalid
+// nested payloads are errors, not ordinary digests.
+func TestRequestBlocksFingerprintTotality(t *testing.T) {
+	cases := map[string]*pbv2.Message{
+		"nil message": nil,
+		"nil block element": {
+			Role:   "user",
+			Blocks: []*pbv2.RequestBlock{nil},
+		},
+		"typed-nil text arm": {
+			Role: "user",
+			Blocks: []*pbv2.RequestBlock{
+				{Kind: &pbv2.RequestBlock_Text{}},
+			},
+		},
+		"typed-nil tool result": {
+			Role: "user",
+			Blocks: []*pbv2.RequestBlock{
+				{Kind: &pbv2.RequestBlock_ToolResult{}},
+			},
+		},
+		"typed-nil unknown": {
+			Role: "user",
+			Blocks: []*pbv2.RequestBlock{
+				{Kind: &pbv2.RequestBlock_Unknown{}},
+			},
+		},
+		"nested nil element": {
+			Role: "user",
+			Blocks: []*pbv2.RequestBlock{
+				{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+					ToolCallId: "c1",
+					Content:    []*pbv2.ToolResultContentBlock{nil},
+				}}},
+			},
+		},
+		"nested typed-nil unknown": {
+			Role: "user",
+			Blocks: []*pbv2.RequestBlock{
+				{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+					ToolCallId: "c1",
+					Content: []*pbv2.ToolResultContentBlock{
+						{Kind: &pbv2.ToolResultContentBlock_Unknown{}},
+					},
+				}}},
+			},
+		},
+		"nested invalid payload": {
+			Role: "user",
+			Blocks: []*pbv2.RequestBlock{
+				{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+					ToolCallId: "c1",
+					Content: []*pbv2.ToolResultContentBlock{
+						{Kind: &pbv2.ToolResultContentBlock_Unknown{Unknown: &pbv2.ToolResultUnknownBlock{
+							Kind: "json", PayloadJson: []byte(`[1,2]`),
+						}}},
+					},
+				}}},
+			},
+		},
+		"nested invalid marker": {
+			Role: "user",
+			Blocks: []*pbv2.RequestBlock{
+				{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+					ToolCallId: "c1",
+					Content: []*pbv2.ToolResultContentBlock{
+						{Kind: &pbv2.ToolResultContentBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.ToolResultCacheBreakpoint{
+							MarkerJson: []byte(`nope`),
+						}}},
+					},
+				}}},
+			},
+		},
+		"nested no arm": {
+			Role: "user",
+			Blocks: []*pbv2.RequestBlock{
+				{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+					ToolCallId: "c1",
+					Content:    []*pbv2.ToolResultContentBlock{{}},
+				}}},
+			},
+		},
+	}
+	for name, m := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got, err := RequestBlocksFingerprint(m); err == nil {
+				t.Fatalf("invalid input produced a usable fingerprint %q", got)
+			}
+		})
+	}
 }
 
 // checkFingerprintInventory is the ONE guard behind both fingerprint

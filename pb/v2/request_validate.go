@@ -115,6 +115,14 @@ var requestJSONFields = map[string]jsonFieldRule{
 	"torana.v2.ToolCall.arguments_json":    {shape: "object", required: true},
 	"torana.v2.ToolDef.parameters_json":    {shape: "object", required: true},
 	"torana.v2.ToolDef.cache_control_json": {shape: "object"},
+	// Provider Part-level custom metadata (Gemini partMetadata): absent or a
+	// strict JSON object, on every Part-mapped block.
+	"torana.v2.RequestTextBlock.part_metadata_json":              {shape: "object"},
+	"torana.v2.RequestThinkingBlock.part_metadata_json":          {shape: "object"},
+	"torana.v2.RequestToolUseBlock.part_metadata_json":           {shape: "object"},
+	"torana.v2.RequestToolResultBlock.part_metadata_json":        {shape: "object"},
+	"torana.v2.RequestUnknownBlock.part_metadata_json":           {shape: "object"},
+	"torana.v2.RequestTrailingSignatureBlock.part_metadata_json": {shape: "object"},
 }
 
 // requestScalarRules declares a rule class for every non-JSON field of the
@@ -176,9 +184,12 @@ var requestScalarRules = map[string]string{
 	"torana.v2.RequestToolUseBlock.name":      "text-required-utf8",
 	"torana.v2.RequestToolUseBlock.signature": "text-utf8",
 	// RequestToolResultBlock
-	"torana.v2.RequestToolResultBlock.tool_call_id": "text-required-utf8",
-	"torana.v2.RequestToolResultBlock.tool_name":    "text-utf8",
-	"torana.v2.RequestToolResultBlock.content":      "repeated-message-nonnil",
+	"torana.v2.RequestToolResultBlock.tool_call_id":  "text-required-utf8",
+	"torana.v2.RequestToolResultBlock.tool_name":     "text-utf8",
+	"torana.v2.RequestToolResultBlock.content":       "repeated-message-nonnil",
+	"torana.v2.RequestToolResultBlock.will_continue": "bool-optional",
+	"torana.v2.RequestToolResultBlock.scheduling":    "text-utf8-optional",
+	"torana.v2.RequestToolResultBlock.signature":     "text-utf8",
 	// ToolResultContentBlock oneof member fields
 	"torana.v2.ToolResultContentBlock.text":             "oneof-message-member",
 	"torana.v2.ToolResultContentBlock.unknown":          "oneof-message-member",
@@ -188,7 +199,8 @@ var requestScalarRules = map[string]string{
 	// ToolResultUnknownBlock
 	"torana.v2.ToolResultUnknownBlock.kind": "text-required-utf8",
 	// RequestUnknownBlock
-	"torana.v2.RequestUnknownBlock.kind": "text-required-utf8",
+	"torana.v2.RequestUnknownBlock.kind":      "text-required-utf8",
+	"torana.v2.RequestUnknownBlock.signature": "text-utf8",
 	// RequestTrailingSignatureBlock
 	"torana.v2.RequestTrailingSignatureBlock.signature": "text-required-utf8",
 	// ToolCall — RESPONSE-side only now (ResponseMessage.tool_calls). ID is
@@ -417,12 +429,20 @@ func validateRequestBlock(b *RequestBlock, mi string, bi, blockCount int, role s
 		if k.Text == nil {
 			return fmt.Errorf("%s text arm is a typed nil", what)
 		}
-		return checkNoUnknown(k.Text.ProtoReflect(), what+".text")
+		if err := checkNoUnknown(k.Text.ProtoReflect(), what+".text"); err != nil {
+			return err
+		}
+		return validateJSONField(k.Text.PartMetadataJson, what+".text.part_metadata_json",
+			requestJSONFields["torana.v2.RequestTextBlock.part_metadata_json"])
 	case *RequestBlock_Thinking:
 		if k.Thinking == nil {
 			return fmt.Errorf("%s thinking arm is a typed nil", what)
 		}
-		return checkNoUnknown(k.Thinking.ProtoReflect(), what+".thinking")
+		if err := checkNoUnknown(k.Thinking.ProtoReflect(), what+".thinking"); err != nil {
+			return err
+		}
+		return validateJSONField(k.Thinking.PartMetadataJson, what+".thinking.part_metadata_json",
+			requestJSONFields["torana.v2.RequestThinkingBlock.part_metadata_json"])
 	case *RequestBlock_RedactedThinking:
 		if k.RedactedThinking == nil {
 			return fmt.Errorf("%s redacted_thinking arm is a typed nil", what)
@@ -442,8 +462,12 @@ func validateRequestBlock(b *RequestBlock, mi string, bi, blockCount int, role s
 		if tu.Name == "" {
 			return fmt.Errorf("%s.tool_use.name must be non-empty", what)
 		}
-		return validateJSONField(tu.ArgumentsJson, what+".tool_use.arguments_json",
-			requestJSONFields["torana.v2.RequestToolUseBlock.arguments_json"])
+		if err := validateJSONField(tu.ArgumentsJson, what+".tool_use.arguments_json",
+			requestJSONFields["torana.v2.RequestToolUseBlock.arguments_json"]); err != nil {
+			return err
+		}
+		return validateJSONField(tu.PartMetadataJson, what+".tool_use.part_metadata_json",
+			requestJSONFields["torana.v2.RequestToolUseBlock.part_metadata_json"])
 	case *RequestBlock_ToolResult:
 		if k.ToolResult == nil {
 			return fmt.Errorf("%s tool_result arm is a typed nil", what)
@@ -454,6 +478,10 @@ func validateRequestBlock(b *RequestBlock, mi string, bi, blockCount int, role s
 		}
 		if tr.ToolCallId == "" {
 			return fmt.Errorf("%s.tool_result.tool_call_id must be non-empty", what)
+		}
+		if err := validateJSONField(tr.PartMetadataJson, what+".tool_result.part_metadata_json",
+			requestJSONFields["torana.v2.RequestToolResultBlock.part_metadata_json"]); err != nil {
+			return err
 		}
 		if len(tr.Content) == 0 {
 			// The canonical spelling of a present-but-empty provider result
@@ -492,8 +520,12 @@ func validateRequestBlock(b *RequestBlock, mi string, bi, blockCount int, role s
 		if u.Kind == "" {
 			return fmt.Errorf("%s.unknown.kind must be non-empty", what)
 		}
-		return validateJSONField(u.PayloadJson, what+".unknown.payload_json",
-			requestJSONFields["torana.v2.RequestUnknownBlock.payload_json"])
+		if err := validateJSONField(u.PayloadJson, what+".unknown.payload_json",
+			requestJSONFields["torana.v2.RequestUnknownBlock.payload_json"]); err != nil {
+			return err
+		}
+		return validateJSONField(u.PartMetadataJson, what+".unknown.part_metadata_json",
+			requestJSONFields["torana.v2.RequestUnknownBlock.part_metadata_json"])
 	case *RequestBlock_TrailingSignature:
 		if k.TrailingSignature == nil {
 			return fmt.Errorf("%s trailing_signature arm is a typed nil", what)
@@ -519,7 +551,8 @@ func validateRequestBlock(b *RequestBlock, mi string, bi, blockCount int, role s
 			// block.
 			return fmt.Errorf("%s.trailing_signature requires at least one preceding text or thinking block", what)
 		}
-		return nil
+		return validateJSONField(ts.PartMetadataJson, what+".trailing_signature.part_metadata_json",
+			requestJSONFields["torana.v2.RequestTrailingSignatureBlock.part_metadata_json"])
 	default:
 		return fmt.Errorf("%s has no kind arm", what)
 	}

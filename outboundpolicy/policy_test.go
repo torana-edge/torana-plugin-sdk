@@ -286,17 +286,21 @@ func TestSignatureBindingsPinned(t *testing.T) {
 	if trail.Domain != SignatureDomainRequest || trail.Message != "torana.v2.RequestTrailingSignatureBlock" {
 		t.Fatal("RequestTrailingSignatureBlock.signature must remain a request-domain binding")
 	}
-	var sawTrailText, sawTrailThinking bool
+	var sawTrailText, sawTrailThinking, sawTrailMeta bool
 	for _, c := range trail.Content {
-		if c.Scope != SignatureScopeTrailingStandalone {
-			t.Fatalf("trailing_signature unexpected scope %v", c.Scope)
-		}
-		if c.Message == "torana.v2.RequestTextBlock" && c.Field == "text" {
+		switch {
+		case c.Scope == SignatureScopeSameMessage && c.Field == "part_metadata_json":
+			sawTrailMeta = true
+		case c.Scope != SignatureScopeTrailingStandalone:
+			t.Fatalf("trailing_signature unexpected scope %v for %+v", c.Scope, c)
+		case c.Message == "torana.v2.RequestTextBlock" && c.Field == "text":
 			sawTrailText = true
-		}
-		if c.Message == "torana.v2.RequestThinkingBlock" && c.Field == "text" {
+		case c.Message == "torana.v2.RequestThinkingBlock" && c.Field == "text":
 			sawTrailThinking = true
 		}
+	}
+	if !sawTrailMeta {
+		t.Fatal("trailing signature must SameMessage-bind its own part_metadata_json")
 	}
 	if !sawTrailText || !sawTrailThinking {
 		t.Fatal("trailing_signature must bind the preceding closed text and thinking blocks")
@@ -309,12 +313,23 @@ func TestSignatureBindingsPinned(t *testing.T) {
 	if cs.Domain != SignatureDomainRequest || cs.Message != "torana.v2.RequestTextBlock" {
 		t.Fatal("RequestTextBlock.signature must remain a request-domain binding")
 	}
-	if len(cs.Content) != 1 {
-		t.Fatalf("content signature must cover exactly one field, got %d", len(cs.Content))
+	if len(cs.Content) != 2 {
+		t.Fatalf("content signature must cover exactly two fields, got %d", len(cs.Content))
 	}
-	c := cs.Content[0]
-	if c.Scope != SignatureScopeSameMessage || c.Message != "" || c.Field != "text" {
-		t.Fatalf("content signature must SameMessage-bind its own text, got %+v", c)
+	var sawText, sawMeta bool
+	for _, c := range cs.Content {
+		if c.Scope != SignatureScopeSameMessage || c.Message != "" {
+			t.Fatalf("content signature must SameMessage-bind its own fields, got %+v", c)
+		}
+		switch c.Field {
+		case "text":
+			sawText = true
+		case "part_metadata_json":
+			sawMeta = true
+		}
+	}
+	if !sawText || !sawMeta {
+		t.Fatalf("content signature must bind text + part_metadata_json, got %+v", cs.Content)
 	}
 	if _, ok := OutboundFieldPolicy("torana.v2.RequestTextBlock", "signature"); ok {
 		t.Fatal("request block must not re-enter the outbound field registry")
@@ -324,9 +339,9 @@ func TestSignatureBindingsPinned(t *testing.T) {
 	if tu.Domain != SignatureDomainRequest || tu.Message != "torana.v2.RequestToolUseBlock" {
 		t.Fatal("RequestToolUseBlock.signature must be a request-domain binding")
 	}
-	want := map[string]bool{"id": true, "name": true, "arguments_json": true}
+	want := map[string]bool{"id": true, "name": true, "arguments_json": true, "part_metadata_json": true}
 	if len(tu.Content) != len(want) {
-		t.Fatalf("tool-use signature must cover exactly id/name/arguments_json, got %d refs", len(tu.Content))
+		t.Fatalf("tool-use signature must cover exactly id/name/arguments_json/part_metadata_json, got %d refs", len(tu.Content))
 	}
 	for _, r := range tu.Content {
 		if r.Scope != SignatureScopeSameMessage || r.Message != "" || !want[r.Field] {
@@ -338,7 +353,7 @@ func TestSignatureBindingsPinned(t *testing.T) {
 	}
 
 	// Reflection-backed completeness: the request-visible signature tokens
-	// and the declared set are exactly equal — the four block tokens, and
+	// and the declared set are exactly equal — the six block tokens, and
 	// nothing else.
 	descs := outboundDescriptors()
 	tokens := map[string]bool{}
@@ -349,6 +364,8 @@ func TestSignatureBindingsPinned(t *testing.T) {
 		"torana.v2.RequestThinkingBlock/signature",
 		"torana.v2.RequestTextBlock/signature",
 		"torana.v2.RequestToolUseBlock/signature",
+		"torana.v2.RequestUnknownBlock/signature",
+		"torana.v2.RequestToolResultBlock/signature",
 		"torana.v2.RequestTrailingSignatureBlock/signature",
 	} {
 		if !tokens[key] {
@@ -463,14 +480,25 @@ func TestRequestContentSignatureMutationClassifies(t *testing.T) {
 	}
 
 	// The verifier's boundContentChanged is computed over the binding's declared
-	// content refs; for the text-block signature that must be exactly the
-	// block's own text.
-	if len(binding.Content) != 1 {
-		t.Fatalf("content signature must declare exactly one content ref, got %d", len(binding.Content))
+	// content refs; for the text-block signature that must be the block's own
+	// text AND its provider part metadata (the complete signed Part).
+	if len(binding.Content) != 2 {
+		t.Fatalf("content signature must declare exactly two content refs, got %d", len(binding.Content))
 	}
-	ref := binding.Content[0]
-	if ref.Scope != SignatureScopeSameMessage || ref.Message != "" || ref.Field != "text" {
-		t.Fatalf("content signature must SameMessage-bind its own text, got %+v", ref)
+	var sawText, sawMeta bool
+	for _, ref := range binding.Content {
+		if ref.Scope != SignatureScopeSameMessage || ref.Message != "" {
+			t.Fatalf("content signature must SameMessage-bind its own fields, got %+v", ref)
+		}
+		switch ref.Field {
+		case "text":
+			sawText = true
+		case "part_metadata_json":
+			sawMeta = true
+		}
+	}
+	if !sawText || !sawMeta {
+		t.Fatalf("content signature must bind text + part_metadata_json, got %+v", binding.Content)
 	}
 
 	// Request plugin rewrites Message.content but keeps the provider token: the
@@ -678,8 +706,8 @@ func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 func TestRequestBindingCompletenessRequiresEveryToken(t *testing.T) {
 	descs := outboundDescriptors()
 	tokens := requestSignatureTokenFields(descs)
-	if len(tokens) != 4 {
-		t.Fatalf("expected exactly four request-visible signature tokens, got %v", tokens)
+	if len(tokens) != 6 {
+		t.Fatalf("expected exactly six request-visible signature tokens, got %v", tokens)
 	}
 	for _, token := range tokens {
 		t.Run(token+" removed", func(t *testing.T) {
@@ -718,12 +746,14 @@ func TestRequestBindingShapeOrderIndependent(t *testing.T) {
 		{
 			Domain: SignatureDomainRequest, Message: "torana.v2.RequestTextBlock", SignatureField: "signature",
 			Content: []SignatureContentRef{
+				{Scope: SignatureScopeSameMessage, Field: "part_metadata_json"},
 				{Scope: SignatureScopeSameMessage, Field: "text"},
 			},
 		},
 		{
 			Domain: SignatureDomainRequest, Message: "torana.v2.RequestTrailingSignatureBlock", SignatureField: "signature",
 			Content: []SignatureContentRef{
+				{Scope: SignatureScopeSameMessage, Field: "part_metadata_json"},
 				{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.RequestThinkingBlock", Field: "text"},
 				{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.RequestTextBlock", Field: "text"},
 			},
