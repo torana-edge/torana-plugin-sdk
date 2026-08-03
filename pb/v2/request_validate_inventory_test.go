@@ -143,9 +143,27 @@ func TestReplacementStringUTF8Sweep(t *testing.T) {
 		}
 	}
 
-	// ChatRequest scalar strings.
-	reject(t, "model", &ChatRequest{Model: bad})
-	reject(t, "stop_sequences[0]", &ChatRequest{StopSequences: []string{bad}})
+	// ChatRequest string fields, descriptor-driven: every singular string
+	// field is probed directly and the repeated stop_sequences list is
+	// probed through its list value, so an additive ChatRequest string field
+	// is genuinely picked up by this sweep, matching the walk's own
+	// descriptor-driven coverage.
+	crMD := (&ChatRequest{}).ProtoReflect().Descriptor()
+	for i := 0; i < crMD.Fields().Len(); i++ {
+		fd := crMD.Fields().Get(i)
+		if fd.Kind() != protoreflect.StringKind {
+			continue
+		}
+		probe := &ChatRequest{}
+		if fd.IsList() {
+			list := probe.ProtoReflect().Mutable(fd).List()
+			list.Append(protoreflect.ValueOfString(bad))
+			reject(t, string(fd.Name())+"[0]", probe)
+		} else {
+			probe.ProtoReflect().Set(fd, protoreflect.ValueOfString(bad))
+			reject(t, string(fd.Name()), probe)
+		}
+	}
 
 	// Message strings (one fresh message per field).
 	msgMD := (&Message{}).ProtoReflect().Descriptor()

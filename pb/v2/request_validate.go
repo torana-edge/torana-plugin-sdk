@@ -88,7 +88,7 @@ var requestJSONFields = map[string]jsonFieldRule{
 //     the descriptor-driven string walk (checkStringsUTF8) — Go strings are
 //     NOT valid UTF-8 by construction, only wire-decoded protobuf strings
 //     are; emptiness is allowed;
-//   - "bool", "int32": protobuf scalars are well-typed by construction;
+//   - "bool": protobuf scalars are well-typed by construction;
 //   - deliberately unconstrained beyond UTF-8: content fields (role,
 //     content, thinking, signatures, description) carry no universal
 //     constraint.

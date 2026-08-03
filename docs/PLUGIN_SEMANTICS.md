@@ -268,6 +268,9 @@ Universal rules:
   `ToolDef.name` is non-empty. Anonymous RESPONSE tool calls are exempt from
   the id rule: response ids are host-owned and may legitimately be absent
   (their own `ToolCall.Validate` governs them);
+- every protobuf string in a replacement is valid UTF-8 (ordinary strings
+  may be empty); the request identity fields `ToolCall.id`, `ToolCall.name`,
+  and `ToolDef.name` are separately required non-empty AND UTF-8-valid;
 - `temperature` and `top_p` are finite when present; `max_tokens` is
   strictly positive when present; no provider-specific ranges are invented;
 - JSON fields must be valid UTF-8, surrogate-safe, and duplicate-free, with
