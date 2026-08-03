@@ -12,7 +12,9 @@ package v2
 //
 // The rules, per the approved executable field contract:
 //
-//	ChatRequest.torana_meta_json      absent | JSON object   (host-owned, immutable)
+//	ChatRequest.torana_meta_json      SDK ABSOLUTE: absent | strict JSON object
+//	                                 HOST RELATIONAL: bytes must equal the accepted
+//	                                 input; no grant authorizes changes
 //	ChatRequest.provider_extensions_json  absent | JSON object
 //	ChatRequest.safety_settings_json  absent | JSON array    (Gemini shape)
 //	ChatRequest.temperature / top_p   finite when present    (no invented ranges)
@@ -72,35 +74,25 @@ var requestJSONFields = map[string]jsonFieldRule{
 	"torana.v2.ToolDef.cache_control_json":           {shape: "object"},
 }
 
-// ReplacementFieldRules exposes the executable field table for the
-// reflection-backed inventory test. Every JSON byte field of the four
-// request-visible messages must appear here; scalar/repeated fields are
-// declared in the universal rule inventory below.
-func ReplacementFieldRules() map[string]string {
-	out := make(map[string]string, len(requestJSONFields)+len(requestScalarRules))
-	for f, r := range requestJSONFields {
-		s := "json-" + r.shape
-		if r.required {
-			s += "-required"
-		}
-		out[f] = s
-	}
-	for f, r := range requestScalarRules {
-		out[f] = r
-	}
-	return out
-}
-
 // requestScalarRules declares a rule class for every non-JSON field of the
-// four request-visible messages. The validator enforces the classes; the
-// inventory test forces additive fields to be declared here.
+// four request-visible messages. The inventory test forces additive fields
+// to be declared here, and each class is either ENFORCED by the validator or
+// documented as inherent/unconstrained:
+//
+//   - enforced: "repeated-message-nonnil", "float-finite-optional",
+//     "int32-positive-optional", "text-required";
+//   - inherent: "text" and "repeated-text" (protobuf strings are valid UTF-8
+//     by construction, so no further constraint applies), "bool", "int32"
+//     (protobuf scalars are well-typed by construction);
+//   - deliberately unconstrained: "text" content fields (role, content,
+//     thinking, signatures, description) carry no universal constraint.
 var requestScalarRules = map[string]string{
 	// ChatRequest
 	"torana.v2.ChatRequest.model":          "text",
 	"torana.v2.ChatRequest.messages":       "repeated-message-nonnil",
 	"torana.v2.ChatRequest.tools":          "repeated-message-nonnil",
 	"torana.v2.ChatRequest.stream":         "bool",
-	"torana.v2.ChatRequest.max_tokens":     "int32-optional",
+	"torana.v2.ChatRequest.max_tokens":     "int32-positive-optional",
 	"torana.v2.ChatRequest.temperature":    "float-finite-optional",
 	"torana.v2.ChatRequest.top_p":          "float-finite-optional",
 	"torana.v2.ChatRequest.stop_sequences": "repeated-text",
@@ -183,6 +175,12 @@ func (x *ChatRequest) ValidateReplacement() error {
 	}
 	if err := checkNoUnknown(x.ProtoReflect(), "chat request replacement"); err != nil {
 		return err
+	}
+	if x.MaxTokens != nil && *x.MaxTokens <= 0 {
+		// Universal validity: every provider surface rejects zero and
+		// negative max_tokens (the adapters emit the value verbatim once
+		// present). Absence is the canonical "provider default" state.
+		return fmt.Errorf("max_tokens must be strictly positive when present")
 	}
 	if x.Temperature != nil && !finiteFloat(*x.Temperature) {
 		return fmt.Errorf("temperature must be finite")

@@ -249,7 +249,7 @@ implementation):
 
 | Field | Rule |
 |---|---|
-| `torana_meta_json` | absent or JSON object (host-owned, immutable) |
+| `torana_meta_json` | SDK ABSOLUTE rule: absent or strict JSON object. The SDK cannot prove immutability — it has no accepted request to compare against; see the HOST RELATIONAL rule below. |
 | `provider_extensions_json` | absent or JSON object |
 | `safety_settings_json` | absent or JSON **array** (Gemini shape) |
 | `Message.content_parts_json` | absent or JSON array |
@@ -268,16 +268,26 @@ Universal rules:
   `ToolDef.name` is non-empty. Anonymous RESPONSE tool calls are exempt from
   the id rule: response ids are host-owned and may legitimately be absent
   (their own `ToolCall.Validate` governs them);
-- `temperature` and `top_p` are finite when present; no provider-specific
-  ranges are invented;
+- `temperature` and `top_p` are finite when present; `max_tokens` is
+  strictly positive when present; no provider-specific ranges are invented;
 - JSON fields must be valid UTF-8, surrogate-safe, and duplicate-free, with
   exactly one top-level value (`pb/v2/jsontext`). Empty bytes are absence
   only for absent-capable fields; a literal JSON `null` is a wrong top-level
   value everywhere.
 
-A replacement that fails this contract is refused; whether the refusal
-follows `failure_mode` (pass keeps the accepted input, block produces the
-plugin-failure refusal) or becomes a host-level terminal error is a host
-policy decision documented in the host's own checkpoint — the SDK unit is
-the single normative statement of the domain, shared by Go guests, handmade
-guests, and the host's unconditional verifier.
+A replacement that fails this contract is refused and ALWAYS enters
+normal plugin `failure_mode`: `pass` keeps the accepted input, `block`
+produces the plugin-failure refusal. It never becomes a host-level terminal
+error — the defensive provider-native 500 applies only to host/adapter
+marshal failure AFTER a contract-valid replacement, which is a host-side
+obligation outside this SDK unit.
+
+HOST RELATIONAL rule for `torana_meta_json`: the host's write verifier
+compares the replacement's bytes against the accepted input — they must be
+equal, and no grant authorizes changes. This is enforced by the host because
+it is the only party holding the accepted request; the SDK validator's
+absolute shape rule above is its share of the contract.
+
+The SDK unit is the single normative statement of the replacement domain,
+shared by Go guests, handmade guests, and the host's unconditional
+verifier.

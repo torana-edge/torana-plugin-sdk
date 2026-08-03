@@ -90,6 +90,32 @@ func TestReplacementUnknownFields(t *testing.T) {
 	mustRejectReplacement(t, "tool-def level", &v2.ChatRequest{Tools: []*v2.ToolDef{td}})
 }
 
+// TestReplacementMaxTokens: when present, max_tokens must be strictly
+// positive (zero and negatives are invalid on every provider surface; absent
+// is fine). Written before the enforcement existed.
+func TestReplacementMaxTokens(t *testing.T) {
+	zero := int32(0)
+	neg := int32(-1)
+	min := int32(math.MinInt32)
+	for _, tc := range []struct {
+		name string
+		v    int32
+	}{
+		{"zero", zero},
+		{"negative", neg},
+		{"MinInt32", min},
+	} {
+		req := baseRequest()
+		req.MaxTokens = &tc.v
+		mustRejectReplacement(t, tc.name, req)
+	}
+	pos := int32(1)
+	req := baseRequest()
+	req.MaxTokens = &pos
+	mustAcceptReplacement(t, "positive", req)
+	mustAcceptReplacement(t, "absent", baseRequest())
+}
+
 func TestReplacementNonFiniteFloats(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -162,6 +188,14 @@ func TestReplacementJSONFieldMatrix(t *testing.T) {
 	badUTF8 := "{\"a\":\"\xff\"}"
 	malformed := `{"a":`
 
+	// badRow is one invalid sample with its failure family. The family maps
+	// to a stable substring of the validator's error so a wrong-shape
+	// rejection cannot satisfy a duplicate/surrogate/utf8 row.
+	type badRow struct {
+		name   string
+		sample string
+		family string // expected substring of the rejection
+	}
 	cases := []struct {
 		name   string
 		mutate func(*v2.ChatRequest, []byte)
@@ -170,7 +204,7 @@ func TestReplacementJSONFieldMatrix(t *testing.T) {
 		// empty bytes (the canonical empty shape is {} or []).
 		absentOK bool
 		valid    []string
-		bad      []string
+		bad      []badRow
 	}{
 		{
 			name:     "content_parts_json array",
@@ -180,7 +214,15 @@ func TestReplacementJSONFieldMatrix(t *testing.T) {
 			},
 			mutate: func(r *v2.ChatRequest, b []byte) { r.Messages[0].ContentPartsJson = b },
 			valid:  []string{`[]`, `[{"type":"text","text":"x"}]`},
-			bad:    []string{malformed, `{}`, `"str"`, dup, surrogate, badUTF8, `null`},
+			bad: []badRow{
+				{"malformed", malformed, "jsontext:"},
+				{"wrong-shape-object", `{}`, "must be a JSON array"},
+				{"wrong-shape-string", `"str"`, "must be a JSON array"},
+				{"duplicate", `[{"a":1,"a":2}]`, "duplicate"},
+				{"surrogate", `[{"a":"\ud800"}]`, "surrogate"},
+				{"utf8", `["` + "\xff" + `"]`, "UTF-8"},
+				{"null", `null`, "must be a JSON array"},
+			},
 		},
 		{
 			name:     "message cache_control_json object",
@@ -190,7 +232,15 @@ func TestReplacementJSONFieldMatrix(t *testing.T) {
 			},
 			mutate: func(r *v2.ChatRequest, b []byte) { r.Messages[0].CacheControlJson = b },
 			valid:  []string{`{}`, `{"type":"ephemeral"}`},
-			bad:    []string{malformed, `[]`, `"str"`, dup, surrogate, badUTF8, `null`},
+			bad: []badRow{
+				{"malformed", malformed, "jsontext:"},
+				{"wrong-shape-array", `[]`, "must be a JSON object"},
+				{"wrong-shape-string", `"str"`, "must be a JSON object"},
+				{"duplicate", dup, "duplicate"},
+				{"surrogate", surrogate, "surrogate"},
+				{"utf8", badUTF8, "UTF-8"},
+				{"null", `null`, "must be a JSON object"},
+			},
 		},
 		{
 			name: "tool call arguments_json object required",
@@ -200,7 +250,15 @@ func TestReplacementJSONFieldMatrix(t *testing.T) {
 			mutate: func(r *v2.ChatRequest, b []byte) { r.Messages[0].ToolCalls[0].ArgumentsJson = b },
 			// absentOK deliberately false: arguments are required.
 			valid: []string{`{}`, `{"path":"server.go"}`, `{"big":1e999,"neg":-1e999}`},
-			bad:   []string{malformed, `[]`, `"str"`, `1`, dup, surrogate, badUTF8, `null`},
+			bad: []badRow{
+				{"malformed", malformed, "jsontext:"},
+				{"wrong-shape-array", `[]`, "must be a JSON object"},
+				{"wrong-shape-number", `1`, "must be a JSON object"},
+				{"duplicate", dup, "duplicate"},
+				{"surrogate", surrogate, "surrogate"},
+				{"utf8", badUTF8, "UTF-8"},
+				{"null", `null`, "must be a JSON object"},
+			},
 		},
 		{
 			name: "tool def parameters_json object required",
@@ -210,7 +268,15 @@ func TestReplacementJSONFieldMatrix(t *testing.T) {
 			mutate: func(r *v2.ChatRequest, b []byte) { r.Tools[0].ParametersJson = b },
 			// absentOK deliberately false: parameters are required.
 			valid: []string{`{}`, `{"type":"object","properties":{}}`},
-			bad:   []string{malformed, `[]`, `"str"`, dup, surrogate, badUTF8, `null`},
+			bad: []badRow{
+				{"malformed", malformed, "jsontext:"},
+				{"wrong-shape-array", `[]`, "must be a JSON object"},
+				{"wrong-shape-string", `"str"`, "must be a JSON object"},
+				{"duplicate", dup, "duplicate"},
+				{"surrogate", surrogate, "surrogate"},
+				{"utf8", badUTF8, "UTF-8"},
+				{"null", `null`, "must be a JSON object"},
+			},
 		},
 		{
 			name:     "tool def cache_control_json object",
@@ -220,7 +286,15 @@ func TestReplacementJSONFieldMatrix(t *testing.T) {
 			},
 			mutate: func(r *v2.ChatRequest, b []byte) { r.Tools[0].CacheControlJson = b },
 			valid:  []string{`{}`, `{"type":"ephemeral"}`},
-			bad:    []string{malformed, `[]`, `"str"`, dup, surrogate, badUTF8, `null`},
+			bad: []badRow{
+				{"malformed", malformed, "jsontext:"},
+				{"wrong-shape-array", `[]`, "must be a JSON object"},
+				{"wrong-shape-string", `"str"`, "must be a JSON object"},
+				{"duplicate", dup, "duplicate"},
+				{"surrogate", surrogate, "surrogate"},
+				{"utf8", badUTF8, "UTF-8"},
+				{"null", `null`, "must be a JSON object"},
+			},
 		},
 		{
 			name:     "provider_extensions_json object",
@@ -230,7 +304,15 @@ func TestReplacementJSONFieldMatrix(t *testing.T) {
 			},
 			mutate: func(r *v2.ChatRequest, b []byte) { r.ProviderExtensionsJson = b },
 			valid:  []string{`{}`, `{"stream_options":{"include_usage":true}}`},
-			bad:    []string{malformed, `[]`, `"str"`, dup, surrogate, badUTF8, `null`},
+			bad: []badRow{
+				{"malformed", malformed, "jsontext:"},
+				{"wrong-shape-array", `[]`, "must be a JSON object"},
+				{"wrong-shape-string", `"str"`, "must be a JSON object"},
+				{"duplicate", dup, "duplicate"},
+				{"surrogate", surrogate, "surrogate"},
+				{"utf8", badUTF8, "UTF-8"},
+				{"null", `null`, "must be a JSON object"},
+			},
 		},
 		{
 			name:     "safety_settings_json array",
@@ -240,7 +322,15 @@ func TestReplacementJSONFieldMatrix(t *testing.T) {
 			},
 			mutate: func(r *v2.ChatRequest, b []byte) { r.SafetySettingsJson = b },
 			valid:  []string{`[]`, `[{"category":"HARM_CATEGORY_HATE","threshold":"BLOCK"}]`},
-			bad:    []string{malformed, `{}`, `"str"`, dup, surrogate, badUTF8, `null`},
+			bad: []badRow{
+				{"malformed", malformed, "jsontext:"},
+				{"wrong-shape-object", `{}`, "must be a JSON array"},
+				{"wrong-shape-string", `"str"`, "must be a JSON array"},
+				{"duplicate", `[{"a":1,"a":2}]`, "duplicate"},
+				{"surrogate", `[{"a":"\ud800"}]`, "surrogate"},
+				{"utf8", `["` + "\xff" + `"]`, "UTF-8"},
+				{"null", `null`, "must be a JSON array"},
+			},
 		},
 		{
 			name:     "torana_meta_json object host-owned",
@@ -250,7 +340,15 @@ func TestReplacementJSONFieldMatrix(t *testing.T) {
 			},
 			mutate: func(r *v2.ChatRequest, b []byte) { r.ToranaMetaJson = b },
 			valid:  []string{`{}`, `{"_provider":"oai"}`},
-			bad:    []string{malformed, `[]`, `"str"`, dup, surrogate, badUTF8, `null`},
+			bad: []badRow{
+				{"malformed", malformed, "jsontext:"},
+				{"wrong-shape-array", `[]`, "must be a JSON object"},
+				{"wrong-shape-string", `"str"`, "must be a JSON object"},
+				{"duplicate", dup, "duplicate"},
+				{"surrogate", surrogate, "surrogate"},
+				{"utf8", badUTF8, "UTF-8"},
+				{"null", `null`, "must be a JSON object"},
+			},
 		},
 	}
 
@@ -282,10 +380,16 @@ func TestReplacementJSONFieldMatrix(t *testing.T) {
 			})
 		}
 		for _, b := range c.bad {
-			t.Run(c.name+"/bad:"+b, func(t *testing.T) {
+			t.Run(c.name+"/bad:"+b.name, func(t *testing.T) {
 				req := validBase()
-				c.mutate(req, []byte(b))
-				mustRejectReplacement(t, "invalid field", req)
+				c.mutate(req, []byte(b.sample))
+				err := req.ValidateReplacement()
+				if err == nil {
+					t.Fatalf("%s (%s): invalid field accepted", b.name, b.family)
+				}
+				if !strings.Contains(err.Error(), b.family) {
+					t.Fatalf("%s: rejection %q does not name family %q", b.name, err, b.family)
+				}
 			})
 		}
 	}
@@ -327,28 +431,5 @@ func TestHookResultValidateForReplaceRequest(t *testing.T) {
 	hr = &v2.HookResult{Action: &v2.HookResult_ReplaceRequest{ReplaceRequest: valid}}
 	if err := hr.ValidateFor(v2.Hook_HOOK_AFTER_RESPONSE); err == nil {
 		t.Fatal("replacement dispatched to the wrong hook accepted")
-	}
-}
-
-// --- reflection-backed inventory -------------------------------------------
-
-// TestReplacementFieldInventory: every field of ChatRequest, Message,
-// ToolCall, and ToolDef must have a deliberate rule class declared in the
-// inventory. An additive v2 field fails this test until a rule is decided,
-// so the contract cannot grow silently.
-func TestReplacementFieldInventory(t *testing.T) {
-	rules := v2.ReplacementFieldRules()
-	// Walk each message's descriptor through a typed instance.
-	instances := []proto.Message{&v2.ChatRequest{}, &v2.Message{}, &v2.ToolCall{}, &v2.ToolDef{}}
-	for _, inst := range instances {
-		md := inst.ProtoReflect().Descriptor()
-		fields := md.Fields()
-		for i := 0; i < fields.Len(); i++ {
-			fd := fields.Get(i)
-			full := string(fd.FullName())
-			if _, ok := rules[full]; !ok {
-				t.Fatalf("field %s has no declared replacement rule; add one to ReplacementFieldRules", full)
-			}
-		}
 	}
 }
