@@ -7,8 +7,9 @@ package plugin_sdk
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"fmt"
-	"strconv"
 	"testing"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -330,77 +331,151 @@ func TestRequestFingerprintCoverageRejectsStaleField(t *testing.T) {
 	}
 }
 
-// TestToolResultContentFingerprintReferenceFrame — the framing layout is
-// executable: an INDEPENDENT byte-level reference encoder (never calling
-// the SDK fingerprint) must produce the exact same digest for a fixed
-// input. This pins the layout (domain frame, count, per-element arm tag +
-// presence + length-prefixed payload) against re-implementations drifting
-// in either direction. The domain/version frame is part of the hashed
-// bytes: a different frame string is a DIFFERENT digest (domain-crossing
-// negative below).
-func TestToolResultContentFingerprintReferenceFrame(t *testing.T) {
+// TestToolResultContentFingerprintBinaryLayout — the nested digest layout
+// is pinned by a GENUINELY INDEPENDENT encoder: it hard-codes the v1
+// domain literal (never the production constant), emits the binary
+// preimage with its own big-endian writer, and asserts BOTH the live
+// digest and a fixed GOLDEN digest for a fixed input. A drift in the
+// implementation OR the encoder fails; the golden hex additionally pins
+// the digest value itself (a change in domain framing, length encoding,
+// arm numbering, or presence bytes changes the hex).
+func TestToolResultContentFingerprintBinaryLayout(t *testing.T) {
 	content := []*pbv2.ToolResultContentBlock{
 		{Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: "ok"}}},
 		{Kind: &pbv2.ToolResultContentBlock_Unknown{Unknown: &pbv2.ToolResultUnknownBlock{Kind: "json", PayloadJson: []byte(`{"v":1}`)}}},
 		{Kind: &pbv2.ToolResultContentBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.ToolResultCacheBreakpoint{MarkerJson: []byte(`{"type":"default"}`)}}},
 	}
 
-	// Reference encoder: identical layout, independent code (literal
-	// big-endian decimal length framing, no shared helpers).
-	frame := func(tag, value string) []byte {
-		return []byte(tag + strconv.Itoa(len(value)) + ":" + value)
+	// The independent reference encoder (spec): literal v1 domain, its own
+	// fixed-width unsigned big-endian writer, numeric arm bytes, literal
+	// presence bytes, exact payload bytes.
+	ref := func() [32]byte {
+		h := sha256.New()
+		u64 := func(v uint64) { var b [8]byte; binary.BigEndian.PutUint64(b[:], v); h.Write(b[:]) }
+		by := func(v []byte) { u64(uint64(len(v))); h.Write(v) }
+		str := func(v string) { by([]byte(v)) }
+		domain := []byte("torana/tool-result-content/v1")
+		u64(uint64(len(domain)))
+		h.Write(domain)
+		u64(uint64(len(content)))
+		h.Write([]byte{1, 1}) // text arm, present
+		str("ok")
+		h.Write([]byte{2, 1}) // unknown arm, present
+		str("json")
+		by([]byte(`{"v":1}`))
+		h.Write([]byte{3, 1}) // cache arm, present
+		by([]byte(`{"type":"default"}`))
+		var sum [32]byte
+		copy(sum[:], h.Sum(nil))
+		return sum
 	}
-	want := sha256.New()
-	want.Write(frame(toolResultContentDomainFrame, ""))
-	want.Write(frame("count", "3"))
-	for j, c := range content {
-		want.Write(frame("nested", strconv.Itoa(j)))
-		switch c.Kind.(type) {
-		case *pbv2.ToolResultContentBlock_Text:
-			want.Write(frame("nkind", "text"))
-			want.Write(frame("presence", "1"))
-			want.Write(frame("text", "ok"))
-		case *pbv2.ToolResultContentBlock_Unknown:
-			want.Write(frame("nkind", "unknown"))
-			want.Write(frame("presence", "1"))
-			want.Write(frame("kind", "json"))
-			want.Write(frame("payload", string([]byte(`{"v":1}`))))
-		case *pbv2.ToolResultContentBlock_CacheBreakpoint:
-			want.Write(frame("nkind", "cache"))
-			want.Write(frame("presence", "1"))
-			want.Write(frame("marker", string([]byte(`{"type":"default"}`))))
-		}
-	}
-	wantSum := want.Sum(nil)
+	want := ref()
 
 	got, err := ToolResultContentFingerprint(content)
 	if err != nil {
 		t.Fatalf("fingerprint: %v", err)
 	}
-	if !bytes.Equal(got[:], wantSum) {
-		t.Fatalf("reference frame mismatch:\n got %x\nwant %x", got, wantSum)
+	if got != want {
+		t.Fatalf("digest mismatch:\n got %x\nwant %x", got, want)
+	}
+	// Fixed golden digest (pinned value; regenerate deliberately with the
+	// reference encoder when the layout changes).
+	const golden = "9a0e95e92fb7b7e617d1bc5e5aeceb73abc63e7a9f22df4cad70283d96b50d47"
+	if hex.EncodeToString(got[:]) != golden {
+		t.Fatalf("golden digest mismatch:\n got %x\nwant %s", got, golden)
 	}
 
-	// Domain-crossing negative: the same content under a DIFFERENT domain
-	// frame is a different digest.
+	// Cross-domain negative: the same content under a DIFFERENT domain
+	// frame is a different digest (the domain is hashed, not prose).
 	other := sha256.New()
-	other.Write(frame("torana/tool-result-content/v2", ""))
-	other.Write(frame("count", "3"))
-	other.Write(wantSum[0:0]) // nothing; the negative only needs the frame delta
-	other.Write(frame("nested", "0"))
-	other.Write(frame("nkind", "text"))
-	other.Write(frame("presence", "1"))
-	other.Write(frame("text", "ok"))
-	other.Write(frame("nested", "1"))
-	other.Write(frame("nkind", "unknown"))
-	other.Write(frame("presence", "1"))
-	other.Write(frame("kind", "json"))
-	other.Write(frame("payload", string([]byte(`{"v":1}`))))
-	other.Write(frame("nested", "2"))
-	other.Write(frame("nkind", "cache"))
-	other.Write(frame("presence", "1"))
-	other.Write(frame("marker", string([]byte(`{"type":"default"}`))))
-	if bytes.Equal(other.Sum(nil), got[:]) {
+	ou64 := func(v uint64) { var b [8]byte; binary.BigEndian.PutUint64(b[:], v); other.Write(b[:]) }
+	oby := func(v []byte) { ou64(uint64(len(v))); other.Write(v) }
+	ostr := func(v string) { oby([]byte(v)) }
+	d2 := []byte("torana/tool-result-content/v2")
+	ou64(uint64(len(d2)))
+	other.Write(d2)
+	ou64(3)
+	other.Write([]byte{1, 1})
+	ostr("ok")
+	other.Write([]byte{2, 1})
+	ostr("json")
+	oby([]byte(`{"v":1}`))
+	other.Write([]byte{3, 1})
+	oby([]byte(`{"type":"default"}`))
+	var osum [32]byte
+	copy(osum[:], other.Sum(nil))
+	if osum == got {
 		t.Fatal("domain frame change produced an identical digest")
+	}
+}
+
+// TestToolResultContentFingerprintLayoutSweep — per-arm and per-edge
+// behavioral pins over the binary layout: order sensitivity, empty
+// values, large payload lengths (beyond any 1-byte/2-byte framing), nil
+// element, typed-nil arm, no arm, invalid object, and domain change.
+func TestToolResultContentFingerprintLayoutSweep(t *testing.T) {
+	text := func(s string) *pbv2.ToolResultContentBlock {
+		return &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: s}}}
+	}
+	unknown := func(kind string, payload []byte) *pbv2.ToolResultContentBlock {
+		return &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_Unknown{Unknown: &pbv2.ToolResultUnknownBlock{Kind: kind, PayloadJson: payload}}}
+	}
+	cache := func(marker []byte) *pbv2.ToolResultContentBlock {
+		return &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.ToolResultCacheBreakpoint{MarkerJson: marker}}}
+	}
+
+	// Order sensitivity: [text, unknown] != [unknown, text].
+	a, err := ToolResultContentFingerprint([]*pbv2.ToolResultContentBlock{text("x"), unknown("json", []byte(`{"a":1}`))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := ToolResultContentFingerprint([]*pbv2.ToolResultContentBlock{unknown("json", []byte(`{"a":1}`)), text("x")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a == b {
+		t.Fatal("element order is not part of the digest")
+	}
+
+	// Empty values are length-framed (empty text vs absent is a distinct
+	// arm layout; an empty text string is a legal, hashable value).
+	empty, err := ToolResultContentFingerprint([]*pbv2.ToolResultContentBlock{text("")})
+	if err != nil {
+		t.Fatalf("empty text value refused: %v", err)
+	}
+	full, err := ToolResultContentFingerprint([]*pbv2.ToolResultContentBlock{text("x")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty == full {
+		t.Fatal("empty vs non-empty text hashed identically")
+	}
+
+	// Large payload length (65536 bytes) — the u64 length framing must
+	// handle values no single-byte or ASCII-decimal framing could.
+	big := []byte(`{"a":"`)
+	big = append(big, bytes.Repeat([]byte("x"), 65536-8)...) // {"a":" + x*65528 + "}
+	big = append(big, '"', '}')
+	if len(big) != 65536 {
+		t.Fatalf("payload size %d != 65536", len(big))
+	}
+	if _, err := ToolResultContentFingerprint([]*pbv2.ToolResultContentBlock{unknown("json", big)}); err != nil {
+		t.Fatalf("large payload refused: %v", err)
+	}
+
+	// Error rows (totality): nil element, typed-nil arms, no arm, invalid
+	// object payload, invalid marker.
+	for name, in := range map[string][]*pbv2.ToolResultContentBlock{
+		"nil element":        {nil},
+		"typed-nil text":     {{Kind: &pbv2.ToolResultContentBlock_Text{}}},
+		"typed-nil unknown":  {{Kind: &pbv2.ToolResultContentBlock_Unknown{}}},
+		"typed-nil cache":    {{Kind: &pbv2.ToolResultContentBlock_CacheBreakpoint{}}},
+		"no arm":             {{}},
+		"non-object payload": {unknown("json", []byte(`[1,2]`))},
+		"invalid marker":     {cache([]byte(`nope`))},
+	} {
+		if _, err := ToolResultContentFingerprint(in); err == nil {
+			t.Errorf("%s: expected an error, got a digest", name)
+		}
 	}
 }

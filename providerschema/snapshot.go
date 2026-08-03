@@ -1,110 +1,157 @@
-// Package providerschema vendors the pinned provider schema snapshot the
-// Gemini Part inventory is validated against.
+// Package providerschema vendors the pinned provider schema the SDK's
+// Part/FunctionResponse inventory is validated against.
 //
-// The snapshot is MACHINE-READABLE and REVIEWED: the inventory test in this
-// package compares the SDK's Part/FunctionResponse member tables against
-// this snapshot, so a provider schema change is only noticed after the
-// snapshot is deliberately re-vendored (see generate.sh for the update
-// workflow). A hand-written "future member" fallback is NOT an inventory.
+// The SCHEMA FACTS live in snapshot.gen.go, GENERATED from the vendored
+// artifacts (source/*.proto) by generate.go — see source/manifest.json for
+// the immutable upstream revisions (repository, commit SHA, path/URL,
+// fetch date, Apache-2.0 license) and generate.sh for the deterministic
+// update command. Ordinary tests and CI compare against the checked-in
+// generated file and the vendored bytes; they never need the network.
 //
-// Provenance (see generate.sh):
-//
-//   - Public Gemini: googleapis master, google/ai/generativelanguage/v1beta/
-//     content.proto, revision fetched 2026-08-03.
-//   - Vertex-compatible: googleapis master, google/cloud/aiplatform/v1/
-//     content.proto, revision fetched 2026-08-03.
-//
-// License provenance: both protos are from googleapis (Apache-2.0); this
-// file contains only extracted member tables, not the protos themselves.
+// This file holds the REVIEWED DECISIONS on top of those facts: which ABI
+// carrier (or explicit rejection) each schema node maps to, and the
+// agent-platform arms that are NOT part of the vendored descriptors.
+// TestSnapshotInventoryBidirectional requires the decision set to be
+// EXACTLY the generated node set in both directions, so a new provider
+// member fails until a decision is recorded and a stale decision fails
+// until it is removed.
 package providerschema
 
-// SnapshotRevision pins the exact upstream state the tables were generated
-// from. Regenerate + update this string together (generate.sh).
-const SnapshotRevision = "googleapis-master-2026-08-03"
+// SnapshotRevision pins the exact upstream state the snapshot was
+// generated from (must match source/manifest.json).
+const SnapshotRevision = "googleapis bc7e3baa28fbb223fa93782e130260fab8205bfc (generativelanguage v1beta) + fb6e47ad850029fd0c4deb96815550bd47bb42f2 (aiplatform v1) — 2026-08-03"
 
-// PartArm is one Gemini Part data arm.
-type PartArm struct {
-	// Wire member name (camelCase JSON).
-	Member string
-	// Surfaces that document this arm ("gemini", "vertex", "agent-platform").
-	Surfaces []string
+// Documented carrier decisions (markers for facts carried structurally
+// rather than by a single field).
+const (
+	// CarrierPreservedMediaPayload: the member travels inside the raw JSON
+	// payload of the media Unknown block (never narrowed: every pinned
+	// object member of the vendored shape is preserved).
+	CarrierPreservedMediaPayload = "PRESERVED-MEDIA-PAYLOAD"
+	// CarrierSignatureToken: the member is projected into the block's
+	// signature field.
+	CarrierSignatureToken = "SIGNATURE-TOKEN"
+	// CarrierPartMetadata: the member is projected into the block's
+	// part_metadata_json field.
+	CarrierPartMetadata = "PART_METADATA_CARRIER"
+	// CarrierResponseTextElement: the function response object becomes the
+	// FIRST nested Text element (single authority; exact raw bytes).
+	CarrierResponseTextElement = "RESPONSE-TEXT-ELEMENT"
+	// CarrierNestedMediaElements: the ordered function-response parts
+	// become ordered nested Unknown elements.
+	CarrierNestedMediaElements = "NESTED-MEDIA-ELEMENTS"
+	// DecisionExcludedValue: the enum value is excluded from the usable
+	// vocabulary (unknown-value handling: value-free 400 at the adapter
+	// boundary; absence stays distinct).
+	DecisionExcludedValue = "EXCLUDED-VALUE"
+)
+
+// schemaCarrierDecisions maps every generated schema node ID to its ABI
+// carrier decision. The value is a protobuf message.field, a message-level
+// carrier (the arm maps to the block as a whole), one of the documented
+// carrier markers above, or DecisionExcludedValue for enum values that are
+// deliberately unusable.
+var schemaCarrierDecisions = map[string]string{
+	// Part data arms.
+	"part.arm.text":                "torana.v2.RequestTextBlock.text",
+	"part.arm.inlineData":          "torana.v2.RequestUnknownBlock.payload_json",
+	"part.arm.fileData":            "torana.v2.RequestUnknownBlock.payload_json",
+	"part.arm.functionCall":        "torana.v2.RequestToolUseBlock",
+	"part.arm.functionResponse":    "torana.v2.RequestToolResultBlock",
+	"part.arm.executableCode":      "torana.v2.RequestUnknownBlock.payload_json",
+	"part.arm.codeExecutionResult": "torana.v2.RequestUnknownBlock.payload_json",
+	// Part ancillaries.
+	"part.ancillary.thought":          "torana.v2.RequestThinkingBlock",
+	"part.ancillary.thoughtSignature": CarrierSignatureToken,
+	"part.ancillary.videoMetadata":    CarrierPreservedMediaPayload,
+	"part.ancillary.mediaResolution":  CarrierPreservedMediaPayload,
+	"part.ancillary.partMetadata":     CarrierPartMetadata,
+	// FunctionResponse members.
+	"function-response.member.id":           "torana.v2.RequestToolResultBlock.tool_call_id",
+	"function-response.member.name":         "torana.v2.RequestToolResultBlock.tool_name",
+	"function-response.member.response":     CarrierResponseTextElement,
+	"function-response.member.parts":        CarrierNestedMediaElements,
+	"function-response.member.willContinue": "torana.v2.RequestToolResultBlock.will_continue",
+	"function-response.member.scheduling":   "torana.v2.RequestToolResultBlock.scheduling",
+	// FunctionResponsePart union arms (nested media elements).
+	"function-response-part.arm.inlineData": "torana.v2.ToolResultUnknownBlock.payload_json",
+	"function-response-part.arm.fileData":   "torana.v2.ToolResultUnknownBlock.payload_json",
+	// Nested media member objects (preserved verbatim in the nested
+	// unknown payload; never narrowed).
+	"function-response-blob.member.mimeType":         CarrierPreservedMediaPayload,
+	"function-response-blob.member.data":             CarrierPreservedMediaPayload,
+	"function-response-blob.member.displayName":      CarrierPreservedMediaPayload,
+	"function-response-file-data.member.mimeType":    CarrierPreservedMediaPayload,
+	"function-response-file-data.member.fileUri":     CarrierPreservedMediaPayload,
+	"function-response-file-data.member.displayName": CarrierPreservedMediaPayload,
+	// mediaResolution object grammar: the level member is preserved inside
+	// the media payload; the usable vocabulary excludes the UNSPECIFIED
+	// value (unknown-value handling at the adapter boundary).
+	"media-resolution.member.level":                            CarrierPreservedMediaPayload,
+	"media-resolution.level.enum.MEDIA_RESOLUTION_LOW":         "torana.v2.RequestUnknownBlock.payload_json",
+	"media-resolution.level.enum.MEDIA_RESOLUTION_MEDIUM":      "torana.v2.RequestUnknownBlock.payload_json",
+	"media-resolution.level.enum.MEDIA_RESOLUTION_HIGH":        "torana.v2.RequestUnknownBlock.payload_json",
+	"media-resolution.level.enum.MEDIA_RESOLUTION_ULTRA_HIGH":  "torana.v2.RequestUnknownBlock.payload_json",
+	"media-resolution.level.enum.MEDIA_RESOLUTION_UNSPECIFIED": DecisionExcludedValue,
+	// scheduling vocabulary: UNSPECIFIED is documented unused by the
+	// provider and receives the same value-free 400 as any unknown value;
+	// absence remains the provider default WHEN_IDLE and is distinct.
+	"scheduling.enum.SILENT":                 "torana.v2.RequestToolResultBlock.scheduling",
+	"scheduling.enum.WHEN_IDLE":              "torana.v2.RequestToolResultBlock.scheduling",
+	"scheduling.enum.INTERRUPT":              "torana.v2.RequestToolResultBlock.scheduling",
+	"scheduling.enum.SCHEDULING_UNSPECIFIED": DecisionExcludedValue,
 }
 
-// PartAncillary is one Gemini Part ancillary member.
-type PartAncillary struct {
-	// Wire member name (camelCase JSON).
-	Member string
-	// Legal carriers; empty = any Part.
-	Carriers []string
-	// Value vocabulary when the member is an enum ("MEDIA_RESOLUTION_LOW",
-	// ...), empty otherwise.
-	Vocabulary []string
+// AgentPlatformArms are Part data arms of the agent-platform surface. They
+// are NOT present in any vendored artifact (grep-verified by
+// TestAgentPlatformArmsHonest); they are a REVIEWED non-descriptor
+// decision, cited from the agent-platform surface by the reviewing round
+// (SDK_SIGNED_PART_CHECKPOINT.md §0) and carried like the other
+// future/unknown arms. A snapshot refresh must confirm them before any
+// generated table can claim descriptor provenance for them.
+var AgentPlatformArms = []SchemaNode{
+	{ID: "part.arm.toolCall", Member: "toolCall", Kind: "message", Surfaces: []string{"agent-platform"}},
+	{ID: "part.arm.toolResponse", Member: "toolResponse", Kind: "message", Surfaces: []string{"agent-platform"}},
 }
 
-// PartArms is the pinned data-arm table.
-var PartArms = []PartArm{
-	{Member: "text", Surfaces: []string{"gemini", "vertex"}},
-	{Member: "inlineData", Surfaces: []string{"gemini", "vertex"}},
-	{Member: "fileData", Surfaces: []string{"gemini", "vertex"}},
-	{Member: "functionCall", Surfaces: []string{"gemini", "vertex"}},
-	{Member: "functionResponse", Surfaces: []string{"gemini", "vertex"}},
-	{Member: "executableCode", Surfaces: []string{"gemini", "vertex"}},
-	{Member: "codeExecutionResult", Surfaces: []string{"gemini", "vertex"}},
-	// Server-side tool invocation arms (agent-platform/reasoning surfaces;
-	// not present in the two fetched protos — recorded from the reviewer-
-	// cited current contract; a snapshot refresh must confirm them).
-	{Member: "toolCall", Surfaces: []string{"agent-platform"}},
-	{Member: "toolResponse", Surfaces: []string{"agent-platform"}},
+// SchemaNodes returns the generated node set plus the reviewed
+// agent-platform arms (the complete Part surface union).
+func SchemaNodes() []SchemaNode {
+	out := make([]SchemaNode, 0, len(schemaNodes)+len(AgentPlatformArms))
+	out = append(out, schemaNodes...)
+	out = append(out, AgentPlatformArms...)
+	return out
 }
 
-// PartAncillaries is the pinned ancillary table.
-var PartAncillaries = []PartAncillary{
-	{Member: "thought", Carriers: []string{"text"}},
-	{Member: "thoughtSignature", Carriers: nil},
-	{Member: "videoMetadata", Carriers: []string{"inlineData", "fileData"}},
-	{Member: "mediaResolution", Carriers: []string{"inlineData", "fileData"},
-		Vocabulary: []string{"MEDIA_RESOLUTION_LOW", "MEDIA_RESOLUTION_MEDIUM",
-			"MEDIA_RESOLUTION_HIGH", "MEDIA_RESOLUTION_ULTRA_HIGH"}},
-	{Member: "partMetadata", Carriers: nil},
+// AgentPlatformCarrierDecisions maps the reviewed non-descriptor arms to
+// their carriers. Kept SEPARATE from schemaCarrierDecisions so the
+// bidirectional inventory over the generated nodes can never claim
+// descriptor provenance for them; TestAgentPlatformArmsHonest checks this
+// map and the artifacts' absence.
+var AgentPlatformCarrierDecisions = map[string]string{
+	"part.arm.toolCall":     "torana.v2.RequestUnknownBlock.payload_json",
+	"part.arm.toolResponse": "torana.v2.RequestUnknownBlock.payload_json",
 }
 
-// FunctionResponseMembers is the pinned FunctionResponse member table.
-// willContinue presence is meaningful; scheduling is the exact wire enum
-// string (SILENT / WHEN_IDLE / INTERRUPT; SCHEDULING_UNSPECIFIED is
-// documented unused and treated like an unknown value at the adapter
-// boundary — absence remains the provider default WHEN_IDLE).
-var FunctionResponseMembers = map[string]string{
-	"id":           "optional",
-	"name":         "required",
-	"response":     "required-object",
-	"parts":        "optional-ordered",
-	"willContinue": "optional-bool",
-	"scheduling":   "optional-enum",
-}
+// CarrierFor returns the decision for a node ID ("" when absent).
+func CarrierFor(id string) string { return schemaCarrierDecisions[id] }
 
-// SchedulingVocabulary is the pinned scheduling enum.
-var SchedulingVocabulary = []string{"SILENT", "WHEN_IDLE", "INTERRUPT"}
-
-// FunctionResponsePartArms is the pinned FunctionResponsePart sealed union.
-// The nested grammar is its OWN union — top-level Part ancillaries are NOT
-// legal inside a FunctionResponsePart.
-var FunctionResponsePartArms = []PartArm{
-	{Member: "inlineData", Surfaces: []string{"gemini", "vertex"}},
-	{Member: "fileData", Surfaces: []string{"vertex"}},
-}
-
-// FunctionResponseBlobMembers is the pinned FunctionResponseBlob table
-// (inlineData arm).
-var FunctionResponseBlobMembers = map[string]string{
-	"mimeType":    "required",
-	"data":        "required",
-	"displayName": "optional",
-}
-
-// FunctionResponseFileDataMembers is the pinned FunctionResponseFileData
-// table (fileData arm).
-var FunctionResponseFileDataMembers = map[string]string{
-	"mimeType":    "required",
-	"fileUri":     "required",
-	"displayName": "optional",
+// UsableEnumValues returns the usable vocabulary for an enum node ID
+// (e.g. "scheduling.enum." or "media-resolution.level.enum."): every value
+// in ARTIFACT order with a non-excluded decision.
+func UsableEnumValues(enumIDPrefix string) []string {
+	var order []string
+	switch enumIDPrefix {
+	case "scheduling.enum.":
+		order = schedulingArtifactOrder
+	case "media-resolution.level.enum.":
+		order = mediaResolutionLevelArtifactOrder
+	}
+	var out []string
+	for _, v := range order {
+		if schemaCarrierDecisions[enumIDPrefix+v] != DecisionExcludedValue {
+			out = append(out, v)
+		}
+	}
+	return out
 }

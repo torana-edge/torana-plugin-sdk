@@ -346,9 +346,17 @@ cc := sdk.CacheControl(msg)                   // the prefix-closing marker (nil 
 `RequestBlocksFingerprint(msg) (string, error)` is the canonical
 message-body fingerprint (kind, presence, order, identities, exact raw
 bytes, signatures, nested content, cache positions — typed length framing).
-It is ERROR-RETURNING: a nil message, a typed-nil block arm, an arm-less
-kind, or a non-strict-object payload/marker is an error, never a hash —
-callers (the host's `CachePrefixKey`, the cache-tier stickiness mirror,
+It is ERROR-RETURNING and requires an ALREADY-VALIDATED message: the
+documented precondition is `ChatRequest.ValidateReplacement`, which the
+host runs before fingerprinting. The exported fingerprint itself
+defensively revalidates only the nested tool-result content (via
+`ToolResultContentFingerprint`); top-level arguments, metadata, unknown
+payloads, and markers are NOT locally re-parsed — a caller fingerprinting
+a non-validated message with an invalid top-level JSON field does NOT get
+a local error, and must not assume it does. Errors it does report: a nil
+message, a nil block element, a typed-nil block arm, an arm-less kind, and
+the nested primitive's own object/marker failures — never a usable hash.
+Callers (the host's `CachePrefixKey`, the cache-tier stickiness mirror,
 write-grant digests) fail closed on unrepresentable input. The host's
 `CachePrefixKey` and the cache-tier stickiness mirror share this
 implementation; the plugin fingerprint never claims to reproduce

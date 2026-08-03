@@ -33,6 +33,7 @@ package plugin_sdk
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"strconv"
@@ -103,61 +104,79 @@ const toolResultContentDomainFrame = "torana/tool-result-content/v1"
 // typed-nil oneof arms are ERRORS (never an ordinary digest), and an
 // unknown payload or cache marker that is not a strict JSON object is an
 // ERROR too — even if a future caller forgets outer request validation.
-// The bytes hashed begin with the domain/version frame, then the element
-// count and each element in wire order: arm tag (1 = text, 2 = unknown,
-// 3 = cache), an arm presence byte, and the payload (text bytes, or
-// unknown kind + exact payload bytes, or cache marker exact bytes), all
-// big-endian length-prefixed.
+//
+// PREIMAGE (the approved binary layout; the ABI for the digest embedded
+// by callers, NOT an implementation detail):
+//
+//	u64be(len(domain)) || domain           // domain = "torana/tool-result-content/v1"
+//	u64be(element count)
+//	per element, in wire order:
+//	  u8 arm tag (1 = text, 2 = unknown, 3 = cache)
+//	  u8 presence byte (1)
+//	  text:    u64be(len(text))  || text
+//	  unknown: u64be(len(kind))  || kind || u64be(len(payload)) || payload
+//	  cache:   u64be(len(marker)) || marker
+//
+// All lengths/counts are fixed-width unsigned big-endian (uint64). There
+// are no textual tags or indexes inside this nested contract; order is
+// implicit in the sequence. The layout is pinned by the independent
+// golden encoder in requestblocks_test.go (TestToolResultContentFingerprint
+// BinaryLayout), which hard-codes the v1 domain literal and a fixed golden
+// digest for a fixed input — a drift in either direction fails.
 //
 // RequestBlocksFingerprint and the host write-grant verifier call THIS
 // implementation — no equivalent framing is ever re-implemented.
 func ToolResultContentFingerprint(content []*pbv2.ToolResultContentBlock) ([32]byte, error) {
 	h := sha256.New()
-	frame := func(tag, value string) {
-		h.Write([]byte(tag))
-		h.Write([]byte(strconv.Itoa(len(value))))
-		h.Write([]byte{':'})
-		h.Write([]byte(value))
+	u64 := func(v uint64) {
+		var b [8]byte
+		binary.BigEndian.PutUint64(b[:], v)
+		h.Write(b[:])
 	}
-	frameBytes := func(tag string, value []byte) {
-		frame(tag, string(value))
+	bytes := func(v []byte) {
+		u64(uint64(len(v)))
+		h.Write(v)
 	}
-	frame(toolResultContentDomainFrame, "")
-	frame("count", strconv.Itoa(len(content)))
+	str := func(v string) { bytes([]byte(v)) }
+	byte1 := func(v byte) { h.Write([]byte{v}) }
+
+	domain := []byte(toolResultContentDomainFrame)
+	u64(uint64(len(domain)))
+	h.Write(domain)
+	u64(uint64(len(content)))
 	for j, c := range content {
-		frame("nested", strconv.Itoa(j))
 		if c == nil {
 			return [32]byte{}, fmt.Errorf("tool-result content[%d]: nil element", j)
 		}
 		switch nk := c.Kind.(type) {
 		case *pbv2.ToolResultContentBlock_Text:
-			frame("nkind", "text")
+			byte1(1) // arm tag: text
 			if nk.Text == nil {
 				return [32]byte{}, fmt.Errorf("tool-result content[%d]: typed-nil text arm", j)
 			}
-			frame("presence", "1")
-			frame("text", nk.Text.Text)
+			byte1(1) // presence
+			str(nk.Text.Text)
 		case *pbv2.ToolResultContentBlock_Unknown:
-			frame("nkind", "unknown")
+			byte1(2) // arm tag: unknown
 			if nk.Unknown == nil {
 				return [32]byte{}, fmt.Errorf("tool-result content[%d]: typed-nil unknown arm", j)
 			}
-			frame("presence", "1")
-			frame("kind", nk.Unknown.Kind)
+			byte1(1) // presence
+			str(nk.Unknown.Kind)
 			if err := validateStrictObject(nk.Unknown.PayloadJson); err != nil {
 				return [32]byte{}, fmt.Errorf("tool-result content[%d]: unknown payload: %w", j, err)
 			}
-			frameBytes("payload", nk.Unknown.PayloadJson)
+			bytes(nk.Unknown.PayloadJson)
 		case *pbv2.ToolResultContentBlock_CacheBreakpoint:
-			frame("nkind", "cache")
+			byte1(3) // arm tag: cache
 			if nk.CacheBreakpoint == nil {
 				return [32]byte{}, fmt.Errorf("tool-result content[%d]: typed-nil cache arm", j)
 			}
-			frame("presence", "1")
+			byte1(1) // presence
 			if err := validateStrictObject(nk.CacheBreakpoint.MarkerJson); err != nil {
 				return [32]byte{}, fmt.Errorf("tool-result content[%d]: cache marker: %w", j, err)
 			}
-			frameBytes("marker", nk.CacheBreakpoint.MarkerJson)
+			bytes(nk.CacheBreakpoint.MarkerJson)
 		default:
 			return [32]byte{}, fmt.Errorf("tool-result content[%d]: no oneof arm", j)
 		}

@@ -1,23 +1,53 @@
 #!/bin/sh
 # generate.sh — deterministic re-vendoring of the provider schema snapshot.
 #
-# Update workflow (documented, deliberate):
-#   1. Review the upstream member changes against the two pinned protos:
-#        https://raw.githubusercontent.com/googleapis/googleapis/master/google/ai/generativelanguage/v1beta/content.proto
-#        https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/aiplatform/v1/content.proto
-#   2. Edit snapshot.go to reflect the reviewed tables, record the new fetch
-#      date in SnapshotRevision, and re-run:
-#        ./generate.sh
-#   3. The inventory test (snapshot_test.go) must pass offline; commit the
-#      snapshot and the test change together.
+# The checked-in authority is snapshot.gen.go, GENERATED from the vendored
+# artifacts in source/ (never a hand-written mirror). This script
 #
-# The snapshot is the source of truth for OFFLINE tests and CI — the test
-# never needs the network. This script only prints the expected commands;
-# the tables themselves are reviewed by a human before being committed.
+#   1. verifies the vendored artifacts against source/manifest.json digests,
+#   2. regenerates snapshot.gen.go,
+#   3. proves determinism (two renders, byte-identical),
+#   4. runs the offline suite.
+#
+# Update workflow (documented, deliberate):
+#
+#   1. Fetch the new upstream protos at their EXACT commit SHAs and replace
+#      the vendored files + manifest entries (upstream_commit_sha, path,
+#      url, sha256, fetched_at). Never pin a moving branch: the SHA is the
+#      immutable input.
+#   2. Run ./generate.sh. The parser is strict: materially different
+#      upstream syntax surfaces as a parse error — a reviewed act, never a
+#      silent parse.
+#   3. Review the snapshot.gen.go diff (the schema facts), then commit the
+#      artifacts, manifest, generated file, and any decision changes in
+#      snapshot.go together.
+#
+# Adversarial pins enforced by the offline tests (no network):
+#   - changing a vendored artifact without re-vendoring the manifest digest
+#     fails TestSnapshotArtifactDigestsPinned;
+#   - changing the manifest SHA/digest without regenerating fails
+#     TestSnapshotGeneratedExact (provenance header + bytes);
+#   - the update command is byte-identical across runs (determinism proof
+#     below + TestSnapshotGeneratedExact re-renders in memory).
 set -eu
-echo "provider schema snapshot regeneration (reviewed, offline):"
-echo "  1. fetch and review:"
-echo "     curl -sL https://raw.githubusercontent.com/googleapis/googleapis/master/google/ai/generativelanguage/v1beta/content.proto"
-echo "     curl -sL https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/aiplatform/v1/content.proto"
-echo "  2. update snapshot.go tables + SnapshotRevision"
-echo "  3. go test ./providerschema/ (offline)"
+cd "$(dirname "$0")"
+
+tmp1=$(mktemp)
+tmp2=$(mktemp)
+trap 'rm -f "$tmp1" "$tmp2"' EXIT
+
+echo "generate: pass 1"
+GOWORK=off go run generate.go
+cp snapshot.gen.go "$tmp1"
+
+echo "generate: pass 2 (determinism)"
+GOWORK=off go run generate.go
+cp snapshot.gen.go "$tmp2"
+if ! cmp -s "$tmp1" "$tmp2"; then
+  echo "generate: FAIL — two renders are not byte-identical" >&2
+  exit 1
+fi
+
+echo "generate: offline suite"
+GOWORK=off go test ./...
+echo "generate: ok — snapshot.gen.go regenerated deterministically"
