@@ -954,9 +954,14 @@ func stripTrailingComment(text string) (string, error) {
 }
 
 // isCompleteOptionTail checks that a comment-free option tail is
-// structurally complete: a BALANCED bracket group (strings skipped, so a
-// `]` inside a quoted value is legal) ending with `];`. An unclosed
-// `[json_name = "x";` or a missing `;` fails.
+// structurally complete: EXACTLY ONE root bracket group whose matching
+// close is the final non-whitespace token before `;`. Once the root
+// closes, only whitespace may follow — a trailing token (`[json_name =
+// "x"] invented;`) or a second bracket group (`[json_name =
+// "x"][deprecated = true];`) is rejected. A close that drives depth
+// negative and a root that never closes are rejected. Brackets inside
+// quoted strings are skipped, so a `]` inside a quoted json_name is
+// legal.
 func isCompleteOptionTail(tail string) bool {
 	t := strings.TrimSpace(tail)
 	if !strings.HasSuffix(t, ";") {
@@ -968,6 +973,7 @@ func isCompleteOptionTail(tail string) bool {
 	}
 	depth := 0
 	inString := false
+	closed := false
 	for i := 0; i < len(t); i++ {
 		c := t[i]
 		if inString {
@@ -982,10 +988,23 @@ func isCompleteOptionTail(tail string) bool {
 		case '"':
 			inString = true
 		case '[':
+			if closed {
+				return false // a second bracket group after the root closed
+			}
 			depth++
 		case ']':
 			depth--
+			if depth < 0 {
+				return false // a close before any open
+			}
+			if depth == 0 {
+				closed = true
+			}
+		default:
+			if closed {
+				return false // a token after the root closed
+			}
 		}
 	}
-	return !inString && depth == 0
+	return !inString && depth == 0 && closed
 }

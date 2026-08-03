@@ -549,10 +549,17 @@ func TestSyntheticRound5TailPins(t *testing.T) {
 	if len(ns) != 2 {
 		t.Fatalf("inline option + comment consumed the next line: %d nodes", len(ns))
 	}
+	// NON-VACUOUS json_name assertion: exactly ONE node must carry the
+	// declared wire member AND its ID. If the parser silently derived the
+	// default member instead, the count is zero and the test fails.
+	honored := 0
 	for _, n := range ns {
-		if n.Member == "xw" && n.ID != "part.ancillary.xw" {
-			t.Fatalf("json_name not honored with comment: %+v", n)
+		if n.Member == "xw" && n.ID == "part.ancillary.xw" {
+			honored++
 		}
+	}
+	if honored != 1 {
+		t.Fatalf("json_name not honored with comment: honored=%d nodes=%+v", honored, ns)
 	}
 
 	// (e) `//` INSIDE a quoted option string is not a comment delimiter
@@ -572,5 +579,73 @@ func TestSyntheticRound5TailPins(t *testing.T) {
 }`
 	if _, err := partNodes(SurfaceGemini, partOf(t, unterminated)); err == nil {
 		t.Fatal("unterminated quoted string in an option accepted")
+	}
+}
+
+// TestSyntheticRound6OptionTailPins (finding round 6): option tails must
+// be EXACTLY one root bracket group — trailing garbage and a second
+// bracket group are rejected; a `]` inside a quoted json_name and the
+// trailing-comment form are positive controls.
+func TestSyntheticRound6OptionTailPins(t *testing.T) {
+	partOf := func(t *testing.T, full string) string {
+		t.Helper()
+		body, ok, err := extractMessage(full, "Part")
+		if err != nil || !ok {
+			t.Fatalf("synthetic: ok=%v err=%v", ok, err)
+		}
+		return body
+	}
+	reject := func(name, full string) {
+		t.Helper()
+		if _, err := partNodes(SurfaceGemini, partOf(t, full)); err == nil {
+			t.Fatalf("%s accepted", name)
+		}
+	}
+
+	// Trailing garbage after the root close.
+	reject("trailing garbage", `message Part {
+  string x = 1 [json_name = "x"] invented;
+}`)
+	// A second bracket group after the root close.
+	reject("second bracket group", `message Part {
+  string x = 1 [json_name = "x"][deprecated = true];
+}`)
+	// A close before any open.
+	reject("close before open", `message Part {
+  string x = 1 ]foo];
+}`)
+	// The root never closes.
+	reject("unclosed root", `message Part {
+  string x = 1 [json_name = "x";
+}`)
+
+	// Positive control: a `]` inside a QUOTED json_name is legal.
+	ns, err := partNodes(SurfaceGemini, partOf(t, `message Part {
+  string x = 1 [json_name = "a]b"];
+}`))
+	if err != nil {
+		t.Fatalf("] inside a quoted json_name refused: %v", err)
+	}
+	honored := 0
+	for _, n := range ns {
+		if n.Member == "a]b" && n.ID == "part.ancillary.a]b" {
+			honored++
+		}
+	}
+	if honored != 1 {
+		t.Fatalf("] inside a quoted json_name not honored: %+v", ns)
+	}
+
+	// Positive control: the trailing-comment form still parses and the
+	// following field is not consumed.
+	ns, err = partNodes(SurfaceGemini, partOf(t, `message Part {
+  string x = 1 [json_name = "xw"]; // note
+  string y = 2;
+}`))
+	if err != nil {
+		t.Fatalf("trailing-comment form refused: %v", err)
+	}
+	if len(ns) != 2 {
+		t.Fatalf("trailing-comment form consumed the next line: %d nodes", len(ns))
 	}
 }
