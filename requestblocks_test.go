@@ -5,7 +5,10 @@ package plugin_sdk
 // that forces a decision for additive block fields.
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"fmt"
+	"strconv"
 	"testing"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -324,5 +327,80 @@ func TestRequestFingerprintCoverageRejectsStaleField(t *testing.T) {
 	stale := append(append([]string{}, fingerprintFieldCoverage...), "torana.v2.RequestTextBlock.removed_field")
 	if err := checkFingerprintInventory(stale); err == nil {
 		t.Fatal("stale same-prefix fingerprint declaration was not caught")
+	}
+}
+
+// TestToolResultContentFingerprintReferenceFrame — the framing layout is
+// executable: an INDEPENDENT byte-level reference encoder (never calling
+// the SDK fingerprint) must produce the exact same digest for a fixed
+// input. This pins the layout (domain frame, count, per-element arm tag +
+// presence + length-prefixed payload) against re-implementations drifting
+// in either direction. The domain/version frame is part of the hashed
+// bytes: a different frame string is a DIFFERENT digest (domain-crossing
+// negative below).
+func TestToolResultContentFingerprintReferenceFrame(t *testing.T) {
+	content := []*pbv2.ToolResultContentBlock{
+		{Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: "ok"}}},
+		{Kind: &pbv2.ToolResultContentBlock_Unknown{Unknown: &pbv2.ToolResultUnknownBlock{Kind: "json", PayloadJson: []byte(`{"v":1}`)}}},
+		{Kind: &pbv2.ToolResultContentBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.ToolResultCacheBreakpoint{MarkerJson: []byte(`{"type":"default"}`)}}},
+	}
+
+	// Reference encoder: identical layout, independent code (literal
+	// big-endian decimal length framing, no shared helpers).
+	frame := func(tag, value string) []byte {
+		return []byte(tag + strconv.Itoa(len(value)) + ":" + value)
+	}
+	want := sha256.New()
+	want.Write(frame(toolResultContentDomainFrame, ""))
+	want.Write(frame("count", "3"))
+	for j, c := range content {
+		want.Write(frame("nested", strconv.Itoa(j)))
+		switch c.Kind.(type) {
+		case *pbv2.ToolResultContentBlock_Text:
+			want.Write(frame("nkind", "text"))
+			want.Write(frame("presence", "1"))
+			want.Write(frame("text", "ok"))
+		case *pbv2.ToolResultContentBlock_Unknown:
+			want.Write(frame("nkind", "unknown"))
+			want.Write(frame("presence", "1"))
+			want.Write(frame("kind", "json"))
+			want.Write(frame("payload", string([]byte(`{"v":1}`))))
+		case *pbv2.ToolResultContentBlock_CacheBreakpoint:
+			want.Write(frame("nkind", "cache"))
+			want.Write(frame("presence", "1"))
+			want.Write(frame("marker", string([]byte(`{"type":"default"}`))))
+		}
+	}
+	wantSum := want.Sum(nil)
+
+	got, err := ToolResultContentFingerprint(content)
+	if err != nil {
+		t.Fatalf("fingerprint: %v", err)
+	}
+	if !bytes.Equal(got[:], wantSum) {
+		t.Fatalf("reference frame mismatch:\n got %x\nwant %x", got, wantSum)
+	}
+
+	// Domain-crossing negative: the same content under a DIFFERENT domain
+	// frame is a different digest.
+	other := sha256.New()
+	other.Write(frame("torana/tool-result-content/v2", ""))
+	other.Write(frame("count", "3"))
+	other.Write(wantSum[0:0]) // nothing; the negative only needs the frame delta
+	other.Write(frame("nested", "0"))
+	other.Write(frame("nkind", "text"))
+	other.Write(frame("presence", "1"))
+	other.Write(frame("text", "ok"))
+	other.Write(frame("nested", "1"))
+	other.Write(frame("nkind", "unknown"))
+	other.Write(frame("presence", "1"))
+	other.Write(frame("kind", "json"))
+	other.Write(frame("payload", string([]byte(`{"v":1}`))))
+	other.Write(frame("nested", "2"))
+	other.Write(frame("nkind", "cache"))
+	other.Write(frame("presence", "1"))
+	other.Write(frame("marker", string([]byte(`{"type":"default"}`))))
+	if bytes.Equal(other.Sum(nil), got[:]) {
+		t.Fatal("domain frame change produced an identical digest")
 	}
 }
