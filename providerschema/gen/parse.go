@@ -158,10 +158,18 @@ var mapFieldRe = regexp.MustCompile(`^\s*map<\s*([\w.]+)\s*,\s*([\w.]+)\s*>\s+(\
 // Option continuation line (wrapped field options end with `;`).
 var optionLineRe = regexp.MustCompile(`^\s*(\[[^\]]*\])\s*;?\s*$`)
 
-var closeBraceRe = regexp.MustCompile(`^\s*}`)
+// closeLineRe is the FULL-LINE oneof/message close rule: a line that is
+// not exactly `}` (plus optional trailing comment) is NOT a close — a
+// `} invented_field = 9;` line must error, never silently drop its tail.
+var closeLineRe = regexp.MustCompile(`^\s*}\s*(//.*)?$`)
 
 var behaviorRe = regexp.MustCompile(`google\.api\.field_behavior\)\s*=\s*(\w+)`)
-var jsonNameRe = regexp.MustCompile(`json_name\s*=\s*"([^"]+)"`)
+
+// jsonNamePresenceRe detects ANY json_name mention; the VALUE is then
+// validated separately so empty/duplicate/malformed spellings can never
+// fall back to the derived name.
+var jsonNamePresenceRe = regexp.MustCompile(`json_name`)
+var jsonNameRe = regexp.MustCompile(`json_name\s*=\s*"([^"]*)"`)
 
 // commentLineRe matches blank/comment lines (skipped by the accounting).
 var commentLineRe = regexp.MustCompile(`^\s*(//.*)?$`)
@@ -190,11 +198,19 @@ func parseFieldOptions(opt string) (FieldBehavior, string, error) {
 		}
 	}
 	jsonName := ""
-	if m := jsonNameRe.FindStringSubmatch(opt); m != nil {
-		jsonName = m[1]
-		if jsonName == "" {
+	mentions := jsonNamePresenceRe.FindAllStringIndex(opt, -1)
+	if len(mentions) > 1 {
+		return "", "", fmt.Errorf("duplicate json_name in options %q", opt)
+	}
+	if len(mentions) == 1 {
+		m := jsonNameRe.FindStringSubmatch(opt)
+		if m == nil {
+			return "", "", fmt.Errorf("malformed json_name in options %q (expected json_name = \"...\")", opt)
+		}
+		if m[1] == "" {
 			return "", "", fmt.Errorf("empty json_name in options %q", opt)
 		}
+		jsonName = m[1]
 	}
 	return fb, jsonName, nil
 }
@@ -285,8 +301,8 @@ func messageFields(body string) ([]fieldDesc, error) {
 		if m := oneofRe.FindStringSubmatch(line); m != nil {
 			continue // handled by the interval pass
 		}
-		if closeBraceRe.MatchString(line) {
-			continue // oneof/message close
+		if closeLineRe.MatchString(line) {
+			continue // full-line oneof/message close (tail must be a comment)
 		}
 		// Wrapped-option continuation from the previous field line.
 		if optionLineRe.MatchString(line) {
@@ -299,7 +315,8 @@ func messageFields(body string) ([]fieldDesc, error) {
 		// the plain regex cannot parse), then plain fields.
 		if m := mapFieldRe.FindStringSubmatch(line); m != nil {
 			// Maps cannot carry repeated/optional prefixes; the prefix is "".
-			f, consumed, err := parseFieldLine(line, lines[i+1:], m[3], m[4], "map<"+m[1]+","+m[2]+">", "", false)
+			tail := line[len(m[0]):]
+			f, consumed, err := parseFieldLine(line, tail, lines[i+1:], m[3], m[4], "map<"+m[1]+","+m[2]+">", "")
 			if err != nil {
 				return nil, err
 			}
@@ -309,7 +326,8 @@ func messageFields(body string) ([]fieldDesc, error) {
 			continue
 		}
 		if m := fieldHeadRe.FindStringSubmatch(line); m != nil {
-			f, consumed, err := parseFieldLine(line, lines[i+1:], m[3], m[4], m[2], m[1], true)
+			tail := line[len(m[0]):]
+			f, consumed, err := parseFieldLine(line, tail, lines[i+1:], m[3], m[4], m[2], m[1])
 			if err != nil {
 				return nil, err
 			}
@@ -345,7 +363,7 @@ func lineOffset(text string, lines []string, idx int) int {
 // number the field number. The tail after the number must be `;`, a
 // bracketed option list, or a wrapped option continuation — anything
 // else is a stable error.
-func parseFieldLine(line string, rest []string, name, number, typ, prefix string, isPlain bool) (fieldDesc, int, error) {
+func parseFieldLine(line string, tail string, rest []string, name, number, typ, prefix string) (fieldDesc, int, error) {
 	f := fieldDesc{
 		Repeated:      strings.Contains(prefix, "repeated"),
 		Optional:      strings.Contains(prefix, "optional"),
@@ -354,15 +372,12 @@ func parseFieldLine(line string, rest []string, name, number, typ, prefix string
 		Number:        number,
 		FieldBehavior: BehaviorUnspecified,
 	}
-	numIdx := strings.LastIndex(line, number)
-	if numIdx < 0 {
-		return fieldDesc{}, 0, fmt.Errorf("field %s: number %s not found in %q", name, number, line)
-	}
-	restOf := strings.TrimSpace(line[numIdx+len(number):])
+	_ = line
 	consumed := 0
 	optText := ""
+	restOf := strings.TrimSpace(tail)
 	switch {
-	case restOf == "" || restOf == ";":
+	case restOf == "" || restOf == ";" || isCommentTail(restOf):
 		// No options on the head line — but a WRAPPED option may begin on
 		// the next line (`= 6\n    [(google.api.field_behavior) = ...];`).
 		if len(rest) > 0 && optionLineRe.MatchString(strings.TrimSpace(rest[0])) {
@@ -374,8 +389,13 @@ func parseFieldLine(line string, rest []string, name, number, typ, prefix string
 			}
 		}
 	case strings.HasPrefix(restOf, "["):
+		// Structural completeness: the option must be a BALANCED bracket
+		// group ending with `];` (a trailing comment after `;` is fine).
+		if !isCompleteOptionTail(restOf) {
+			return fieldDesc{}, 0, fmt.Errorf("field %s: structurally incomplete option tail %q", name, restOf)
+		}
 		optText = restOf
-		if !strings.HasSuffix(optText, ";") {
+		if !strings.HasSuffix(strings.TrimSpace(optText), ";") {
 			// Wrapped option list: consume continuation lines until one
 			// ends with ';'.
 			for consumed < len(rest) {
@@ -389,7 +409,7 @@ func parseFieldLine(line string, rest []string, name, number, typ, prefix string
 					break
 				}
 			}
-			if !strings.HasSuffix(optText, ";") {
+			if !strings.HasSuffix(strings.TrimSpace(optText), ";") {
 				return fieldDesc{}, 0, fmt.Errorf("field %s: unterminated wrapped option", name)
 			}
 		}
@@ -865,4 +885,28 @@ func SyntheticPartArms(full string) (map[string]bool, error) {
 		out[n.ID] = true
 	}
 	return out, nil
+}
+
+// isCompleteOptionTail checks that an inline option tail is structurally
+// complete: a BALANCED bracket group ending with `];` (a trailing comment
+// is allowed). An unclosed `[json_name = "x";` or a missing `;` fails.
+func isCompleteOptionTail(tail string) bool {
+	t := strings.TrimSpace(tail)
+	// Strip a trailing comment first.
+	if i := strings.Index(t, "//"); i >= 0 {
+		t = strings.TrimSpace(t[:i])
+	}
+	if !strings.HasSuffix(t, ";") {
+		return false
+	}
+	t = strings.TrimSpace(t[:len(t)-1])
+	if !strings.HasPrefix(t, "[") || !strings.HasSuffix(t, "]") {
+		return false
+	}
+	return strings.Count(t, "[") == 1 && strings.Count(t, "]") == 1
+}
+
+// isCommentTail reports a tail that is only whitespace + a comment.
+func isCommentTail(tail string) bool {
+	return commentLineRe.MatchString(strings.TrimSpace(tail))
 }

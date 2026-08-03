@@ -11,7 +11,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -86,31 +88,40 @@ func decodeManifest(raw []byte) (*Manifest, error) {
 	var trailing any
 	if err := dec.Decode(&trailing); err == nil {
 		return nil, fmt.Errorf("parse vendored manifest: trailing JSON after the manifest object")
-	} else if err.Error() != "EOF" {
+	} else if !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parse vendored manifest: %w", err)
 	}
 	return &m, nil
 }
 
-// rejectDuplicateKeys walks the JSON token stream and rejects duplicate
-// object keys at any depth (json.Unmarshal would silently keep the last).
+// rejectDuplicateKeys walks the ENTIRE JSON token stream (recursively,
+// including objects nested inside arrays) and rejects duplicate object
+// keys at every depth. json.Unmarshal would silently keep the last
+// occurrence; a duplicate SHA/path/URL/date inside files[] must fail.
+// Decoded keys collide as encoding/json sees them, so escape-equivalent
+// spellings (e.g. "a\u0062c" vs "abc") are the same member.
 func rejectDuplicateKeys(raw []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
-	for {
-		tok, err := dec.Token()
-		if err != nil {
-			if err.Error() == "EOF" {
-				return nil
-			}
-			return err
+	return walkTokens(dec, 0)
+}
+
+// walkTokens consumes one JSON value and checks every object for
+// duplicate keys. depth is the bracket nesting for error context.
+func walkTokens(dec *json.Decoder, depth int) error {
+	tok, err := dec.Token()
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
 		}
-		if _, ok := tok.(json.Delim); !ok {
-			continue
-		}
-		if delim, ok := tok.(json.Delim); !ok || delim != '{' {
-			continue
-		}
+		return err
+	}
+	delim, ok := tok.(json.Delim)
+	if !ok {
+		return nil // scalar value: nothing to check
+	}
+	switch delim {
+	case '{':
 		seen := map[string]bool{}
 		for dec.More() {
 			keyTok, err := dec.Token()
@@ -122,40 +133,24 @@ func rejectDuplicateKeys(raw []byte) error {
 				return fmt.Errorf("non-string object key %v", keyTok)
 			}
 			if seen[key] {
-				return fmt.Errorf("duplicate object key %q", key)
+				return fmt.Errorf("duplicate object key %q at depth %d", key, depth)
 			}
 			seen[key] = true
-			if err := skipValue(dec); err != nil {
+			if err := walkTokens(dec, depth+1); err != nil {
 				return err
 			}
 		}
-		if _, err := dec.Token(); err != nil {
-			return err
-		}
-	}
-}
-
-// skipValue consumes one JSON value from the decoder.
-func skipValue(dec *json.Decoder) error {
-	tok, err := dec.Token()
-	if err != nil {
+		// Consume the closing '}'.
+		_, err := dec.Token()
 		return err
-	}
-	if _, ok := tok.(json.Delim); ok {
-		depth := 1
-		for depth > 0 {
-			t, err := dec.Token()
-			if err != nil {
+	case '[':
+		for dec.More() {
+			if err := walkTokens(dec, depth+1); err != nil {
 				return err
 			}
-			if d, ok := t.(json.Delim); ok {
-				if d == '{' || d == '[' {
-					depth++
-				} else {
-					depth--
-				}
-			}
 		}
+		_, err := dec.Token()
+		return err
 	}
 	return nil
 }

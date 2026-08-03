@@ -404,3 +404,81 @@ func TestSyntheticEnumFailClosed(t *testing.T) {
 		t.Fatal("semicolon-less enum declaration accepted")
 	}
 }
+
+// TestSyntheticFullLineConsumptionPins (finding 2, round 4): the strict
+// scanner must reject every escape from the line-accounting invariant.
+func TestSyntheticFullLineConsumptionPins(t *testing.T) {
+	partOf := func(t *testing.T, full string) string {
+		t.Helper()
+		body, ok, err := extractMessage(full, "Part")
+		if err != nil || !ok {
+			t.Fatalf("synthetic: ok=%v err=%v", ok, err)
+		}
+		return body
+	}
+
+	// (a) A close line with a trailing declaration is NOT a close: the
+	// tail must not disappear. The line sits INSIDE the oneof so the
+	// message extraction cannot truncate the body at it.
+	tailEscape := `message Part {
+  oneof data {
+    string text = 1;
+    } invented_field = 9;
+  }
+}`
+	if _, err := partNodes(SurfaceGemini, partOf(t, tailEscape)); err == nil {
+		t.Fatal("`} invented_field = 9;` accepted (close-line tail escaped)")
+	}
+
+	// (b) An EMPTY json_name is a stable error, never a fallback to the
+	// derived name.
+	emptyName := `message Part {
+  string text = 1 [json_name = ""];
+}`
+	if _, err := partNodes(SurfaceGemini, partOf(t, emptyName)); err == nil {
+		t.Fatal("empty json_name accepted")
+	}
+
+	// (c) An inline option tail with an UNCLOSED bracket is a stable
+	// error, never accepted as `[ ... ;`.
+	unclosed := `message Part {
+  string text = 1 [json_name = "x";
+}`
+	if _, err := partNodes(SurfaceGemini, partOf(t, unclosed)); err == nil {
+		t.Fatal("unclosed option bracket accepted")
+	}
+
+	// (d) A digit-bearing json_name with a single-digit field number must
+	// parse to the DECLARED wire member (the old LastIndex search would
+	// mis-slice on the digits inside the option).
+	digitName := `message FunctionResponse {
+  string request_id = 1 [json_name = "v1"];
+}`
+	body, ok, err := extractMessage(digitName, "FunctionResponse")
+	if err != nil || !ok {
+		t.Fatalf("digitName synthetic: ok=%v err=%v", ok, err)
+	}
+	ns, err := memberNodes("function-response", false, SurfaceGemini, body)
+	if err != nil {
+		t.Fatalf("digit-bearing json_name refused: %v", err)
+	}
+	if len(ns) != 1 || ns[0].Member != "v1" {
+		t.Fatalf("json_name not honored: %+v", ns)
+	}
+
+	// (e) A duplicated json_name is a stable error.
+	dupName := `message Part {
+  string text = 1 [json_name = "a", json_name = "b"];
+}`
+	if _, err := partNodes(SurfaceGemini, partOf(t, dupName)); err == nil {
+		t.Fatal("duplicate json_name accepted")
+	}
+
+	// (f) A malformed json_name (no quoted value) is a stable error.
+	malformed := `message Part {
+  string text = 1 [json_name = unquoted];
+}`
+	if _, err := partNodes(SurfaceGemini, partOf(t, malformed)); err == nil {
+		t.Fatal("malformed json_name accepted")
+	}
+}

@@ -242,6 +242,28 @@ func TestManifestStrictDecodeRows(t *testing.T) {
 	if _, err := LoadManifestFrom(writeRaw(t, trailing)); err == nil {
 		t.Fatal("trailing JSON accepted")
 	}
+	// Nested duplicates: a duplicate field INSIDE one files[] entry (the
+	// SHA/path/URL/date authority) must fail.
+	nested := string(raw(valid()))
+	nested = strings.Replace(nested,
+		`"local":"generativelanguage-v1beta-content.proto"`,
+		`"local":"generativelanguage-v1beta-content.proto","local":"x"`, 1)
+	if _, err := LoadManifestFrom(writeRaw(t, nested)); err == nil {
+		t.Fatal("duplicate key inside a files[] entry accepted")
+	}
+	// Duplicates inside an object nested THROUGH an array (array element
+	// object keys) must fail.
+	throughArray := `{"fetched_at":"2026-08-03","license":"l","upstream":"https://github.com/googleapis/googleapis",
+  "files":[{"local":"a","local":"b"}]}`
+	if _, err := LoadManifestFrom(writeRaw(t, throughArray)); err == nil {
+		t.Fatal("duplicate key in an array-nested object accepted")
+	}
+	// Escape-equivalent keys collide: "li\u0063ense" decodes to "license",
+	// which is already present.
+	escaped := strings.Replace(string(raw(valid())), `"license":"Apache-2.0 (googleapis)"`, `"license":"Apache-2.0 (googleapis)","li\u0063ense":"x"`, 1)
+	if _, err := LoadManifestFrom(writeRaw(t, escaped)); err == nil {
+		t.Fatal("escape-equivalent duplicate key accepted")
+	}
 	// The valid manifest still passes.
 	p := writeManifest(t, valid())
 	if _, err := LoadManifestFrom(p); err != nil {
