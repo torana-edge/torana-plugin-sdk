@@ -182,18 +182,21 @@ Provider prompt caching bills cached input tokens at ~10% of full price — it i
 the single biggest cost lever an agent session has, and a plugin can silently
 destroy it. Two rules keep a plugin compliant:
 
-**1. Never strip cache breakpoints.** `Message.cache_control_json` and
-`ToolDef.cache_control_json` carry the client's cache markers (Anthropic
-`cache_control`, Bedrock `cachePoint`) through the plugin boundary. They
+**1. Never strip cache breakpoints.** Cache markers are `RequestCacheBreakpoint`
+blocks at explicit positions in the ordered message body (Anthropic
+`cache_control`, Bedrock `cachePoint` both project to positional blocks);
+`ToolDef.cache_control_json` carries the tool-definition marker. Markers
 survive automatically — a plugin that returns a request keeps them without
 doing anything. But a plugin that *restructures* messages (splits, merges,
 reorders, drops) must carry the marker to the equivalent position in its
-output. The SDK helpers do this:
+output. The SDK helpers do this positionally:
 
 ```go
-cc := sdk.CacheControl(msg)          // read a message's breakpoint (nil if none)
-sdk.SetCacheBreakpoint(msg, cc)      // attach / clear one
-sdk.MoveCacheBreakpoint(from, to)    // transfer when merging messages
+views := sdk.CacheBreakpoints(msg)        // copied views incl. block positions
+sdk.SetCacheBreakpoint(msg, pos, marker)  // replace at an explicit position
+sdk.AddCacheBreakpoint(msg, at, marker)   // insert at a position
+sdk.DeleteCacheBreakpoint(msg, pos)       // remove
+cc := sdk.CacheControl(msg)               // read the prefix-closing marker (nil if none)
 ```
 
 **2. Be deterministic over the cacheable prefix.** Everything before the last
@@ -247,27 +250,44 @@ only ever sees canonical shapes.
 Executable field table (see `pb/v2/request_validate.go` for the normative
 implementation):
 
+The message body is the ordered `RequestBlock` sequence (`Message.blocks`) —
+the SOLE authority for every content fact; there are no competing flat
+fields. Absolute structural rules only (no accepted-request inference);
+relational provenance (signature binding, grants, host-owned facts) is the
+host verifier's layer.
+
 | Field | Rule |
 |---|---|
 | `torana_meta_json` | SDK ABSOLUTE rule: absent or strict JSON object. The SDK cannot prove immutability — it has no accepted request to compare against; see the HOST RELATIONAL rule below. |
 | `provider_extensions_json` | absent or JSON object |
 | `safety_settings_json` | absent or JSON **array** (Gemini shape) |
-| `Message.content_parts_json` | absent or JSON array |
-| `Message.cache_control_json` | absent or JSON object |
-| `ToolCall.arguments_json` | REQUIRED non-empty JSON object per present call (`{}` is the canonical no-arguments shape) |
+| `Message.role` | non-empty UTF-8 (catch-all stays open) |
+| `Message.blocks` | at least one block; nil elements refused |
+| `RequestTextBlock.text` | UTF-8; explicit empty is a first-class arm |
+| `RequestTextBlock.signature` / `RequestThinkingBlock.signature` | UTF-8; provenance-governed (unchanged signature over changed covered content = stale, cleared-over-changed = allowed, cleared-over-unchanged = dropped/rejected, added/changed/reused = rejected — the host verifier's matrix) |
+| `RequestToolUseBlock` | non-empty `id`, non-empty `name`, REQUIRED object `arguments_json` (`{}` canonical), provenance-governed `signature` |
+| `RequestToolResultBlock` | non-empty `tool_call_id`, optional `tool_name`, NON-EMPTY ordered NESTED `content` (one explicit empty text element is the canonical empty-result spelling; an empty list is refused). `ToolResultContentBlock`: text/unknown/cache only |
+| `RequestCacheBreakpoint.marker_json` | REQUIRED JSON object; positional (closes the cached prefix at its position) |
+| `RequestUnknownBlock` | non-empty provider `kind` + REQUIRED strict JSON object `payload_json`. The kind-specific projection invariant (no discriminant / canonical cache member inside the payload) is the PROVIDER ADAPTER's marshal validator — an executable edge obligation; the SDK has no provider vocabulary to prove it |
+| `RequestTrailingSignatureBlock` | non-empty token, assistant-only, FINAL block |
 | `ToolDef.parameters_json` | REQUIRED non-empty JSON object per present definition (`{}` is a valid unconstrained schema; empty bytes are not) |
 | `ToolDef.cache_control_json` | absent or JSON object |
 
 Universal rules:
 
-- no nil nested messages, tool calls, or tool definitions (an adversarial
-  guest must not be able to crash the verifier);
-- unknown protobuf fields are refused at the request, message, tool-call,
-  and tool-definition levels (the contract is closed);
-- `ToolCall.id` and `ToolCall.name` are non-empty in the REQUEST context;
-  `ToolDef.name` is non-empty. Anonymous RESPONSE tool calls are exempt from
-  the id rule: response ids are host-owned and may legitimately be absent
-  (their own `ToolCall.Validate` governs them);
+- no nil nested messages, blocks, oneof arms, or tool definitions (typed-nil
+  wrappers included — an adversarial guest must not be able to crash the
+  verifier);
+- unknown protobuf fields are refused at the request, message, block, leaf,
+  and nested-content levels (the contract is closed; unknown PROVIDER JSON
+  blocks are preserved through the explicit `RequestUnknownBlock` arm —
+  different concepts);
+- block identity and placement rules: tool-use id/name, tool-result
+  tool_call_id, unknown kind, and the trailing signature (non-empty,
+  assistant-only, final) hold absolutely. Provider-specific role/kind
+  combinations are each ADAPTER marshal validator's job — the SDK keeps the
+  catch-all open (`ir.messages.write.other` and unmodelled provider roles
+  stay representable);
 - every protobuf string in a replacement is valid UTF-8 (ordinary strings
   may be empty); the request identity fields `ToolCall.id`, `ToolCall.name`,
   and `ToolDef.name` are separately required non-empty AND UTF-8-valid;
@@ -294,3 +314,37 @@ absolute shape rule above is its share of the contract.
 The SDK unit is the single normative statement of the replacement domain,
 shared by Go guests, handmade guests, and the host's unconditional
 verifier.
+
+## 9. Message-body helpers (the sanctioned mutation surface)
+
+Plugins do not parse provider-shaped raw arrays and do not manipulate oneof
+internals for ordinary tasks; the SDK helpers in the module root read and
+mutate the ordered body with explicit errors, out-of-range/wrong-kind
+rejection, and the signature-clearing rules they own (changing a
+text/thinking/tool-use block's covered content clears its provenance token;
+a trailing-signature block whose scope was invalidated is removed). All
+reads return copied views; all writes mutate in place and report errors.
+
+```go
+segs := sdk.TextSegments(msg)                 // text blocks in wire order (copied)
+text := sdk.Text(msg)                         // documented concatenation
+sdk.SetTextAt(msg, block, text)               // replace one text block
+sdk.ReplaceAllText(msg, text)                 // collapse: first text position, rest removed
+
+calls := sdk.ToolCalls(msg)                   // tool-use views + block positions
+results := sdk.ToolResults(msg)               // tool-result views + nested content
+sdk.AddToolCall(msg, at, call)                // insert a tool-use block
+sdk.ReplaceToolCall(msg, block, call)         // replace identity/arguments (clears the token)
+
+views := sdk.CacheBreakpoints(msg)            // copied marker views + positions
+sdk.SetCacheBreakpoint(msg, pos, marker)      // replace at an explicit position
+sdk.AddCacheBreakpoint(msg, at, marker)       // insert (closes the prefix at that position)
+sdk.DeleteCacheBreakpoint(msg, pos)           // remove
+cc := sdk.CacheControl(msg)                   // the prefix-closing marker (nil if none)
+```
+
+`RequestBlocksFingerprint(msg)` is the canonical message-body fingerprint
+(kind, presence, order, identities, exact raw bytes, signatures, nested
+content, cache positions — typed length framing). The host's `CachePrefixKey`
+and the cache-tier stickiness mirror share this implementation; the plugin
+fingerprint never claims to reproduce host-only envelope topology.

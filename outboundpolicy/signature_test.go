@@ -278,7 +278,8 @@ func TestValidateRejectsDuplicateRequestContentRef(t *testing.T) {
 	dup := make([]SignatureBinding, len(original))
 	copy(dup, original)
 	for i := range dup {
-		if dup[i].Domain == SignatureDomainRequest && dup[i].SignatureField == "thinking_signature" {
+		if dup[i].Domain == SignatureDomainRequest &&
+			dup[i].Message == "torana.v2.RequestThinkingBlock" && dup[i].SignatureField == "signature" {
 			dup[i].Content = append(append([]SignatureContentRef{}, dup[i].Content...), dup[i].Content[0])
 		}
 	}

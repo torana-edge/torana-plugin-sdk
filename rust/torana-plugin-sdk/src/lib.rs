@@ -14,6 +14,10 @@ pub mod pb {
     include!(concat!(env!("OUT_DIR"), "/torana.v1.rs"));
 }
 
+pub mod pbv2 {
+    include!(concat!(env!("OUT_DIR"), "/torana.v2.rs"));
+}
+
 pub const LOG_DEBUG: i32 = 0;
 pub const LOG_INFO: i32 = 1;
 

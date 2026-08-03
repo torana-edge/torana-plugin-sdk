@@ -14,6 +14,7 @@ package v2
 // kind/cardinality so a rule cannot silently drift from its field.
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -38,7 +39,25 @@ func TestReplacementFieldInventoryExact(t *testing.T) {
 	}
 
 	// Direction 1: every descriptor field has exactly one declared rule.
-	instances := []proto.Message{&ChatRequest{}, &Message{}, &ToolCall{}, &ToolDef{}}
+	instances := []proto.Message{
+		&ChatRequest{},
+		&Message{},
+		&RequestBlock{},
+		&RequestTextBlock{},
+		&RequestThinkingBlock{},
+		&RequestRedactedThinkingBlock{},
+		&RequestToolUseBlock{},
+		&RequestToolResultBlock{},
+		&RequestCacheBreakpoint{},
+		&RequestUnknownBlock{},
+		&RequestTrailingSignatureBlock{},
+		&ToolResultContentBlock{},
+		&ToolResultTextBlock{},
+		&ToolResultUnknownBlock{},
+		&ToolResultCacheBreakpoint{},
+		&ToolCall{},
+		&ToolDef{},
+	}
 	descriptors := map[string]protoreflect.MessageDescriptor{}
 	for _, inst := range instances {
 		md := inst.ProtoReflect().Descriptor()
@@ -95,6 +114,10 @@ func checkRuleMatchesDescriptor(t *testing.T, fd protoreflect.FieldDescriptor, r
 		if fd.Kind() != protoreflect.BytesKind || fd.IsList() {
 			t.Fatalf("field %s: JSON rule %s requires a singular bytes field", full, rule)
 		}
+	case rule == "oneof-message-member":
+		if fd.IsList() || fd.Kind() != protoreflect.MessageKind {
+			t.Fatalf("field %s: rule %s requires a singular message field (oneof member)", full, rule)
+		}
 	case rule == "repeated-message-nonnil":
 		if !fd.IsList() || fd.Kind() != protoreflect.MessageKind {
 			t.Fatalf("field %s: rule %s requires a repeated message field", full, rule)
@@ -125,7 +148,7 @@ func checkRuleMatchesDescriptor(t *testing.T, fd protoreflect.FieldDescriptor, r
 }
 
 // TestReplacementStringUTF8Sweep probes EVERY protobuf string field of the
-// four request-visible messages with invalid UTF-8 and requires
+// request-visible messages (the whole block tree) with invalid UTF-8 and requires
 // ValidateReplacement to reject it, naming the UTF-8 rule. The walk is
 // descriptor-driven (no partial list), and this is the live proof that every
 // string rule class is covered — an additive string field is picked up by
@@ -165,30 +188,63 @@ func TestReplacementStringUTF8Sweep(t *testing.T) {
 		}
 	}
 
-	// Message strings (one fresh message per field).
-	msgMD := (&Message{}).ProtoReflect().Descriptor()
-	for i := 0; i < msgMD.Fields().Len(); i++ {
-		fd := msgMD.Fields().Get(i)
-		if fd.Kind() != protoreflect.StringKind {
-			continue
+	// Message body strings: one valid request exercising EVERY block kind
+	// (and every nested tool-result kind), then a full-tree reflection walk
+	// mutating each reachable string field to invalid UTF-8. Descriptor-
+	// driven by construction: an additive string field anywhere in the
+	// request tree is picked up by both the walk and this sweep.
+	seed := func() *ChatRequest {
+		return &ChatRequest{
+			Model: "m",
+			Messages: []*Message{{
+				Role: "assistant",
+				Blocks: []*RequestBlock{
+					{Kind: &RequestBlock_Thinking{Thinking: &RequestThinkingBlock{Text: "r", Signature: "s"}}},
+					{Kind: &RequestBlock_Text{Text: &RequestTextBlock{Text: "hi", Signature: "s"}}},
+					{Kind: &RequestBlock_RedactedThinking{RedactedThinking: &RequestRedactedThinkingBlock{Data: "d"}}},
+					{Kind: &RequestBlock_ToolUse{ToolUse: &RequestToolUseBlock{
+						Id: "t1", Name: "read", ArgumentsJson: []byte(`{}`), Signature: "s",
+					}}},
+					{Kind: &RequestBlock_ToolResult{ToolResult: &RequestToolResultBlock{
+						ToolCallId: "t1", ToolName: "read",
+						Content: []*ToolResultContentBlock{
+							{Kind: &ToolResultContentBlock_Text{Text: &ToolResultTextBlock{Text: "ok"}}},
+							{Kind: &ToolResultContentBlock_Unknown{Unknown: &ToolResultUnknownBlock{
+								Kind: "json", PayloadJson: []byte(`{}`),
+							}}},
+							{Kind: &ToolResultContentBlock_CacheBreakpoint{CacheBreakpoint: &ToolResultCacheBreakpoint{
+								MarkerJson: []byte(`{}`),
+							}}},
+						},
+					}}},
+					{Kind: &RequestBlock_CacheBreakpoint{CacheBreakpoint: &RequestCacheBreakpoint{
+						MarkerJson: []byte(`{}`),
+					}}},
+					{Kind: &RequestBlock_Unknown{Unknown: &RequestUnknownBlock{
+						Kind: "custom", PayloadJson: []byte(`{}`),
+					}}},
+					{Kind: &RequestBlock_TrailingSignature{TrailingSignature: &RequestTrailingSignatureBlock{
+						Signature: "s",
+					}}},
+				},
+			}},
+			Tools: []*ToolDef{{Name: "read", ParametersJson: []byte(`{}`)}},
 		}
-		probe := &Message{Role: "user", Content: "hi"}
-		probe.ProtoReflect().Set(fd, protoreflect.ValueOfString(bad))
-		reject(t, "messages[0]."+string(fd.Name()), &ChatRequest{Messages: []*Message{probe}})
 	}
-
-	// ToolCall strings (request context: valid id/name baseline first).
-	tcMD := (&ToolCall{}).ProtoReflect().Descriptor()
-	for i := 0; i < tcMD.Fields().Len(); i++ {
-		fd := tcMD.Fields().Get(i)
-		if fd.Kind() != protoreflect.StringKind {
-			continue
-		}
-		probe := &ToolCall{Id: "t1", Name: "read", ArgumentsJson: []byte(`{}`)}
-		probe.ProtoReflect().Set(fd, protoreflect.ValueOfString(bad))
-		reject(t, "messages[0].tool_calls[0]."+string(fd.Name()), &ChatRequest{
-			Messages: []*Message{{Role: "assistant", ToolCalls: []*ToolCall{probe}}},
-		})
+	// The seed must be valid before any mutation.
+	if err := seed().ValidateReplacement(); err != nil {
+		t.Fatalf("UTF-8 sweep seed is not a valid replacement: %v", err)
+	}
+	// Collect every reachable string field path of the seed (descriptor
+	// driven), then probe each one with invalid UTF-8 on a fresh clone.
+	paths := collectStringPaths(seed().ProtoReflect(), "")
+	if len(paths) == 0 {
+		t.Fatal("sweep found no string fields to probe")
+	}
+	for _, p := range paths {
+		probe := seed()
+		mutateStringAt(probe.ProtoReflect(), p, bad)
+		reject(t, strings.TrimPrefix(p.path, "."), probe)
 	}
 
 	// ToolDef strings.
@@ -210,4 +266,105 @@ func TestReplacementStringUTF8Sweep(t *testing.T) {
 	if err := (&ChatRequest{Model: "", StopSequences: []string{"\u2603", ""}}).ValidateReplacement(); err != nil {
 		t.Fatalf("empty/escaped-unicode strings rejected: %v", err)
 	}
+}
+
+// stringPath is one step in a reflection walk: a field, plus an optional
+// list index.
+type stringPath struct {
+	fd    protoreflect.FieldDescriptor
+	index int // -1 for singular fields
+	path  string
+}
+
+// collectStringPaths walks the descriptor tree of a request and returns the
+// path of every reachable string field (list elements probed once each).
+func collectStringPaths(m protoreflect.Message, prefix string) []stringPath {
+	var out []stringPath
+	fields := m.Descriptor().Fields()
+	for i := 0; i < fields.Len(); i++ {
+		fd := fields.Get(i)
+		full := prefix + "." + string(fd.Name())
+		switch {
+		case fd.Kind() == protoreflect.StringKind && !fd.IsList():
+			out = append(out, stringPath{fd: fd, index: -1, path: full})
+		case fd.Kind() == protoreflect.StringKind && fd.IsList():
+			list := m.Get(fd).List()
+			if list.Len() > 0 {
+				out = append(out, stringPath{fd: fd, index: 0, path: full + "[0]"})
+			}
+		case fd.Kind() == protoreflect.MessageKind && !fd.IsList():
+			sub := m.Get(fd).Message()
+			if sub.IsValid() {
+				out = append(out, collectStringPaths(sub, full)...)
+			}
+		case fd.Kind() == protoreflect.MessageKind && fd.IsList():
+			list := m.Get(fd).List()
+			for j := 0; j < list.Len(); j++ {
+				elem := list.Get(j).Message()
+				if elem.IsValid() {
+					out = append(out, collectStringPaths(elem, fmt.Sprintf("%s[%d]", full, j))...)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// mutateStringAt applies a single stringPath to a fresh probe by replaying
+// the path: singular string fields are set directly; list string fields set
+// element 0; message fields recurse.
+func mutateStringAt(m protoreflect.Message, target stringPath, bad string) {
+	steps := splitPath(target.path)
+	cur := m
+	for i, step := range steps {
+		fd := cur.Descriptor().Fields().ByName(protoreflect.Name(step.field))
+		if fd == nil {
+			panic("sweep path replay: unknown field " + step.field)
+		}
+		if i == len(steps)-1 {
+			if fd.IsList() {
+				list := cur.Mutable(fd).List()
+				list.Set(0, protoreflect.ValueOfString(bad))
+			} else {
+				cur.Set(fd, protoreflect.ValueOfString(bad))
+			}
+			return
+		}
+		if fd.IsList() {
+			cur = cur.Mutable(fd).List().Get(step.index).Message()
+		} else {
+			cur = cur.Mutable(fd).Message()
+		}
+	}
+	panic("sweep path replay: path exhausted")
+}
+
+// splitPath parses "a.b[0].c" into steps.
+func splitPath(path string) []struct {
+	field string
+	index int
+} {
+	var steps []struct {
+		field string
+		index int
+	}
+	for _, part := range strings.Split(path, ".") {
+		if part == "" {
+			continue
+		}
+		if i := strings.Index(part, "["); i >= 0 {
+			idx := 0
+			fmt.Sscanf(part[i+1:], "%d]", &idx)
+			steps = append(steps, struct {
+				field string
+				index int
+			}{field: part[:i], index: idx})
+		} else {
+			steps = append(steps, struct {
+				field string
+				index int
+			}{field: part, index: 0})
+		}
+	}
+	return steps
 }
