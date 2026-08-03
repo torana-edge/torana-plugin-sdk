@@ -103,7 +103,12 @@ var requestScalarRules = map[string]string{
 	"torana.v2.ChatRequest.top_p":          "float-finite-optional",
 	"torana.v2.ChatRequest.stop_sequences": "repeated-text-utf8",
 	// Message
-	"torana.v2.Message.role":               "text-utf8",
+	// role is non-empty UTF-8 in the request domain: an empty role is not
+	// a meaningful request message, and a nil Message element survives
+	// protobuf transport as a zero-length message that would otherwise
+	// decode to exactly this empty state. The catch-all role decision
+	// stays open — there is deliberately no closed enum.
+	"torana.v2.Message.role":               "text-required-utf8",
 	"torana.v2.Message.content":            "text-utf8",
 	"torana.v2.Message.thinking":           "text-utf8",
 	"torana.v2.Message.thinking_signature": "text-utf8",
@@ -286,6 +291,9 @@ func (x *ChatRequest) ValidateReplacement() error {
 func validateMessageReplacement(m *Message, i int) error {
 	if err := checkNoUnknown(m.ProtoReflect(), fmt.Sprintf("chat request replacement messages[%d]", i)); err != nil {
 		return err
+	}
+	if m.Role == "" {
+		return fmt.Errorf("chat request replacement messages[%d].role must be non-empty", i)
 	}
 	for _, f := range []struct {
 		field string
