@@ -234,3 +234,50 @@ economically gated transformations must be assessed as one batch from the
 earliest changed item. Reuse the policy and cache-key helpers in `plugin-sdk`
 rather than inventing plugin-specific matching or call-ID-only keys. See
 [COMPACTION.md](https://github.com/torana-edge/torana-edge/blob/main/docs/COMPACTION.md) for the public contract.
+
+## 8. Request-replacement validation (normative output contract)
+
+A `ReplaceRequest` returned from `run_before_request` is validated atomically
+by `HookResult.ValidateFor(HOOK_BEFORE_REQUEST)` BEFORE the host chains or
+applies it. These are REPLACEMENT-OUTPUT rules: the plugin and the provider
+must never be able to inspect different logical requests. Accepted host input
+is normalized into this closed domain before plugin dispatch, so a plugin
+only ever sees canonical shapes.
+
+Executable field table (see `pb/v2/request_validate.go` for the normative
+implementation):
+
+| Field | Rule |
+|---|---|
+| `torana_meta_json` | absent or JSON object (host-owned, immutable) |
+| `provider_extensions_json` | absent or JSON object |
+| `safety_settings_json` | absent or JSON **array** (Gemini shape) |
+| `Message.content_parts_json` | absent or JSON array |
+| `Message.cache_control_json` | absent or JSON object |
+| `ToolCall.arguments_json` | REQUIRED non-empty JSON object per present call (`{}` is the canonical no-arguments shape) |
+| `ToolDef.parameters_json` | REQUIRED non-empty JSON object per present definition (`{}` is a valid unconstrained schema; empty bytes are not) |
+| `ToolDef.cache_control_json` | absent or JSON object |
+
+Universal rules:
+
+- no nil nested messages, tool calls, or tool definitions (an adversarial
+  guest must not be able to crash the verifier);
+- unknown protobuf fields are refused at the request, message, tool-call,
+  and tool-definition levels (the contract is closed);
+- `ToolCall.id` and `ToolCall.name` are non-empty in the REQUEST context;
+  `ToolDef.name` is non-empty. Anonymous RESPONSE tool calls are exempt from
+  the id rule: response ids are host-owned and may legitimately be absent
+  (their own `ToolCall.Validate` governs them);
+- `temperature` and `top_p` are finite when present; no provider-specific
+  ranges are invented;
+- JSON fields must be valid UTF-8, surrogate-safe, and duplicate-free, with
+  exactly one top-level value (`pb/v2/jsontext`). Empty bytes are absence
+  only for absent-capable fields; a literal JSON `null` is a wrong top-level
+  value everywhere.
+
+A replacement that fails this contract is refused; whether the refusal
+follows `failure_mode` (pass keeps the accepted input, block produces the
+plugin-failure refusal) or becomes a host-level terminal error is a host
+policy decision documented in the host's own checkpoint — the SDK unit is
+the single normative statement of the domain, shared by Go guests, handmade
+guests, and the host's unconditional verifier.
