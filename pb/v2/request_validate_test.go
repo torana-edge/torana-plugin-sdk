@@ -432,4 +432,21 @@ func TestHookResultValidateForReplaceRequest(t *testing.T) {
 	if err := hr.ValidateFor(v2.Hook_HOOK_AFTER_RESPONSE); err == nil {
 		t.Fatal("replacement dispatched to the wrong hook accepted")
 	}
+
+	// Invalid UTF-8 in a Go-constructed string is rejected by ValidateFor
+	// BEFORE proto.Marshal would refuse it — the Go-guest and handwritten-
+	// wire-guest domains are the same.
+	badModel := &v2.ChatRequest{Model: string([]byte{0xff})}
+	hr = &v2.HookResult{Action: &v2.HookResult_ReplaceRequest{ReplaceRequest: badModel}}
+	if err := hr.ValidateFor(v2.Hook_HOOK_BEFORE_REQUEST); err == nil ||
+		!strings.Contains(err.Error(), "UTF-8") {
+		t.Fatalf("invalid Go-side UTF-8 accepted or wrong error: %v", err)
+	}
+
+	// A valid Unicode replacement passes the same gate.
+	uni := &v2.ChatRequest{Model: "héllo 日本語", Messages: []*v2.Message{{Role: "user", Content: "雪"}}}
+	hr = &v2.HookResult{Action: &v2.HookResult_ReplaceRequest{ReplaceRequest: uni}}
+	if err := hr.ValidateFor(v2.Hook_HOOK_BEFORE_REQUEST); err != nil {
+		t.Fatalf("valid unicode replacement rejected: %v", err)
+	}
 }

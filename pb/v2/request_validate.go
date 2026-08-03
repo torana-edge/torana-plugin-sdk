@@ -33,7 +33,9 @@ package v2
 // Empty bytes are absence ONLY for absent-capable fields; a literal JSON null
 // is a wrong top-level value everywhere. Unknown protobuf fields are refused
 // at every level (the contract is closed; the host cannot know their
-// semantics). Nil nested elements are refused without panicking.
+// semantics). Nil nested elements are refused without panicking. Every
+// protobuf string is valid UTF-8 (descriptor-driven walk — Go strings are
+// NOT valid UTF-8 by construction, only wire-decoded protobuf strings are).
 //
 // Tool-call ID rules are REQUEST-CONTEXT ONLY. Anonymous RESPONSE tool calls
 // keep their separate generic ToolCall.Validate: response IDs are host-owned
@@ -44,6 +46,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"unicode/utf8"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -80,41 +83,99 @@ var requestJSONFields = map[string]jsonFieldRule{
 // documented as inherent/unconstrained:
 //
 //   - enforced: "repeated-message-nonnil", "float-finite-optional",
-//     "int32-positive-optional", "text-required";
-//   - inherent: "text" and "repeated-text" (protobuf strings are valid UTF-8
-//     by construction, so no further constraint applies), "bool", "int32"
-//     (protobuf scalars are well-typed by construction);
-//   - deliberately unconstrained: "text" content fields (role, content,
-//     thinking, signatures, description) carry no universal constraint.
+//     "int32-positive-optional", "text-required-utf8";
+//   - "text-utf8" and "repeated-text-utf8": UTF-8 validity is ENFORCED by
+//     the descriptor-driven string walk (checkStringsUTF8) — Go strings are
+//     NOT valid UTF-8 by construction, only wire-decoded protobuf strings
+//     are; emptiness is allowed;
+//   - "bool", "int32": protobuf scalars are well-typed by construction;
+//   - deliberately unconstrained beyond UTF-8: content fields (role,
+//     content, thinking, signatures, description) carry no universal
+//     constraint.
 var requestScalarRules = map[string]string{
 	// ChatRequest
-	"torana.v2.ChatRequest.model":          "text",
+	"torana.v2.ChatRequest.model":          "text-utf8",
 	"torana.v2.ChatRequest.messages":       "repeated-message-nonnil",
 	"torana.v2.ChatRequest.tools":          "repeated-message-nonnil",
 	"torana.v2.ChatRequest.stream":         "bool",
 	"torana.v2.ChatRequest.max_tokens":     "int32-positive-optional",
 	"torana.v2.ChatRequest.temperature":    "float-finite-optional",
 	"torana.v2.ChatRequest.top_p":          "float-finite-optional",
-	"torana.v2.ChatRequest.stop_sequences": "repeated-text",
+	"torana.v2.ChatRequest.stop_sequences": "repeated-text-utf8",
 	// Message
-	"torana.v2.Message.role":               "text",
-	"torana.v2.Message.content":            "text",
-	"torana.v2.Message.thinking":           "text",
-	"torana.v2.Message.thinking_signature": "text",
-	"torana.v2.Message.redacted_thinking":  "text",
+	"torana.v2.Message.role":               "text-utf8",
+	"torana.v2.Message.content":            "text-utf8",
+	"torana.v2.Message.thinking":           "text-utf8",
+	"torana.v2.Message.thinking_signature": "text-utf8",
+	"torana.v2.Message.redacted_thinking":  "text-utf8",
 	"torana.v2.Message.tool_calls":         "repeated-message-nonnil",
-	"torana.v2.Message.tool_call_id":       "text",
-	"torana.v2.Message.tool_name":          "text",
-	"torana.v2.Message.trailing_signature": "text",
-	"torana.v2.Message.content_signature":  "text",
+	"torana.v2.Message.tool_call_id":       "text-utf8",
+	"torana.v2.Message.tool_name":          "text-utf8",
+	"torana.v2.Message.trailing_signature": "text-utf8",
+	"torana.v2.Message.content_signature":  "text-utf8",
 	// ToolCall (request context)
-	"torana.v2.ToolCall.id":        "text-required",
-	"torana.v2.ToolCall.name":      "text-required",
-	"torana.v2.ToolCall.signature": "text",
+	"torana.v2.ToolCall.id":        "text-required-utf8",
+	"torana.v2.ToolCall.name":      "text-required-utf8",
+	"torana.v2.ToolCall.signature": "text-utf8",
 	// ToolDef
-	"torana.v2.ToolDef.name":        "text-required",
-	"torana.v2.ToolDef.description": "text",
+	"torana.v2.ToolDef.name":        "text-required-utf8",
+	"torana.v2.ToolDef.description": "text-utf8",
 	"torana.v2.ToolDef.strict":      "bool",
+}
+
+// checkStringsUTF8 enforces UTF-8 validity on every protobuf string field
+// reachable from m, recursively through message fields with list indexes in
+// the error path. Go guests construct these values IN MEMORY, where Go
+// strings may carry arbitrary bytes — protobuf's UTF-8 guarantee holds only
+// after successful wire decoding, so a contract that skipped this check
+// would accept a replacement the trampoline's own proto.Marshal rejects, and
+// the advertised domain would differ between Go SDK guests and handwritten
+// wire guests. Descriptor-driven by construction: there is no partial
+// hand-maintained list, so an additive string field is covered automatically
+// (and still forces a deliberate inventory decision).
+func checkStringsUTF8(m protoreflect.Message, path string) error {
+	var firstErr error
+	m.Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
+		full := path + "." + string(fd.Name())
+		switch {
+		case fd.Kind() == protoreflect.StringKind && !fd.IsList():
+			if !utf8.ValidString(v.String()) {
+				firstErr = fmt.Errorf("%s: invalid UTF-8", full)
+				return false
+			}
+		case fd.Kind() == protoreflect.StringKind && fd.IsList():
+			list := v.List()
+			for i := 0; i < list.Len(); i++ {
+				if !utf8.ValidString(list.Get(i).String()) {
+					firstErr = fmt.Errorf("%s[%d]: invalid UTF-8", full, i)
+					return false
+				}
+			}
+		case fd.Kind() == protoreflect.MessageKind && !fd.IsList():
+			msg := v.Message()
+			if !msg.IsValid() {
+				return true
+			}
+			if err := checkStringsUTF8(msg, full); err != nil {
+				firstErr = err
+				return false
+			}
+		case fd.Kind() == protoreflect.MessageKind && fd.IsList():
+			list := v.List()
+			for i := 0; i < list.Len(); i++ {
+				elem := list.Get(i).Message()
+				if !elem.IsValid() {
+					continue
+				}
+				if err := checkStringsUTF8(elem, fmt.Sprintf("%s[%d]", full, i)); err != nil {
+					firstErr = err
+					return false
+				}
+			}
+		}
+		return true
+	})
+	return firstErr
 }
 
 // checkNoUnknown refuses a message carrying unknown protobuf fields.
@@ -174,6 +235,9 @@ func (x *ChatRequest) ValidateReplacement() error {
 		return fmt.Errorf("chat request replacement is nil")
 	}
 	if err := checkNoUnknown(x.ProtoReflect(), "chat request replacement"); err != nil {
+		return err
+	}
+	if err := checkStringsUTF8(x.ProtoReflect(), "chat request replacement"); err != nil {
 		return err
 	}
 	if x.MaxTokens != nil && *x.MaxTokens <= 0 {
