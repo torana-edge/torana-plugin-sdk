@@ -375,11 +375,25 @@ func validateMessageReplacement(m *Message, i int) error {
 		// text == ""; an empty blocks list is not a second spelling.
 		return fmt.Errorf("chat request replacement messages[%d].blocks must contain at least one block", i)
 	}
+	// hasCoveredBlock: at least one text or thinking block exists in this
+	// message — the trailing-signature token binds preceding CLOSED
+	// text/thinking content, so a standalone trailing token (no covered
+	// block) is meaningless and refused absolutely.
+	hasCoveredBlock := false
+	for _, b := range m.Blocks {
+		if b == nil {
+			continue
+		}
+		if b.GetText() != nil || b.GetThinking() != nil {
+			hasCoveredBlock = true
+			break
+		}
+	}
 	for j, b := range m.Blocks {
 		if b == nil {
 			return fmt.Errorf("chat request replacement messages[%d].blocks[%d] is nil", i, j)
 		}
-		if err := validateRequestBlock(b, fmt.Sprintf("%d", i), j, len(m.Blocks), m.Role); err != nil {
+		if err := validateRequestBlock(b, fmt.Sprintf("%d", i), j, len(m.Blocks), m.Role, hasCoveredBlock); err != nil {
 			return err
 		}
 	}
@@ -393,7 +407,7 @@ func validateMessageReplacement(m *Message, i int) error {
 // ADAPTER marshal validator's job — the SDK contract is provider-independent
 // (the ir.messages.write.other catch-all and unmodelled provider roles stay
 // representable).
-func validateRequestBlock(b *RequestBlock, mi string, bi, blockCount int, role string) error {
+func validateRequestBlock(b *RequestBlock, mi string, bi, blockCount int, role string, hasCoveredBlock bool) error {
 	what := fmt.Sprintf("chat request replacement messages[%s].blocks[%d]", mi, bi)
 	if err := checkNoUnknown(b.ProtoReflect(), what); err != nil {
 		return err
@@ -496,6 +510,14 @@ func validateRequestBlock(b *RequestBlock, mi string, bi, blockCount int, role s
 		}
 		if bi != blockCount-1 {
 			return fmt.Errorf("%s.trailing_signature must be the final block of the message", what)
+		}
+		if !hasCoveredBlock {
+			// The token binds preceding CLOSED text/thinking content; a
+			// standalone trailing signature (no covered block — e.g. a
+			// tool-call-only or redacted-only message) is unrepresentable.
+			// An EXPLICIT EMPTY text/thinking block is still a real covered
+			// block.
+			return fmt.Errorf("%s.trailing_signature requires at least one preceding text or thinking block", what)
 		}
 		return nil
 	default:

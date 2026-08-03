@@ -94,14 +94,6 @@ func SetTextAt(msg *pbv2.Message, block int, text string) error {
 //
 //   - the FIRST text block keeps its position and receives text;
 //   - every other text block is REMOVED from the body;
-//   - a message with no text block gets one APPENDED at the end;
-//   - signature tokens on every touched block are cleared (stale), and a
-//     trailing-signature block whose covered content changed is cleared.
-//
-// ReplaceAllText collapses the message's text to exactly text:
-//
-//   - the FIRST text block keeps its position and receives text;
-//   - every other text block is REMOVED from the body;
 //   - a message with no text block gets one APPENDED at the end (after any
 //     final trailing-signature block is removed — appending content after
 //     the token's covered scope makes it stale and breaks finality);
@@ -131,13 +123,12 @@ func ReplaceAllText(msg *pbv2.Message, text string) error {
 		}
 	}
 	if first < 0 {
-		if text == "" {
-			// No text blocks and nothing requested: a semantic no-op.
-			return nil
-		}
+		// A message with no text block gets one APPENDED — even for the
+		// empty string: an explicit empty text arm is first-class and
+		// distinct from absence (ordered topology is semantic).
 		// A trailing-signature block cannot stay final if content is
 		// appended after it; the appended text is also outside the provider
-		// token's covered scope, so the token is stale.
+		// token's covered scope, so the token is stale and removed first.
 		clearTrailingSignature(msg)
 		msg.Blocks = append(msg.Blocks, &pbv2.RequestBlock{
 			Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: text}},

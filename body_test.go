@@ -446,7 +446,64 @@ func TestHelperPropertyMatrix(t *testing.T) {
 	expectValid(t, "AddToolCall before trailing", m)
 	_ = before
 
-	// 7. ReplaceAllText with no text block and a trailing signature: the
+	// 7. ReplaceAllText with no text block: an EXPLICIT EMPTY text block is
+	// created for the empty string (absence != empty), and a stale trailing
+	// token is removed before appending.
+	toolOnly := &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{{
+		Kind: &pbv2.RequestBlock_ToolUse{ToolUse: &pbv2.RequestToolUseBlock{
+			Id: "t1", Name: "read", ArgumentsJson: []byte(`{}`),
+		}},
+	}}}
+	if err := ReplaceAllText(toolOnly, ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(toolOnly.Blocks) != 2 || toolOnly.Blocks[1].GetText() == nil || toolOnly.Blocks[1].GetText().Text != "" {
+		t.Fatalf("empty replacement must append one explicit empty text block: %+v", toolOnly.Blocks)
+	}
+	expectValid(t, "ReplaceAllText empty append", toolOnly)
+
+	thinkingOnly := &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{
+		{Kind: &pbv2.RequestBlock_Thinking{Thinking: &pbv2.RequestThinkingBlock{Text: "r"}}},
+	}}
+	if err := ReplaceAllText(thinkingOnly, ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(thinkingOnly.Blocks) != 2 || thinkingOnly.Blocks[1].GetText() == nil {
+		t.Fatalf("thinking + explicit empty text expected: %+v", thinkingOnly.Blocks)
+	}
+	expectValid(t, "ReplaceAllText thinking + empty", thinkingOnly)
+
+	thinkingTrailing := &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{
+		{Kind: &pbv2.RequestBlock_Thinking{Thinking: &pbv2.RequestThinkingBlock{Text: "r", Signature: "ST"}}},
+		{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: &pbv2.RequestTrailingSignatureBlock{Signature: "S"}}},
+	}}
+	if err := ReplaceAllText(thinkingTrailing, ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(thinkingTrailing.Blocks) != 2 || thinkingTrailing.Blocks[1].GetText() == nil {
+		t.Fatalf("thinking + explicit empty text expected: %+v", thinkingTrailing.Blocks)
+	}
+	if last := thinkingTrailing.Blocks[len(thinkingTrailing.Blocks)-1]; last.GetTrailingSignature() != nil {
+		t.Fatal("stale trailing token not removed on append")
+	}
+	expectValid(t, "ReplaceAllText thinking + trailing + empty", thinkingTrailing)
+
+	// An already-explicit-empty single text block with the empty request is
+	// a byte-identical no-op preserving its signature and a valid trailing
+	// token.
+	already := &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{
+		{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "", Signature: "S1"}}},
+		{Kind: &pbv2.RequestBlock_Thinking{Thinking: &pbv2.RequestThinkingBlock{Text: "r", Signature: "ST"}}},
+		{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: &pbv2.RequestTrailingSignatureBlock{Signature: "S"}}},
+	}}
+	before = snapshot(already)
+	if err := ReplaceAllText(already, ""); err != nil {
+		t.Fatal(err)
+	}
+	expectNoopPreserves(t, "ReplaceAllText empty no-op", already, before)
+	expectValid(t, "ReplaceAllText empty no-op", already)
+
+	// 8. ReplaceAllText with no text block and a trailing signature: the
 	// stale token is removed, the text is appended, and the result is valid.
 	none := &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{
 		{Kind: &pbv2.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.RequestCacheBreakpoint{MarkerJson: []byte(`{}`)}}},
@@ -461,7 +518,7 @@ func TestHelperPropertyMatrix(t *testing.T) {
 		t.Fatalf("text not appended: %+v", none.Blocks)
 	}
 
-	// 8. Errors leave the input byte-for-byte unchanged.
+	// 9. Errors leave the input byte-for-byte unchanged.
 	for _, tc := range []struct {
 		name string
 		call func(*pbv2.Message) error
@@ -493,7 +550,7 @@ func TestHelperPropertyMatrix(t *testing.T) {
 		}
 	}
 
-	// 9. Typed-nil arm adversaries: wrong-kind errors, never panics.
+	// 10. Typed-nil arm adversaries: wrong-kind errors, never panics.
 	m = helperMsg()
 	m.Blocks = append(m.Blocks, &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_Text{}})
 	before = snapshot(m)

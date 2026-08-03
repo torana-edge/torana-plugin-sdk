@@ -140,12 +140,14 @@ func TestWritePermissionsAreSorted(t *testing.T) {
 	}
 }
 
-// TestCacheControlWriteFieldInventory anchors the request-body fields of the
-// ir.cache_control.write grant: RequestCacheBreakpoint.marker_json and
-// ToolResultCacheBreakpoint.marker_json are the ONLY request message-body
-// cache carriers (message-level cache_control_json is gone), and
-// ToolDef.cache_control_json remains the tool-definition carrier. The block
-// oneof makes any third carrier a deliberate proto change.
+// TestCacheControlWriteFieldInventory anchors the documented request-body
+// carriers of the ir.cache_control.write grant: RequestCacheBreakpoint.
+// marker_json, ToolResultCacheBreakpoint.marker_json, and
+// ToolDef.cache_control_json (message-level cache_control_json is gone; the
+// block oneof makes any additional carrier a deliberate proto change). This
+// is a scoped anchor: the positive-AND-negative enforcement inventory —
+// proving no OTHER field maps to this grant — is Edge's reflection-backed
+// verifier inventory, authoritative at the host.
 func TestCacheControlWriteFieldInventory(t *testing.T) {
 	blkFields := (&pbv2.RequestCacheBreakpoint{}).ProtoReflect().Descriptor().Fields()
 	nestedFields := (&pbv2.ToolResultCacheBreakpoint{}).ProtoReflect().Descriptor().Fields()

@@ -311,6 +311,47 @@ func TestReplacementBlockIdentityAndPlacement(t *testing.T) {
 	}}
 	mustAcceptReplacement(t, "trailing signature final assistant", req)
 
+	// The trailing token binds preceding CLOSED text/thinking content:
+	// standalone forms are unrepresentable and refused absolutely.
+	standalone := []struct {
+		name   string
+		blocks []*v2.RequestBlock
+	}{
+		{"trailing alone", []*v2.RequestBlock{{
+			Kind: &v2.RequestBlock_TrailingSignature{TrailingSignature: &v2.RequestTrailingSignatureBlock{Signature: "SIG"}},
+		}}},
+		{"tool-use only", []*v2.RequestBlock{
+			{Kind: &v2.RequestBlock_ToolUse{ToolUse: &v2.RequestToolUseBlock{
+				Id: "t1", Name: "read", ArgumentsJson: []byte(`{}`),
+			}}},
+			{Kind: &v2.RequestBlock_TrailingSignature{TrailingSignature: &v2.RequestTrailingSignatureBlock{Signature: "SIG"}}},
+		}},
+		{"redacted only", []*v2.RequestBlock{
+			{Kind: &v2.RequestBlock_RedactedThinking{RedactedThinking: &v2.RequestRedactedThinkingBlock{Data: "..."}}},
+			{Kind: &v2.RequestBlock_TrailingSignature{TrailingSignature: &v2.RequestTrailingSignatureBlock{Signature: "SIG"}}},
+		}},
+	}
+	for _, tc := range standalone {
+		req = baseRequest()
+		req.Messages[0] = &v2.Message{Role: "assistant", Blocks: tc.blocks}
+		mustRejectReplacement(t, "trailing "+tc.name, req)
+	}
+
+	// Explicit EMPTY text/thinking blocks are still real covered blocks.
+	req = baseRequest()
+	req.Messages[0] = &v2.Message{Role: "assistant", Blocks: []*v2.RequestBlock{
+		textBlock(""),
+		{Kind: &v2.RequestBlock_TrailingSignature{TrailingSignature: &v2.RequestTrailingSignatureBlock{Signature: "SIG"}}},
+	}}
+	mustAcceptReplacement(t, "trailing over explicit empty text", req)
+
+	req = baseRequest()
+	req.Messages[0] = &v2.Message{Role: "assistant", Blocks: []*v2.RequestBlock{
+		{Kind: &v2.RequestBlock_Thinking{Thinking: &v2.RequestThinkingBlock{Text: ""}}},
+		{Kind: &v2.RequestBlock_TrailingSignature{TrailingSignature: &v2.RequestTrailingSignatureBlock{Signature: "SIG"}}},
+	}}
+	mustAcceptReplacement(t, "trailing over explicit empty thinking", req)
+
 	// Every block kind in one message is valid (provider-independent
 	// grammar: no closed global role/kind matrix).
 	mustAcceptReplacement(t, "full block set", &v2.ChatRequest{Messages: []*v2.Message{fullBlocks()}})

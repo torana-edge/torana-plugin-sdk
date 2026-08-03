@@ -5,6 +5,7 @@ package plugin_sdk
 // that forces a decision for additive block fields.
 
 import (
+	"fmt"
 	"testing"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -109,18 +110,19 @@ func TestRequestBlocksFingerprintSensitive(t *testing.T) {
 	})
 }
 
-// TestRequestFingerprintCoverageExact: the reflection-backed inventory is
-// BIDIRECTIONAL — the declared coverage set and the set of fields actually
-// visited by the descriptor walk must be exactly equal, so an additive block
-// field fails until it is hashed, and a stale or misspelled declaration fails
-// even when it shares the body prefix.
-func TestRequestFingerprintCoverageExact(t *testing.T) {
-	declared := map[string]bool{}
-	for _, f := range fingerprintFieldCoverage {
-		if declared[f] {
-			t.Fatalf("coverage declares %s twice", f)
+// checkFingerprintInventory is the ONE guard behind both fingerprint
+// inventory tests: it requires the supplied declared set and the
+// descriptor-derived visited set to be exactly equal in BOTH directions.
+// The stale-field negative uses this same helper, so deleting either
+// direction here fails that test too — the regression is connected to the
+// guard, not a private copy.
+func checkFingerprintInventory(declared []string) error {
+	decl := map[string]bool{}
+	for _, f := range declared {
+		if decl[f] {
+			return fmt.Errorf("coverage declares %s twice", f)
 		}
-		declared[f] = true
+		decl[f] = true
 	}
 
 	visited := map[string]bool{}
@@ -143,50 +145,34 @@ func TestRequestFingerprintCoverageExact(t *testing.T) {
 	// Direction 1: descriptor minus declared empty — every visited field has
 	// a decision.
 	for f := range visited {
-		if !declared[f] {
-			t.Fatalf("request-body field %s has no fingerprint coverage decision", f)
+		if !decl[f] {
+			return fmt.Errorf("request-body field %s has no fingerprint coverage decision", f)
 		}
 	}
 	// Direction 2: declared minus descriptor empty — a stale or misspelled
 	// declaration (even one sharing the body prefix) fails.
-	for f := range declared {
+	for f := range decl {
 		if !visited[f] {
-			t.Fatalf("fingerprint coverage declares %s which is not a request-body field", f)
+			return fmt.Errorf("fingerprint coverage declares %s which is not a request-body field", f)
 		}
+	}
+	return nil
+}
+
+// TestRequestFingerprintCoverageExact: the real inventory must pass the
+// shared bidirectional guard.
+func TestRequestFingerprintCoverageExact(t *testing.T) {
+	if err := checkFingerprintInventory(fingerprintFieldCoverage); err != nil {
+		t.Fatal(err)
 	}
 }
 
 // TestRequestFingerprintCoverageRejectsStaleField: a plausible same-prefix
-// stale declaration must fail the exact inventory (the reverse direction of
-// the check above).
+// stale declaration must fail the SAME shared guard (the reverse direction
+// lives inside checkFingerprintInventory; deleting it fails this test).
 func TestRequestFingerprintCoverageRejectsStaleField(t *testing.T) {
-	original := fingerprintFieldCoverage
-	t.Cleanup(func() { fingerprintFieldCoverage = original })
-	fingerprintFieldCoverage = append(append([]string{}, original...), "torana.v2.RequestTextBlock.removed_field")
-
-	declared := map[string]bool{}
-	for _, f := range fingerprintFieldCoverage {
-		declared[f] = true
+	stale := append(append([]string{}, fingerprintFieldCoverage...), "torana.v2.RequestTextBlock.removed_field")
+	if err := checkFingerprintInventory(stale); err == nil {
+		t.Fatal("stale same-prefix fingerprint declaration was not caught")
 	}
-	visited := map[string]bool{}
-	var walk func(md protoreflect.MessageDescriptor)
-	walk = func(md protoreflect.MessageDescriptor) {
-		fields := md.Fields()
-		for i := 0; i < fields.Len(); i++ {
-			fd := fields.Get(i)
-			visited[string(fd.FullName())] = true
-			if fd.Kind() == protoreflect.MessageKind {
-				if sub := fd.Message(); sub != nil && sub.FullName() != "torana.v2.Message" {
-					walk(sub)
-				}
-			}
-		}
-	}
-	walk((&pbv2.Message{}).ProtoReflect().Descriptor())
-	for f := range declared {
-		if !visited[f] {
-			return // the stale declaration was caught
-		}
-	}
-	t.Fatal("stale same-prefix fingerprint declaration was not caught")
 }

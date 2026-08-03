@@ -602,6 +602,65 @@ func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 				{Scope: SignatureScopeSameMessage, Message: "torana.v2.ToolCall", Field: "name"},
 			},
 		},
+		// The tool-use token's exact covered set is id + name +
+		// arguments_json: each missing member, an extra/duplicated member,
+		// a wrong scope, and a cross-message ref must all fail the shape
+		// check — proving the contract, not just the happy path.
+		{ // tool-use partial: missing id
+			Domain: SignatureDomainRequest, Message: "torana.v2.RequestToolUseBlock", SignatureField: "signature",
+			Content: []SignatureContentRef{
+				{Scope: SignatureScopeSameMessage, Field: "name"},
+				{Scope: SignatureScopeSameMessage, Field: "arguments_json"},
+			},
+		},
+		{ // tool-use partial: missing name
+			Domain: SignatureDomainRequest, Message: "torana.v2.RequestToolUseBlock", SignatureField: "signature",
+			Content: []SignatureContentRef{
+				{Scope: SignatureScopeSameMessage, Field: "id"},
+				{Scope: SignatureScopeSameMessage, Field: "arguments_json"},
+			},
+		},
+		{ // tool-use partial: missing arguments_json
+			Domain: SignatureDomainRequest, Message: "torana.v2.RequestToolUseBlock", SignatureField: "signature",
+			Content: []SignatureContentRef{
+				{Scope: SignatureScopeSameMessage, Field: "id"},
+				{Scope: SignatureScopeSameMessage, Field: "name"},
+			},
+		},
+		{ // tool-use extra member
+			Domain: SignatureDomainRequest, Message: "torana.v2.RequestToolUseBlock", SignatureField: "signature",
+			Content: []SignatureContentRef{
+				{Scope: SignatureScopeSameMessage, Field: "id"},
+				{Scope: SignatureScopeSameMessage, Field: "name"},
+				{Scope: SignatureScopeSameMessage, Field: "arguments_json"},
+				{Scope: SignatureScopeSameMessage, Field: "tool_name"},
+			},
+		},
+		{ // tool-use duplicated member
+			Domain: SignatureDomainRequest, Message: "torana.v2.RequestToolUseBlock", SignatureField: "signature",
+			Content: []SignatureContentRef{
+				{Scope: SignatureScopeSameMessage, Field: "id"},
+				{Scope: SignatureScopeSameMessage, Field: "id"},
+				{Scope: SignatureScopeSameMessage, Field: "name"},
+				{Scope: SignatureScopeSameMessage, Field: "arguments_json"},
+			},
+		},
+		{ // tool-use wrong scope
+			Domain: SignatureDomainRequest, Message: "torana.v2.RequestToolUseBlock", SignatureField: "signature",
+			Content: []SignatureContentRef{
+				{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.RequestToolUseBlock", Field: "id"},
+				{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.RequestToolUseBlock", Field: "name"},
+				{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.RequestToolUseBlock", Field: "arguments_json"},
+			},
+		},
+		{ // tool-use cross-message ref
+			Domain: SignatureDomainRequest, Message: "torana.v2.RequestToolUseBlock", SignatureField: "signature",
+			Content: []SignatureContentRef{
+				{Scope: SignatureScopeSameMessage, Field: "id"},
+				{Scope: SignatureScopeSameMessage, Field: "name"},
+				{Scope: SignatureScopeSameMessage, Message: "torana.v2.ToolCall", Field: "arguments_json"},
+			},
+		},
 	}
 	for i, b := range bad {
 		if err := b.validateShape(); err == nil {
@@ -612,15 +671,17 @@ func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 
 // Completeness: removing ANY required request-domain binding must fail the
 // startup proof — Validate() must prove every pinned token has a declaration,
-// not just that the declarations that exist are well-formed. Table-driven over
-// all three tokens so a fourth token added to the contract table cannot
-// silently skip this check.
+// not just that the declarations that exist are well-formed. The token list
+// is DERIVED from the reflection inventory (every request-visible "signature"
+// field), so a token added to the descriptors cannot silently skip this check
+// by being missing from a hard-coded list here.
 func TestRequestBindingCompletenessRequiresEveryToken(t *testing.T) {
-	for _, token := range []string{
-		"torana.v2.RequestThinkingBlock/signature",
-		"torana.v2.RequestTextBlock/signature",
-		"torana.v2.RequestTrailingSignatureBlock/signature",
-	} {
+	descs := outboundDescriptors()
+	tokens := requestSignatureTokenFields(descs)
+	if len(tokens) != 4 {
+		t.Fatalf("expected exactly four request-visible signature tokens, got %v", tokens)
+	}
+	for _, token := range tokens {
 		t.Run(token+" removed", func(t *testing.T) {
 			bindings := make([]SignatureBinding, 0, len(signatureBindings)-1)
 			for _, b := range signatureBindings {

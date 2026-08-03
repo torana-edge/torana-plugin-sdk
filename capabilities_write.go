@@ -74,9 +74,12 @@ const (
 	// content/topology change that alters an existing cached prefix needs
 	// the UNION of the role grant and this grant (host enforcement in edge).
 	//
-	// FIELD INVENTORY (pinned by TestCacheControlWriteFieldInventory): the
-	// three carriers above, no others. The message-level flat
-	// cache_control_json field no longer exists in the ABI.
+	// FIELD INVENTORY (anchored by TestCacheControlWriteFieldInventory): the
+	// SDK anchors the three documented carriers above; the message-level
+	// flat cache_control_json field no longer exists in the ABI. The
+	// positive-AND-negative enforcement inventory — proving no other field
+	// maps to this grant — is Edge's reflection-backed verifier inventory,
+	// authoritative at the host.
 	SectionCacheControl WriteSection = "ir.cache_control.write"
 
 	// SectionMessagesUser and friends cover one message role each. A change at
