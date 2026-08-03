@@ -523,5 +523,16 @@ func (x *HookResult) ValidateFor(hook Hook) error {
 			return fmt.Errorf("hook result: %w", err)
 		}
 	}
+	if rr, ok := x.Action.(*HookResult_ReplaceRequest); ok {
+		// The normative replacement contract: the nested ChatRequest is
+		// validated in full (executable JSON field table, universal
+		// structural rules, request-context identity rules). A plugin whose
+		// replacement fails this contract is refused atomically BEFORE the
+		// host chains or applies it — the plugin and the provider can never
+		// inspect different logical requests.
+		if err := rr.ReplaceRequest.ValidateReplacement(); err != nil {
+			return fmt.Errorf("hook result: %w", err)
+		}
+	}
 	return nil
 }
