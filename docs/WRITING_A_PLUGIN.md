@@ -256,6 +256,31 @@ cached prefix and whether the request carries a cache-breakpoint carrier:
   order and lexemes are identity-relevant), optional scalars fold
   presence-aware, and stop sequences fold ordered.
 
+### `ToolResultScalarText(v ToolResultView) (text string, ok bool)`
+
+Scalar compatibility for a tool-result view (from `ToolResults`): a result
+with EXACTLY ONE text arm (an explicit EMPTY text arm is compatible), ZERO
+unknown/provider arms, and any number of cache-marker arms. Zero text arms
+(marker-only), multiple text arms, or any unknown arm ⇒ `ok=false` — decline
+the result UNCHANGED. Text arms are never concatenated (concatenation is not
+injective and the flat scalar had no such shape).
+
+### `ReplaceToolResultText(msg, block, text) (changed bool, err error)`
+
+The total, self-validating, ATOMIC in-place replacement of a tool-result
+block's single text arm, by message block index:
+
+- every error (nil message, out-of-range block, non-tool-result block, zero/
+  multiple text arms, unknown arm) leaves the message unchanged;
+- the exact nested arm count/order and every marker byte are retained — only
+  the designated text value changes, so the provider cached-prefix boundary
+  does not move;
+- a byte-identical value is a structural no-op (`changed=false`) preserving
+  every provenance token;
+- a real change preserves `part_metadata_json` but clears the tool-result
+  signature and any final trailing-signature block whose covered scope
+  changed — no stale token survives.
+
 ### `ReplaceLastCacheBreakpoint(req, marker) (changed bool, err error)`
 
 Applies a cache-breakpoint marker **exactly**:

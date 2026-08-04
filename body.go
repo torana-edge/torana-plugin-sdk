@@ -185,6 +185,97 @@ func clearTrailingSignature(msg *pbv2.Message) {
 	}
 }
 
+// ToolResultScalarText reports whether v — a ToolResultView produced by
+// ToolResults — is SCALAR-COMPATIBLE and returns its scalar text.
+//
+// A scalar-compatible tool result has EXACTLY ONE text arm (an EXPLICIT
+// EMPTY text arm is compatible — its position is real), ZERO unknown/
+// provider arms, and any number of cache-marker arms. Zero text arms
+// (marker-only), multiple text arms, or any unknown arm are NOT compatible:
+// plain concatenation is not injective (["ab","c"] vs ["a","bc"] collide),
+// and the flat scalar era had no such shapes. The caller must decline
+// incompatible results UNCHANGED.
+//
+// The view must come from ToolResults: a manually fabricated/ambiguous view
+// cannot enable mutation of an incompatible real block, because
+// ReplaceToolResultText re-validates against the REAL block arms and is the
+// total, self-validating, atomic boundary.
+func ToolResultScalarText(v ToolResultView) (string, bool) {
+	text := ""
+	textArms := 0
+	for _, c := range v.Content {
+		if c.UnknownKind != "" {
+			return "", false
+		}
+		if c.CacheMarker != nil {
+			continue
+		}
+		textArms++
+		text = c.Text
+	}
+	if textArms != 1 {
+		return "", false
+	}
+	return text, true
+}
+
+// ReplaceToolResultText replaces the text of the SINGLE text arm of the
+// tool-result block at block with text. It is the TOTAL, self-validating,
+// ATOMIC boundary for tool-result text mutation:
+//
+//   - every error (nil message, out-of-range block, non-tool-result block,
+//     zero/multiple text arms, any unknown arm) leaves the message
+//     byte/structurally UNCHANGED;
+//   - on success the EXACT nested arm count/order is retained and every
+//     non-text arm's bytes (cache markers) are untouched — only the
+//     designated text arm's value changes, so the provider cached-prefix
+//     boundary does not move;
+//   - a byte-identical text value is a structural NO-OP (changed=false):
+//     every provenance token — the tool-result signature,
+//     part_metadata_json, and a final trailing-signature block — is
+//     preserved byte-for-byte;
+//   - a REAL text change preserves part_metadata_json but clears every
+//     provenance token whose covered scope changed: the tool-result
+//     signature (its scope is the result content) and a final
+//     trailing-signature block (its covered scope is the message body).
+func ReplaceToolResultText(msg *pbv2.Message, block int, text string) (bool, error) {
+	if msg == nil {
+		return false, fmt.Errorf("replace tool result text: nil message")
+	}
+	if block < 0 || block >= len(msg.Blocks) {
+		return false, fmt.Errorf("replace tool result text: block %d out of range (0..%d)", block, len(msg.Blocks)-1)
+	}
+	b := msg.Blocks[block]
+	if b == nil || b.GetToolResult() == nil {
+		return false, fmt.Errorf("replace tool result text: block %d is not a tool-result block", block)
+	}
+	tr := b.GetToolResult()
+	// Self-validation against the REAL block arms.
+	textIdx := -1
+	for i, c := range tr.Content {
+		if c.GetUnknown() != nil {
+			return false, fmt.Errorf("replace tool result text: block %d has an unknown content arm", block)
+		}
+		if c.GetText() != nil {
+			if textIdx >= 0 {
+				return false, fmt.Errorf("replace tool result text: block %d has multiple text arms", block)
+			}
+			textIdx = i
+		}
+	}
+	if textIdx < 0 {
+		return false, fmt.Errorf("replace tool result text: block %d has no text arm", block)
+	}
+	tb := tr.Content[textIdx].GetText()
+	if tb.Text == text {
+		return false, nil // structural no-op: every provenance token preserved
+	}
+	tb.Text = text
+	tr.Signature = "" // stale: the result content changed
+	clearTrailingSignature(msg)
+	return true, nil
+}
+
 // ToolCallView is a copied view of one tool-use block.
 type ToolCallView struct {
 	// Block is the block index inside Message.blocks.
