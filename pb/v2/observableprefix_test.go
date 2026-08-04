@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -729,11 +730,20 @@ func TestObservablePrefixSafetySettingsArray(t *testing.T) {
 }
 
 func TestObservablePrefixFailClosedAndNonAliasing(t *testing.T) {
-	// Out-of-domain request: error, never a partial projection.
+	// Out-of-domain request: the COMPLETE tuple is (nil, false, err) — no
+	// partial projection, no presence claim — and the input is untouched.
 	bad := baseObservableRequest()
 	bad.MaxTokens = proto.Int32(0)
-	if _, _, err := RequestObservablePrefix(bad); err == nil {
+	badBefore := proto.Clone(bad).(*ChatRequest)
+	b, has, err := RequestObservablePrefix(bad)
+	if err == nil {
 		t.Fatal("out-of-domain request produced a prefix")
+	}
+	if b != nil || has {
+		t.Fatalf("out-of-domain tuple = (%v, %v, %v), want (nil, false, err)", b, has, err)
+	}
+	if !proto.Equal(bad, badBefore) {
+		t.Fatal("the out-of-domain error path mutated its input")
 	}
 
 	// Non-aliasing + non-mutation: the call neither mutates the input nor
@@ -806,6 +816,31 @@ func TestObservablePrefixMarkerPresence(t *testing.T) {
 				t.Fatal("the presence oracle mutated its input")
 			}
 		})
+	}
+}
+
+// TestObservablePrefixMarshalErrorNormalization — the deterministic seam:
+// a marshal failure must produce the SAME normalized tuple as a validation
+// failure — (nil, false, err) — never a prefix with a presence claim. The
+// contract is not weakened on the theory that current validation makes
+// marshal failure unlikely.
+func TestObservablePrefixMarshalErrorNormalization(t *testing.T) {
+	orig := marshalProjection
+	defer func() { marshalProjection = orig }()
+	marshalProjection = func(out *ChatRequest, has bool) ([]byte, bool, error) {
+		return nil, false, errors.New("seam marshal failure")
+	}
+	base := baseObservableRequest()
+	before := proto.Clone(base).(*ChatRequest)
+	b, has, err := RequestObservablePrefix(base)
+	if err == nil || !strings.Contains(err.Error(), "seam marshal failure") {
+		t.Fatalf("seam error not surfaced: %v", err)
+	}
+	if b != nil || has {
+		t.Fatalf("marshal-error tuple = (%v, %v), want (nil, false)", b, has)
+	}
+	if !proto.Equal(base, before) {
+		t.Fatal("the marshal-error path mutated its input")
 	}
 }
 

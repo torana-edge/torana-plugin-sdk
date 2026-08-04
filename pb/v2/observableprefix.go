@@ -146,19 +146,29 @@ func RequestObservablePrefix(req *ChatRequest) (prefix []byte, hasBreakpoint boo
 	last := lastCacheMarker(out)
 	if last == nil {
 		// No marker: the whole request is the prefix.
-		b, err := proto.MarshalOptions{Deterministic: true}.Marshal(out)
-		return b, false, err
+		return marshalProjection(out, false)
 	}
 	if last.kind == markerCarrierTool {
 		out.Tools = out.Tools[:last.tool+1]
 		out.Messages = nil
-		b, err := proto.MarshalOptions{Deterministic: true}.Marshal(out)
-		return b, true, err
+		return marshalProjection(out, true)
 	}
 	out.Messages = out.Messages[:last.msg+1]
 	out.Messages[last.msg] = truncateMessage(out.Messages[last.msg], last.block, last.nested)
+	return marshalProjection(out, true)
+}
+
+// marshalProjection is the SINGLE serialization exit: the public contract is
+// a normalized tuple — success carries the fresh prefix and the ACTUAL
+// presence; ANY marshal error returns (nil, false, err), so no error can
+// ever pair with a usable result or a presence claim. The seam exists for
+// the normalization pin; it is not a compatibility wrapper.
+var marshalProjection = func(out *ChatRequest, has bool) ([]byte, bool, error) {
 	b, err := proto.MarshalOptions{Deterministic: true}.Marshal(out)
-	return b, true, err
+	if err != nil {
+		return nil, false, err
+	}
+	return b, has, nil
 }
 
 // ReplaceLastCacheBreakpoint replaces the marker on the LAST EXISTING carrier
