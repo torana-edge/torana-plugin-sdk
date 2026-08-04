@@ -886,72 +886,41 @@ func TestReplaceLastCacheBreakpointMixedCarriers(t *testing.T) {
 			if err != nil || !changed {
 				t.Fatalf("changed=%v err=%v, want changed", changed, err)
 			}
-			// Exactly the actual last carrier changed.
+			// SINGLE structural proof: expected = the pre-call clone with
+			// ONLY the row-designated last marker changed (built
+			// independently from the row's known indices — the production
+			// helper is never used to construct it). proto.Equal(r,
+			// expected) proves the last carrier changed AND every other
+			// request fact (model, content, parameters, earlier carriers)
+			// stayed identical — an accidental mutation of any unrelated
+			// field fails.
+			expected := proto.Clone(before).(*ChatRequest)
 			switch {
 			case row.lastTool:
-				if !bytes.Equal(r.Tools[0].CacheControlJson, replacement) {
-					t.Fatalf("tool carrier = %s, want %s", r.Tools[0].CacheControlJson, replacement)
-				}
+				expected.Tools[0].CacheControlJson = append([]byte(nil), replacement...)
 			case row.lastNested[0] >= 0:
-				got := r.Messages[row.lastNested[0]].Blocks[row.lastNested[1]].GetToolResult().Content[row.lastNested[2]].GetCacheBreakpoint().MarkerJson
-				if !bytes.Equal(got, replacement) {
-					t.Fatalf("nested carrier = %s, want %s", got, replacement)
-				}
+				expected.Messages[row.lastNested[0]].Blocks[row.lastNested[1]].GetToolResult().Content[row.lastNested[2]].GetCacheBreakpoint().MarkerJson = append([]byte(nil), replacement...)
 			case row.lastTop[0] >= 0:
-				got := r.Messages[row.lastTop[0]].Blocks[row.lastTop[1]].GetCacheBreakpoint().MarkerJson
-				if !bytes.Equal(got, replacement) {
-					t.Fatalf("outer carrier = %s, want %s", got, replacement)
-				}
+				expected.Messages[row.lastTop[0]].Blocks[row.lastTop[1]].GetCacheBreakpoint().MarkerJson = append([]byte(nil), replacement...)
 			}
-			// Every earlier carrier byte-identical.
-			after := proto.Clone(r).(*ChatRequest)
-			r2 := base()
-			row.build(r2)
-			earlier := proto.Clone(r2).(*ChatRequest)
-			// Replay on the clone of the ORIGINAL: only the last carrier may differ.
-			if _, err := ReplaceLastCacheBreakpoint(earlier, replacement); err != nil {
-				t.Fatalf("replay: %v", err)
+			if !proto.Equal(r, expected) {
+				t.Fatalf("mutation is not exactly the last carrier: got %v, want %v", r, expected)
 			}
-			// Compare every carrier region: count differing carrier fields.
-			diffs := 0
-			if !bytes.Equal(earlier.Tools[0].CacheControlJson, r2.Tools[0].CacheControlJson) {
-				diffs++
-			}
-			for mi := range r2.Messages {
-				for bi := range r2.Messages[mi].Blocks {
-					b2 := r2.Messages[mi].Blocks[bi]
-					b1 := earlier.Messages[mi].Blocks[bi]
-					if b2.GetCacheBreakpoint() != nil && b1.GetCacheBreakpoint() != nil {
-						if !bytes.Equal(b1.GetCacheBreakpoint().MarkerJson, b2.GetCacheBreakpoint().MarkerJson) {
-							diffs++
-						}
-					}
-					if tr2 := b2.GetToolResult(); tr2 != nil {
-						tr1 := b1.GetToolResult()
-						for ci := range tr2.Content {
-							c2 := tr2.Content[ci]
-							c1 := tr1.Content[ci]
-							if c2.GetCacheBreakpoint() != nil && c1.GetCacheBreakpoint() != nil {
-								if !bytes.Equal(c1.GetCacheBreakpoint().MarkerJson, c2.GetCacheBreakpoint().MarkerJson) {
-									diffs++
-								}
-							}
-						}
-					}
-				}
-			}
-			if diffs != 1 {
-				t.Fatalf("%d carrier fields changed, want exactly 1 (the actual last carrier)", diffs)
+			// Weakened-form proof: an unrelated mutation must FAIL the
+			// structural equality, proving the proof is not vacuous.
+			weakened := proto.Clone(r).(*ChatRequest)
+			weakened.Model = "other"
+			if proto.Equal(weakened, expected) {
+				t.Fatal("structural equality ignores unrelated mutations")
 			}
 			// Exact-byte replay: changed=false, nothing changes.
-			changed2, err := ReplaceLastCacheBreakpoint(after, replacement)
+			changed2, err := ReplaceLastCacheBreakpoint(r, replacement)
 			if err != nil || changed2 {
 				t.Fatalf("replay: changed=%v err=%v, want no-op", changed2, err)
 			}
-			if !proto.Equal(after, r) {
+			if !proto.Equal(r, expected) {
 				t.Fatal("exact-byte replay mutated the request")
 			}
-			_ = before
 		})
 	}
 }
