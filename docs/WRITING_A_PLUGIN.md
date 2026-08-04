@@ -226,11 +226,17 @@ serialization order. One SDK-owned projection defines it for every consumer
 (the Edge host keys its conversation cache on it; cache-aware plugins key
 their decisions on it), so no plugin can drift into a second definition.
 
-### `RequestObservablePrefix(req) ([]byte, error)`
+### `RequestObservablePrefix(req) ([]byte, bool, error)`
 
 Returns the deterministic protobuf serialization of the provider-visible
-cached prefix:
+cached prefix and whether the request carries a cache-breakpoint carrier:
 
+- **Marker presence oracle**: `hasBreakpoint` is true when a carrier exists
+  in the tools-first/outer/nested order (the prefix closes at it), false for
+  a no-marker request (the whole request is the automatic-cache prefix). It
+  is a PURE read — the same traversal the projection uses, with no mutation
+  — so a plugin can decline a no-marker request BEFORE any state access
+  without re-implementing the carrier model.
 - **Owned validation**: the request must pass `ValidateReplacement`; an
   out-of-domain request is an ERROR — never a partial projection. Decline
   without state access or mutation when it errors.

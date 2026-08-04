@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -50,11 +51,21 @@ func baseObservableRequest() *ChatRequest {
 
 func observablePrefix(t *testing.T, req *ChatRequest) []byte {
 	t.Helper()
-	b, err := RequestObservablePrefix(req)
+	b, _, err := RequestObservablePrefix(req)
 	if err != nil {
 		t.Fatalf("RequestObservablePrefix: %v", err)
 	}
 	return b
+}
+
+// observablePrefixFull returns all three values for the presence pins.
+func observablePrefixFull(t *testing.T, req *ChatRequest) ([]byte, bool) {
+	t.Helper()
+	b, has, err := RequestObservablePrefix(req)
+	if err != nil {
+		t.Fatalf("RequestObservablePrefix: %v", err)
+	}
+	return b, has
 }
 
 // checkObservablePrefixInventory validates the include/exclude tables
@@ -397,7 +408,7 @@ func TestObservablePrefixStructuralReference(t *testing.T) {
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
-			got, err := RequestObservablePrefix(row.input)
+			got, _, err := RequestObservablePrefix(row.input)
 			if err != nil {
 				t.Fatalf("RequestObservablePrefix: %v", err)
 			}
@@ -713,17 +724,26 @@ func TestObservablePrefixSafetySettingsArray(t *testing.T) {
 	// {} is NOT a valid safety-settings value (array shape) — fail-closed.
 	bad := proto.Clone(base).(*ChatRequest)
 	bad.SafetySettingsJson = []byte(`{}`)
-	if _, err := RequestObservablePrefix(bad); err == nil {
+	if _, _, err := RequestObservablePrefix(bad); err == nil {
 		t.Fatal("object-shaped safety_settings_json was not rejected")
 	}
 }
 
 func TestObservablePrefixFailClosedAndNonAliasing(t *testing.T) {
-	// Out-of-domain request: error, never a partial projection.
+	// Out-of-domain request: the COMPLETE tuple is (nil, false, err) — no
+	// partial projection, no presence claim — and the input is untouched.
 	bad := baseObservableRequest()
 	bad.MaxTokens = proto.Int32(0)
-	if _, err := RequestObservablePrefix(bad); err == nil {
+	badBefore := proto.Clone(bad).(*ChatRequest)
+	b, has, err := RequestObservablePrefix(bad)
+	if err == nil {
 		t.Fatal("out-of-domain request produced a prefix")
+	}
+	if b != nil || has {
+		t.Fatalf("out-of-domain tuple = (%v, %v, %v), want (nil, false, err)", b, has, err)
+	}
+	if !proto.Equal(bad, badBefore) {
+		t.Fatal("the out-of-domain error path mutated its input")
 	}
 
 	// Non-aliasing + non-mutation: the call neither mutates the input nor
@@ -749,6 +769,77 @@ func TestObservablePrefixFailClosedAndNonAliasing(t *testing.T) {
 	after := observablePrefix(t, base)
 	if bytes.Equal(after, retained) {
 		t.Fatal("prefix result aliased the input request")
+	}
+}
+
+// TestObservablePrefixMarkerPresence — the hasBreakpoint oracle: true when
+// the LAST carrier in tools-first/outer/nested order exists, false for a
+// no-marker request; a pure read (the input is never mutated).
+func TestObservablePrefixMarkerPresence(t *testing.T) {
+	rows := []struct {
+		name string
+		req  *ChatRequest
+		want bool
+	}{
+		{"no marker", func() *ChatRequest {
+			r := baseObservableRequest()
+			r.Messages[1].Blocks = r.Messages[1].Blocks[:1]
+			return r
+		}(), false},
+		{"tool carrier", func() *ChatRequest {
+			r := baseObservableRequest()
+			r.Messages[1].Blocks = r.Messages[1].Blocks[:1]
+			r.Tools[0].CacheControlJson = []byte(`{"type":"ephemeral"}`)
+			return r
+		}(), true},
+		{"outer carrier", baseObservableRequest(), true},
+		{"nested carrier (later than outer)", func() *ChatRequest {
+			r := baseObservableRequest()
+			r.Messages[1].Blocks = append(r.Messages[1].Blocks, &RequestBlock{Kind: &RequestBlock_ToolResult{ToolResult: &RequestToolResultBlock{
+				ToolCallId: "c1",
+				Content: []*ToolResultContentBlock{
+					{Kind: &ToolResultContentBlock_Text{Text: &ToolResultTextBlock{Text: "a"}}},
+					{Kind: &ToolResultContentBlock_CacheBreakpoint{CacheBreakpoint: &ToolResultCacheBreakpoint{MarkerJson: []byte(`{"type":"ephemeral"}`)}}},
+				},
+			}}})
+			return r
+		}(), true},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			before := proto.Clone(row.req).(*ChatRequest)
+			_, has := observablePrefixFull(t, row.req)
+			if has != row.want {
+				t.Fatalf("hasBreakpoint = %v, want %v", has, row.want)
+			}
+			if !proto.Equal(row.req, before) {
+				t.Fatal("the presence oracle mutated its input")
+			}
+		})
+	}
+}
+
+// TestObservablePrefixMarshalErrorNormalization — the deterministic seam:
+// a marshal failure must produce the SAME normalized tuple as a validation
+// failure — (nil, false, err) — never a prefix with a presence claim. The
+// contract is not weakened on the theory that current validation makes
+// marshal failure unlikely.
+func TestObservablePrefixMarshalErrorNormalization(t *testing.T) {
+	// The internal With helper injects a failing marshal function — no
+	// production global, no restore, no mutex.
+	base := baseObservableRequest()
+	before := proto.Clone(base).(*ChatRequest)
+	b, has, err := marshalProjectionWith(base, true, func(*ChatRequest) ([]byte, error) {
+		return nil, errors.New("seam marshal failure")
+	})
+	if err == nil || !strings.Contains(err.Error(), "seam marshal failure") {
+		t.Fatalf("seam error not surfaced: %v", err)
+	}
+	if b != nil || has {
+		t.Fatalf("marshal-error tuple = (%v, %v), want (nil, false)", b, has)
+	}
+	if !proto.Equal(base, before) {
+		t.Fatal("the marshal-error path mutated its input")
 	}
 }
 
