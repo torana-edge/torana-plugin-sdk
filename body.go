@@ -250,17 +250,39 @@ func ReplaceToolResultText(msg *pbv2.Message, block int, text string) (bool, err
 		return false, fmt.Errorf("replace tool result text: block %d is not a tool-result block", block)
 	}
 	tr := b.GetToolResult()
-	// Self-validation against the REAL block arms.
+	// TOTAL self-validation against the REAL nested arms: every malformed
+	// element (nil element, arm-less element, typed-nil oneof arm,
+	// malformed/incorrect-shape/duplicate-key cache marker) fails closed
+	// BEFORE any mutation — the SDK-owned strict-object rules (jsontext +
+	// shape discrimination) are reused, not re-derived.
 	textIdx := -1
 	for i, c := range tr.Content {
-		if c.GetUnknown() != nil {
-			return false, fmt.Errorf("replace tool result text: block %d has an unknown content arm", block)
+		if c == nil {
+			return false, fmt.Errorf("replace tool result text: block %d content[%d] is nil", block, i)
 		}
-		if c.GetText() != nil {
+		switch k := c.Kind.(type) {
+		case *pbv2.ToolResultContentBlock_Text:
+			if k.Text == nil {
+				return false, fmt.Errorf("replace tool result text: block %d content[%d] is a typed-nil text arm", block, i)
+			}
 			if textIdx >= 0 {
 				return false, fmt.Errorf("replace tool result text: block %d has multiple text arms", block)
 			}
 			textIdx = i
+		case *pbv2.ToolResultContentBlock_Unknown:
+			if k.Unknown == nil {
+				return false, fmt.Errorf("replace tool result text: block %d content[%d] is a typed-nil unknown arm", block, i)
+			}
+			return false, fmt.Errorf("replace tool result text: block %d has an unknown content arm", block)
+		case *pbv2.ToolResultContentBlock_CacheBreakpoint:
+			if k.CacheBreakpoint == nil {
+				return false, fmt.Errorf("replace tool result text: block %d content[%d] is a typed-nil cache arm", block, i)
+			}
+			if err := validJSONObject(k.CacheBreakpoint.MarkerJson); err != nil {
+				return false, fmt.Errorf("replace tool result text: block %d content[%d] has a malformed cache marker: %w", block, i, err)
+			}
+		default:
+			return false, fmt.Errorf("replace tool result text: block %d content[%d] is arm-less", block, i)
 		}
 	}
 	if textIdx < 0 {

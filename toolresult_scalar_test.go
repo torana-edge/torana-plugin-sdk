@@ -70,45 +70,116 @@ func TestToolResultScalarTextMatrix(t *testing.T) {
 	}
 }
 
-// TestReplaceToolResultTextInPlace — the exact in-place contract: the nested
-// arm count/order and every marker byte are retained; only the designated
-// text arm's value changes; a byte-identical value is a structural no-op
-// preserving the whole message.
-func TestReplaceToolResultTextInPlace(t *testing.T) {
-	mk := func() *pbv2.Message {
-		return toolResultMsg(trContent(
-			trMarker(`{"type":"ephemeral"}`),
-			trText("before"),
-			trMarker(`{"type":"standard"}`),
-		))
-	}
+// richToolResultMsg is a RICH ordered message: the designated tool-result
+// block carries identity, optional scalars (incl. present-false), outer
+// metadata, multiple cache markers, an unrelated SIBLING result with its
+// own content, surrounding text blocks, and a final trailing-signature
+// block (assistant-role, per the SDK's assistant-only trailing rule).
+func richToolResultMsg() *pbv2.Message {
+	return &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{
+		{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "leading"}}},
+		{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+			ToolCallId:       "c1",
+			ToolName:         "read",
+			WillContinue:     proto.Bool(false),
+			Scheduling:       proto.String("normal"),
+			PartMetadataJson: []byte(`{"outer":{"b":1,"a":2}}`),
+			Signature:        "result-sig",
+			Content: []*pbv2.ToolResultContentBlock{
+				trMarker(`{"type":"ephemeral"}`),
+				trText("before"),
+				trMarker(`{"type":"standard"}`),
+			},
+		}}},
+		{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+			ToolCallId: "c2",
+			ToolName:   "write",
+			Content: []*pbv2.ToolResultContentBlock{
+				trText("sibling-content"),
+			},
+		}}},
+		{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "trailing"}}},
+		{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: &pbv2.RequestTrailingSignatureBlock{Signature: "trailing-sig"}}},
+	}}
+}
 
-	// Real change: markers stay at their exact positions with exact bytes.
-	msg := mk()
-	changed, err := ReplaceToolResultText(msg, 0, "after")
+// TestReplaceToolResultTextRichStructuralEquality — ONLY the authorized
+// fields change: the designated text value, the tool-result signature
+// (cleared), and the final trailing-signature block (removed). The expected
+// is built by cloning the rich original and changing exactly those three;
+// proto.Equal(actual, expected) proves identity, optional scalars, outer
+// metadata, every marker byte/position, surrounding text blocks, and the
+// unrelated sibling result all stay EXACT.
+func TestReplaceToolResultTextRichStructuralEquality(t *testing.T) {
+	original := richToolResultMsg()
+	actual := proto.Clone(original).(*pbv2.Message)
+	changed, err := ReplaceToolResultText(actual, 1, "after")
 	if err != nil || !changed {
-		t.Fatalf("changed=%v err=%v, want changed", changed, err)
+		t.Fatalf("changed=%v err=%v", changed, err)
 	}
-	tr := msg.Blocks[0].GetToolResult()
-	if len(tr.Content) != 3 {
-		t.Fatalf("arm count changed: %d, want 3", len(tr.Content))
+	expected := proto.Clone(original).(*pbv2.Message)
+	expected.Blocks[1].GetToolResult().Content[1].GetText().Text = "after"
+	expected.Blocks[1].GetToolResult().Signature = ""
+	expected.Blocks = expected.Blocks[:len(expected.Blocks)-1] // trailing block removed
+	if !proto.Equal(actual, expected) {
+		t.Fatalf("mutation is not exactly the three authorized changes\n got: %v\nwant: %v", actual, expected)
 	}
-	if string(tr.Content[0].GetCacheBreakpoint().MarkerJson) != `{"type":"ephemeral"}` ||
-		string(tr.Content[2].GetCacheBreakpoint().MarkerJson) != `{"type":"standard"}` {
-		t.Fatalf("marker bytes moved: %+v", tr.Content)
-	}
-	if tr.Content[1].GetText().Text != "after" {
-		t.Fatalf("text = %q, want after", tr.Content[1].GetText().Text)
-	}
-
-	// Structural no-op: byte-identical value preserves the ENTIRE message.
-	before := proto.Clone(msg).(*pbv2.Message)
-	changed, err = ReplaceToolResultText(msg, 0, "after")
+	// The byte-identical replay is a structural no-op on the RICH message.
+	before := proto.Clone(actual).(*pbv2.Message)
+	changed, err = ReplaceToolResultText(actual, 1, "after")
 	if err != nil || changed {
-		t.Fatalf("no-op: changed=%v err=%v, want unchanged", changed, err)
+		t.Fatalf("no-op: changed=%v err=%v", changed, err)
 	}
-	if !proto.Equal(msg, before) {
-		t.Fatal("a no-op mutated the message")
+	if !proto.Equal(actual, before) {
+		t.Fatal("the no-op mutated the rich message")
+	}
+}
+
+// TestReplaceToolResultTextWeakenedProductionMutation — a production
+// mutation that also changed a marker, the identity, or a sibling would fail
+// the structural equality: the rich pin is not vacuous.
+func TestReplaceToolResultTextWeakenedProductionMutation(t *testing.T) {
+	original := richToolResultMsg()
+	actual := proto.Clone(original).(*pbv2.Message)
+	if _, err := ReplaceToolResultText(actual, 1, "after"); err != nil {
+		t.Fatal(err)
+	}
+	expected := proto.Clone(original).(*pbv2.Message)
+	expected.Blocks[1].GetToolResult().Content[1].GetText().Text = "after"
+	expected.Blocks[1].GetToolResult().Signature = ""
+	expected.Blocks = expected.Blocks[:len(expected.Blocks)-1]
+
+	for name, tamper := range map[string]func(*pbv2.Message){
+		"marker byte": func(m *pbv2.Message) {
+			m.Blocks[1].GetToolResult().Content[0].GetCacheBreakpoint().MarkerJson = []byte(`{"type":"standard"}`)
+		},
+		"marker position": func(m *pbv2.Message) {
+			c := m.Blocks[1].GetToolResult().Content
+			c[0], c[2] = c[2], c[0]
+		},
+		"tool-call identity": func(m *pbv2.Message) {
+			m.Blocks[1].GetToolResult().ToolCallId = "other"
+		},
+		"optional scalar": func(m *pbv2.Message) {
+			m.Blocks[1].GetToolResult().WillContinue = proto.Bool(true)
+		},
+		"outer metadata": func(m *pbv2.Message) {
+			m.Blocks[1].GetToolResult().PartMetadataJson = []byte(`{"outer":1}`)
+		},
+		"sibling result": func(m *pbv2.Message) {
+			m.Blocks[2].GetToolResult().Content[0].GetText().Text = "tampered"
+		},
+		"surrounding text": func(m *pbv2.Message) {
+			m.Blocks[0].GetText().Text = "tampered"
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tampered := proto.Clone(expected).(*pbv2.Message)
+			tamper(tampered)
+			if proto.Equal(actual, tampered) {
+				t.Fatalf("weakened production mutation %q went undetected", name)
+			}
+		})
 	}
 }
 
@@ -129,6 +200,15 @@ func TestReplaceToolResultTextAtomicErrors(t *testing.T) {
 		{"zero text arms", toolResultMsg(trContent(trMarker(`{"type":"ephemeral"}`))), 0},
 		{"multiple text arms", toolResultMsg(trContent(trText("a"), trText("b"))), 0},
 		{"unknown arm", toolResultMsg(trContent(trText("r"), trUnknown())), 0},
+		// Malformed nested elements: fail closed BEFORE any mutation.
+		{"nil content element", toolResultMsg(trContent(trText("r"), nil)), 0},
+		{"arm-less element", toolResultMsg(trContent(trText("r"), &pbv2.ToolResultContentBlock{})), 0},
+		{"typed-nil text arm", toolResultMsg(trContent(trText("r"), &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_Text{}})), 0},
+		{"typed-nil unknown arm", toolResultMsg(trContent(trText("r"), &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_Unknown{}})), 0},
+		{"typed-nil cache arm", toolResultMsg(trContent(trText("r"), &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_CacheBreakpoint{}})), 0},
+		{"malformed marker", toolResultMsg(trContent(trText("r"), trMarker(`not json`))), 0},
+		{"incorrect-shape marker", toolResultMsg(trContent(trText("r"), trMarker(`[1,2]`))), 0},
+		{"duplicate-key marker", toolResultMsg(trContent(trText("r"), trMarker(`{"type":"a","type":"b"}`))), 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
