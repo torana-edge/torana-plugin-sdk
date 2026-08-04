@@ -159,7 +159,8 @@ func RequestObservablePrefix(req *ChatRequest) ([]byte, error) {
 //     structurally unchanged;
 //   - changed=false when the existing marker bytes are byte-identical to
 //     marker (a lexically different but semantically identical marker is a
-//     CHANGE — conservative: the provider observes the new bytes);
+//     CHANGE — conservative: the new bytes are identity-relevant, even
+//     though an adapter may compact raw JSON at its wire boundary);
 //   - on success exactly that carrier is mutated with a defensive byte copy,
 //     so later caller mutation of marker cannot alter the request.
 func ReplaceLastCacheBreakpoint(req *ChatRequest, marker []byte) (changed bool, err error) {

@@ -205,7 +205,7 @@ opaque signatures) are **host-owned** — immutable under plugin mutation
 
 | Capability | Covers |
 | --- | --- |
-| `ir.cache_control.write` | The cache breakpoint marker ONLY: `Message.cache_control_json` and `ToolDef.cache_control_json`. It does NOT authorise message or tool content/schema changes, and the message-role grants / `ir.tools.write` do NOT authorise these marker fields — a plugin that changes a breakpoint marker must hold this grant, and nothing else it changes is covered by it. |
+| `ir.cache_control.write` | The cache breakpoint marker ONLY, on its three ordered carriers: `ToolDef.cache_control_json` (tools-first section), `RequestBlock.cache_breakpoint` (outer block), and the nested `ToolResultContentBlock.cache_breakpoint` inside a tool result. It does NOT authorise message or tool content/schema changes, and the message-role grants / `ir.tools.write` do NOT authorise these marker fields — a plugin that changes a breakpoint marker must hold this grant, and nothing else it changes is covered by it. |
 | `ir.messages.write.{user,assistant,system,tool,developer,other}` | Message **content** of that role (request and response). Not response role or signatures. |
 | `ir.tools.write` | Tool definitions on the request. |
 | `ir.model.write` | **Request** model selection only. |
@@ -218,8 +218,59 @@ changed/removed/added`. A one-for-one `TextDelta` rewrite needs only
 `ir.messages.write.assistant`. When `AfterResponse.mutable` is false, a
 `ReplaceResponse` is discarded by the host.
 
-Opaque signatures (`thinking_signature`, `ToolCall.signature`,
-`ToolCallRef.signature`) bind provider tokens to content. Mutating signed
+## The observable request prefix and cache-breakpoint carriers
+
+The host's prompt-cache identity is the **observable request prefix**: the
+bytes the provider will cache, closed at the LAST cache-breakpoint marker in
+serialization order. One SDK-owned projection defines it for every consumer
+(the Edge host keys its conversation cache on it; cache-aware plugins key
+their decisions on it), so no plugin can drift into a second definition.
+
+### `RequestObservablePrefix(req) ([]byte, error)`
+
+Returns the deterministic protobuf serialization of the provider-visible
+cached prefix:
+
+- **Owned validation**: the request must pass `ValidateReplacement`; an
+  out-of-domain request is an ERROR — never a partial projection. Decline
+  without state access or mutation when it errors.
+- **Marker model**: the prefix closes at the LAST carrier in
+  tools-first/outer/nested order. A tool-section marker ends the prefix in
+  the tools (no message is part of it); an outer or nested marker truncates
+  the messages inclusive at the exact block/nested position. NO marker means
+  the WHOLE request is the prefix (automatic prefix caching).
+- **Field set**: model, tools, messages through the boundary,
+  `provider_extensions_json`, `safety_settings_json`, and the generation
+  params (`max_tokens` / `temperature` / `top_p` / `stop_sequences`,
+  presence-aware). ONLY `stream` and `torana_meta_json` are excluded — every
+  other top-level field folds, so an additive field is a deliberate,
+  inventory-tested decision.
+- **Purity**: the projection is a fresh clone; the input is never mutated
+  and the returned bytes never alias it. Raw JSON folds verbatim (member
+  order and lexemes are identity-relevant), optional scalars fold
+  presence-aware, and stop sequences fold ordered.
+
+### `ReplaceLastCacheBreakpoint(req, marker) (changed bool, err error)`
+
+Applies a cache-breakpoint marker **exactly**:
+
+- Replaces the marker on the LAST EXISTING carrier (tool section / outer
+  block / nested tool-result content) — it NEVER inserts a marker and never
+  guesses a position.
+- No carrier ⇒ `ErrNoCacheBreakpoint` (treat as pass: decline without state
+  or mutation).
+- ATOMIC: the request and the marker (a strict JSON object) are validated
+  and the carrier is located BEFORE any mutation; on every error the request
+  is unchanged. On success exactly one carrier is replaced with a defensive
+  byte copy.
+- `changed=false` when the new marker bytes are byte-identical to the
+  existing marker. A lexically different but semantically identical marker
+  IS a change — conservative: the new bytes are identity-relevant, even
+  though an adapter may compact raw JSON at its wire boundary.
+- The marker mutation requires the `ir.cache_control.write` grant (see the
+  capability table).
+
+ Mutating signed
 content while leaving the signature in place is invalid — the host must reject
 that mutation or clear the signature. On the stream path, `ToolCallRef.signature`
 binds `id`/`name` and `ToolCallDelta.arguments_delta` for the **same unique
