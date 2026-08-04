@@ -91,6 +91,15 @@ const (
 	SectionMessagesSystem    WriteSection = "ir.messages.write.system"
 	SectionMessagesTool      WriteSection = "ir.messages.write.tool"
 
+	// SectionToolResultsWrite is the dedicated source-level capability for
+	// ToolResultTextBlock.text: it authorizes ONLY position-preserving text
+	// VALUE changes at the exact (message, block, content) position,
+	// independent of the enclosing message role. It does NOT authorize
+	// topology, cache markers, roles, metadata, identities, unknown arms,
+	// or ordinary prompt text (those stay under their own grants). The
+	// official compactors request ONLY this grant for result text.
+	SectionToolResultsWrite WriteSection = "ir.tool_results.write"
+
 	// SectionMessagesDeveloper covers OpenAI's "developer" role, which is its
 	// rename of "system". Format adapters pass roles through verbatim — a
 	// transparent proxy must not rewrite "developer" to "system" on the way in,

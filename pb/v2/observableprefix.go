@@ -230,6 +230,11 @@ func ReplaceLastCacheBreakpoint(req *ChatRequest, marker []byte) (changed bool, 
 			return false, nil
 		}
 		cb.MarkerJson = append([]byte(nil), marker...)
+		// A nested marker change alters the signed tool-result content, so
+		// the containing result signature is cleared (its covered content
+		// changed); the trailing carrier and unrelated tokens are preserved
+		// (markers are outside their coverage).
+		req.Messages[last.msg].Blocks[last.block].GetToolResult().Signature = ""
 		return true, nil
 	}
 	return false, fmt.Errorf("cache breakpoint carrier %d is not a marker carrier", last.kind)
