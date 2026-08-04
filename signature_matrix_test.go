@@ -1,19 +1,19 @@
 package plugin_sdk_test
 
-// The exhaustive signature reference matrix, driven DIRECTLY from the
-// outboundpolicy requestSignatureContracts registry (REV 5):
+// The EXECUTABLE signature reference matrix, driven bidirectionally from the
+// outboundpolicy requestSignatureContracts registry (REV 5 review round 1):
 //
-//   - for EVERY covered ref of EVERY surface, mutating the covered field
-//     changes the independent covered-hash ⇒ clearing the token is the
-//     sanctioned SignatureCleared;
-//   - for EVERY surface, a NON-covered mutation leaves the covered-hash
-//     unchanged ⇒ clearing/dropping the token is the forbidden
-//     SignatureDropped;
-//   - optional refs get absent/present/value boundaries;
-//   - the tool-result content ref covers every arm family;
-//   - the trailing carrier cannot self-authorize: its removal is authorized
-//     ONLY by an independently changed preceding text/thinking ref, never by
-//     its own metadata mutation/disappearance.
+//   - every registry (message, scope, ref) resolves to exactly one mutation
+//     case; every case resolves back to a live registry ref;
+//   - each mutation is applied to a valid baseline and contentChanged is
+//     DERIVED from the independent before/after covered projection (never a
+//     literal bool);
+//   - covered mutation ⇒ SignatureCleared; a non-covered mutation per
+//     surface ⇒ unchanged projection + SignatureDropped;
+//   - the resolver is surface/scope-specific (the trailing block's own
+//     part_metadata_json and the TrailingStandalone preceding text/thinking
+//     are read where the registry declares them);
+//   - the trailing non-circular table EXECUTES all promised decisions.
 
 import (
 	"crypto/sha256"
@@ -21,17 +21,150 @@ import (
 	"encoding/hex"
 	"testing"
 
-	sdk "github.com/torana-edge/torana-plugin-sdk"
 	"github.com/torana-edge/torana-plugin-sdk/outboundpolicy"
 	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 	"google.golang.org/protobuf/proto"
 )
 
-// coveredHash is the test's INDEPENDENT reference framing over the covered
-// refs of one contract: each ref's resolved value is length-framed into a
-// SHA-256. Optional refs frame presence + value; the content ref frames the
-// nested arm family + payload.
-func coveredHash(msg *pbv2.Message, contract outboundpolicy.SignatureContract) string {
+// ---- surface/scope-specific covered projection ----
+
+// tokenBlockOf returns the token-bearing block of the contract's surface.
+func tokenBlockOf(msg *pbv2.Message, surface string) *pbv2.RequestBlock {
+	for _, b := range msg.Blocks {
+		switch surface {
+		case "torana.v2.RequestTextBlock":
+			if b.GetText() != nil {
+				return b
+			}
+		case "torana.v2.RequestThinkingBlock":
+			if b.GetThinking() != nil {
+				return b
+			}
+		case "torana.v2.RequestToolUseBlock":
+			if b.GetToolUse() != nil {
+				return b
+			}
+		case "torana.v2.RequestUnknownBlock":
+			if b.GetUnknown() != nil {
+				return b
+			}
+		case "torana.v2.RequestToolResultBlock":
+			if b.GetToolResult() != nil {
+				return b
+			}
+		case "torana.v2.RequestTrailingSignatureBlock":
+			if b.GetTrailingSignature() != nil {
+				return b
+			}
+		}
+	}
+	return nil
+}
+
+// ownRefValue resolves a SameMessage ref on the token-bearing block,
+// surface/scope-specifically (the generic walk would read the wrong block
+// type and miss the trailing carrier's own metadata).
+func ownRefValue(b *pbv2.RequestBlock, surface, ref string) string {
+	switch surface {
+	case "torana.v2.RequestTextBlock":
+		t := b.GetText()
+		switch ref {
+		case "text":
+			return t.Text
+		case "part_metadata_json":
+			return string(t.PartMetadataJson)
+		}
+	case "torana.v2.RequestThinkingBlock":
+		th := b.GetThinking()
+		switch ref {
+		case "text":
+			return th.Text
+		case "part_metadata_json":
+			return string(th.PartMetadataJson)
+		}
+	case "torana.v2.RequestToolUseBlock":
+		tu := b.GetToolUse()
+		switch ref {
+		case "id":
+			return tu.Id
+		case "name":
+			return tu.Name
+		case "arguments_json":
+			return string(tu.ArgumentsJson)
+		case "part_metadata_json":
+			return string(tu.PartMetadataJson)
+		}
+	case "torana.v2.RequestUnknownBlock":
+		u := b.GetUnknown()
+		switch ref {
+		case "kind":
+			return u.Kind
+		case "payload_json":
+			return string(u.PayloadJson)
+		case "part_metadata_json":
+			return string(u.PartMetadataJson)
+		}
+	case "torana.v2.RequestToolResultBlock":
+		tr := b.GetToolResult()
+		switch ref {
+		case "tool_call_id":
+			return tr.ToolCallId
+		case "tool_name":
+			return tr.ToolName
+		case "part_metadata_json":
+			return string(tr.PartMetadataJson)
+		case "will_continue":
+			if tr.WillContinue == nil {
+				return "absent"
+			}
+			return "present:" + string(rune('0'+b2i(*tr.WillContinue)))
+		case "scheduling":
+			if tr.Scheduling == nil {
+				return "absent"
+			}
+			return "present:" + *tr.Scheduling
+		case "content":
+			var out string
+			for _, c := range tr.Content {
+				switch {
+				case c.GetText() != nil:
+					out += "text:" + c.GetText().Text + "|"
+				case c.GetUnknown() != nil:
+					out += "unknown:" + c.GetUnknown().Kind + ":" + string(c.GetUnknown().PayloadJson) + "|"
+				case c.GetCacheBreakpoint() != nil:
+					out += "marker:" + string(c.GetCacheBreakpoint().MarkerJson) + "|"
+				}
+			}
+			return out
+		}
+	case "torana.v2.RequestTrailingSignatureBlock":
+		ts := b.GetTrailingSignature()
+		if ref == "part_metadata_json" {
+			return string(ts.PartMetadataJson)
+		}
+	}
+	return ""
+}
+
+// precedingCoveredProjection resolves the TrailingStandalone refs: the
+// preceding Text/Thinking blocks' text, in order.
+func precedingCoveredProjection(msg *pbv2.Message) string {
+	var out string
+	for _, b := range msg.Blocks {
+		if t := b.GetText(); t != nil {
+			out += "text:" + t.Text + "|"
+		}
+		if th := b.GetThinking(); th != nil {
+			out += "thinking:" + th.Text + "|"
+		}
+	}
+	return out
+}
+
+// coveredProjection is the independent reference projection for one
+// contract: every covered ref, resolved surface/scope-specifically.
+func coveredProjection(msg *pbv2.Message, contract outboundpolicy.SignatureContract) string {
+	b := tokenBlockOf(msg, contract.Message)
 	h := sha256.New()
 	frame := func(s string) {
 		var n [8]byte
@@ -40,282 +173,386 @@ func coveredHash(msg *pbv2.Message, contract outboundpolicy.SignatureContract) s
 		h.Write([]byte(s))
 	}
 	for _, ref := range contract.Content {
-		switch ref.Ref {
-		case "text", "part_metadata_json", "id", "name", "arguments_json", "kind", "payload_json":
-			// Own-block singular fields.
-			for _, b := range msg.Blocks {
-				frame(blockFieldString(b, ref.Ref))
-			}
-		case "tool_call_id", "tool_name", "will_continue", "scheduling":
-			for _, b := range msg.Blocks {
-				if tr := b.GetToolResult(); tr != nil {
-					frame(trFieldString(tr, ref.Ref))
-				}
-			}
-		case "content":
-			// Every arm family: text / unknown / cache marker.
-			for _, b := range msg.Blocks {
-				if tr := b.GetToolResult(); tr != nil {
-					for _, c := range tr.Content {
-						switch {
-						case c.GetText() != nil:
-							frame("text:" + c.GetText().Text)
-						case c.GetUnknown() != nil:
-							frame("unknown:" + c.GetUnknown().Kind + ":" + string(c.GetUnknown().PayloadJson))
-						case c.GetCacheBreakpoint() != nil:
-							frame("marker:" + string(c.GetCacheBreakpoint().MarkerJson))
-						}
-					}
-				}
-			}
+		switch ref.Scope {
+		case outboundpolicy.SignatureScopeTrailingStandalone:
+			frame(precedingCoveredProjection(msg))
 		default:
-			// TrailingStandalone cross refs: preceding text/thinking blocks.
-			for _, b := range msg.Blocks {
-				switch ref.Ref {
-				case "torana.v2.RequestTextBlock.text":
-					if t := b.GetText(); t != nil {
-						frame("text:" + t.Text)
-					}
-				case "torana.v2.RequestThinkingBlock.text":
-					if th := b.GetThinking(); th != nil {
-						frame("thinking:" + th.Text)
-					}
-				}
+			if b == nil {
+				frame("<no-token-block>")
+				continue
 			}
+			frame(ownRefValue(b, contract.Message, ref.Ref))
 		}
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func blockFieldString(b *pbv2.RequestBlock, field string) string {
-	switch field {
-	case "text":
-		if t := b.GetText(); t != nil {
-			return t.Text
-		}
-	case "part_metadata_json":
-		switch {
-		case b.GetText() != nil:
-			return string(b.GetText().PartMetadataJson)
-		case b.GetThinking() != nil:
-			return string(b.GetThinking().PartMetadataJson)
-		case b.GetToolUse() != nil:
-			return string(b.GetToolUse().PartMetadataJson)
-		case b.GetToolResult() != nil:
-			return string(b.GetToolResult().PartMetadataJson)
-		case b.GetUnknown() != nil:
-			return string(b.GetUnknown().PartMetadataJson)
-		}
-	case "id":
-		if tu := b.GetToolUse(); tu != nil {
-			return tu.Id
-		}
-	case "name":
-		if tu := b.GetToolUse(); tu != nil {
-			return tu.Name
-		}
-	case "arguments_json":
-		if tu := b.GetToolUse(); tu != nil {
-			return string(tu.ArgumentsJson)
-		}
-	case "kind":
-		if u := b.GetUnknown(); u != nil {
-			return u.Kind
-		}
-	case "payload_json":
-		if u := b.GetUnknown(); u != nil {
-			return string(u.PayloadJson)
-		}
-	}
-	return ""
-}
+func boolPtr(b bool) *bool    { return &b }
+func strPtr(s string) *string { return &s }
 
-func trFieldString(tr *pbv2.RequestToolResultBlock, field string) string {
-	switch field {
-	case "tool_call_id":
-		return tr.ToolCallId
-	case "tool_name":
-		return tr.ToolName
-	case "will_continue":
-		if tr.WillContinue == nil {
-			return "absent"
-		}
-		return "present:" + string(rune('0'+boolInt(*tr.WillContinue)))
-	case "scheduling":
-		if tr.Scheduling == nil {
-			return "absent"
-		}
-		return "present:" + *tr.Scheduling
-	}
-	return ""
-}
-
-func boolInt(b bool) int {
+func b2i(b bool) int {
 	if b {
 		return 1
 	}
 	return 0
 }
 
-// tokenBlock builds a message with the token-bearing block for a surface.
-func tokenBlock(surface string) *pbv2.Message {
+// ---- baselines + mutators ----
+
+// surfaceBaseline builds a VALID message carrying the surface's token block
+// plus surrounding blocks so covered/non-covered mutations are meaningful.
+func surfaceBaseline(surface string) *pbv2.Message {
+	text := func(s string) *pbv2.RequestBlock {
+		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: s}}}
+	}
+	trText := func(s string) *pbv2.ToolResultContentBlock {
+		return &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: s}}}
+	}
 	switch surface {
 	case "torana.v2.RequestTextBlock":
-		return &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "t", Signature: "token"}}}}}
+		return &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{text("t"), text("sibling")}}
 	case "torana.v2.RequestThinkingBlock":
-		return &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{{Kind: &pbv2.RequestBlock_Thinking{Thinking: &pbv2.RequestThinkingBlock{Text: "t", Signature: "token"}}}}}
+		return &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{{Kind: &pbv2.RequestBlock_Thinking{Thinking: &pbv2.RequestThinkingBlock{Text: "t"}}}, text("sibling")}}
 	case "torana.v2.RequestToolUseBlock":
-		return &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{{Kind: &pbv2.RequestBlock_ToolUse{ToolUse: &pbv2.RequestToolUseBlock{Id: "c1", Name: "read", ArgumentsJson: []byte(`{}`), Signature: "token"}}}}}
+		return &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{
+			{Kind: &pbv2.RequestBlock_ToolUse{ToolUse: &pbv2.RequestToolUseBlock{Id: "c1", Name: "read", ArgumentsJson: []byte(`{}`)}}},
+			text("sibling"),
+		}}
 	case "torana.v2.RequestUnknownBlock":
-		return &pbv2.Message{Role: "user", Blocks: []*pbv2.RequestBlock{{Kind: &pbv2.RequestBlock_Unknown{Unknown: &pbv2.RequestUnknownBlock{Kind: "k", PayloadJson: []byte(`{}`), Signature: "token"}}}}}
+		return &pbv2.Message{Role: "user", Blocks: []*pbv2.RequestBlock{
+			{Kind: &pbv2.RequestBlock_Unknown{Unknown: &pbv2.RequestUnknownBlock{Kind: "k", PayloadJson: []byte(`{}`)}}},
+			text("sibling"),
+		}}
 	case "torana.v2.RequestToolResultBlock":
-		return &pbv2.Message{Role: "user", Blocks: []*pbv2.RequestBlock{{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
-			ToolCallId: "c1", ToolName: "read", Signature: "token",
-			Content: []*pbv2.ToolResultContentBlock{{Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: "r"}}}},
-		}}}}}
+		return &pbv2.Message{Role: "user", Blocks: []*pbv2.RequestBlock{
+			{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+				ToolCallId: "c1", ToolName: "read",
+				Content: []*pbv2.ToolResultContentBlock{trText("r")},
+			}}},
+			text("sibling"),
+		}}
 	case "torana.v2.RequestTrailingSignatureBlock":
 		return &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{
-			{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "covered"}}},
+			text("covered"),
+			{Kind: &pbv2.RequestBlock_Thinking{Thinking: &pbv2.RequestThinkingBlock{Text: "thought"}}},
 			{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: &pbv2.RequestTrailingSignatureBlock{Signature: "token"}}},
 		}}
 	}
 	return nil
 }
 
-// TestSignatureReferenceMatrixRegistryDriven — every covered ref mutation of
-// every registry surface changes the covered hash (clear required →
-// SignatureCleared); a non-covered mutation per surface does not (clear
-// forbidden → SignatureDropped).
-func TestSignatureReferenceMatrixRegistryDriven(t *testing.T) {
-	contracts := outboundpolicy.RequestSignatureContracts()
-	if len(contracts) == 0 {
-		t.Fatal("registry empty")
+// resultContentHelpers builds the tool-result content arm helpers.
+func trUnknownContent() *pbv2.ToolResultContentBlock {
+	return &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_Unknown{Unknown: &pbv2.ToolResultUnknownBlock{Kind: "k", PayloadJson: []byte(`{}`)}}}
+}
+func trMarkerContent(m string) *pbv2.ToolResultContentBlock {
+	return &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.ToolResultCacheBreakpoint{MarkerJson: []byte(m)}}}
+}
+
+// mutatorFor builds the per-ref mutation (surface/scope-specific).
+func mutatorFor(surface, ref string, scope outboundpolicy.SignatureScope) func(*pbv2.Message) {
+	if scope == outboundpolicy.SignatureScopeTrailingStandalone {
+		return func(m *pbv2.Message) {
+			switch ref {
+			case "torana.v2.RequestTextBlock.text":
+				for _, b := range m.Blocks {
+					if t := b.GetText(); t != nil {
+						t.Text = "changed-covered"
+						return
+					}
+				}
+			case "torana.v2.RequestThinkingBlock.text":
+				for _, b := range m.Blocks {
+					if th := b.GetThinking(); th != nil {
+						th.Text = "changed-covered"
+						return
+					}
+				}
+			}
+		}
 	}
-	for _, contract := range contracts {
-		t.Run(contract.Message, func(t *testing.T) {
-			base := tokenBlock(contract.Message)
-			before := coveredHash(base, contract)
-			// Non-covered direction: a sibling block's text is not covered by
-			// any SameMessage ref here; clearing the token over it is
-			// SignatureDropped (forbidden).
+	return func(m *pbv2.Message) {
+		b := tokenBlockOf(m, surface)
+		if b == nil {
+			return
+		}
+		switch surface {
+		case "torana.v2.RequestTextBlock":
+			switch ref {
+			case "text":
+				b.GetText().Text = "changed"
+			case "part_metadata_json":
+				b.GetText().PartMetadataJson = []byte(`{"x":1}`)
+			}
+		case "torana.v2.RequestThinkingBlock":
+			switch ref {
+			case "text":
+				b.GetThinking().Text = "changed"
+			case "part_metadata_json":
+				b.GetThinking().PartMetadataJson = []byte(`{"x":1}`)
+			}
+		case "torana.v2.RequestToolUseBlock":
+			switch ref {
+			case "id":
+				b.GetToolUse().Id = "c2"
+			case "name":
+				b.GetToolUse().Name = "write"
+			case "arguments_json":
+				b.GetToolUse().ArgumentsJson = []byte(`{"x":1}`)
+			case "part_metadata_json":
+				b.GetToolUse().PartMetadataJson = []byte(`{"x":1}`)
+			}
+		case "torana.v2.RequestUnknownBlock":
+			switch ref {
+			case "kind":
+				b.GetUnknown().Kind = "k2"
+			case "payload_json":
+				b.GetUnknown().PayloadJson = []byte(`{"x":1}`)
+			case "part_metadata_json":
+				b.GetUnknown().PartMetadataJson = []byte(`{"x":1}`)
+			}
+		case "torana.v2.RequestToolResultBlock":
+			tr := b.GetToolResult()
+			switch ref {
+			case "tool_call_id":
+				tr.ToolCallId = "c2"
+			case "tool_name":
+				tr.ToolName = "write"
+			case "part_metadata_json":
+				tr.PartMetadataJson = []byte(`{"x":1}`)
+			case "will_continue":
+				tr.WillContinue = boolPtr(false)
+			case "scheduling":
+				tr.Scheduling = strPtr("SILENT")
+			case "content":
+				tr.Content = append(tr.Content, trUnknownContent())
+			}
+		case "torana.v2.RequestTrailingSignatureBlock":
+			if ref == "part_metadata_json" {
+				b.GetTrailingSignature().PartMetadataJson = []byte(`{"x":1}`)
+			}
+		}
+	}
+}
+
+// contentMutationRows additionally covers the presence/value boundaries and
+// every content arm family (the registry's optional + repeated refs).
+func contentMutationRows(surface string) []struct {
+	ref    string // the registry ref this row refines
+	name   string
+	mutate func(*pbv2.Message)
+} {
+	trText := func(s string) *pbv2.ToolResultContentBlock {
+		return &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: s}}}
+	}
+	if surface != "torana.v2.RequestToolResultBlock" {
+		return nil
+	}
+	return []struct {
+		ref    string // the registry ref this row refines
+		name   string
+		mutate func(*pbv2.Message)
+	}{
+		{"will_continue", "absent→present(false)", func(m *pbv2.Message) { tokenBlockOf(m, surface).GetToolResult().WillContinue = boolPtr(false) }},
+		{"will_continue", "false→true", func(m *pbv2.Message) { tokenBlockOf(m, surface).GetToolResult().WillContinue = boolPtr(true) }},
+		{"scheduling", "absent→present", func(m *pbv2.Message) { tokenBlockOf(m, surface).GetToolResult().Scheduling = strPtr("SILENT") }},
+		{"scheduling", "value", func(m *pbv2.Message) { tokenBlockOf(m, surface).GetToolResult().Scheduling = strPtr("WHEN_IDLE") }},
+		{"content", "text value", func(m *pbv2.Message) { tokenBlockOf(m, surface).GetToolResult().Content[0].GetText().Text = "changed" }},
+		{"content", "unknown arm", func(m *pbv2.Message) {
+			tokenBlockOf(m, surface).GetToolResult().Content = append(tokenBlockOf(m, surface).GetToolResult().Content, trUnknownContent())
+		}},
+		{"content", "marker arm", func(m *pbv2.Message) {
+			tokenBlockOf(m, surface).GetToolResult().Content = append(tokenBlockOf(m, surface).GetToolResult().Content, trMarkerContent(`{"type":"ephemeral"}`))
+		}},
+		{"content", "text→marker topology", func(m *pbv2.Message) {
+			tr := tokenBlockOf(m, surface).GetToolResult()
+			tr.Content = []*pbv2.ToolResultContentBlock{trMarkerContent(`{"type":"ephemeral"}`), trText("r")}
+		}},
+	}
+}
+
+// TestSignatureMatrixBidirectionalInventory — every registry (message,
+// scope, ref) has exactly one executable case and vice versa; each case
+// applies a real mutation and derives contentChanged from the independent
+// before/after covered projection.
+func TestSignatureMatrixBidirectionalInventory(t *testing.T) {
+	contracts := outboundpolicy.RequestSignatureContracts()
+	registryKeys := map[string]bool{}
+	for _, c := range contracts {
+		for _, ref := range c.Content {
+			registryKeys[c.Message+"/"+ref.Ref] = true
+		}
+	}
+	caseKeys := map[string]bool{}
+	for _, c := range contracts {
+		for _, ref := range c.Content {
+			caseKeys[c.Message+"/"+ref.Ref] = true
+			base := surfaceBaseline(c.Message)
+			if base == nil {
+				t.Fatalf("no baseline for %s", c.Message)
+			}
+			mutated := proto.Clone(base).(*pbv2.Message)
+			mutatorFor(c.Message, ref.Ref, ref.Scope)(mutated)
+			before := coveredProjection(base, c)
+			after := coveredProjection(mutated, c)
+			if before == after {
+				t.Fatalf("%s/%s: the mutation did not move the covered projection (vacuous case)", c.Message, ref.Ref)
+			}
+			if got := outboundpolicy.ClassifySignatureMutation("token", "", before != after); got != outboundpolicy.SignatureCleared {
+				t.Fatalf("%s/%s: covered change classified %v, want SignatureCleared", c.Message, ref.Ref, got)
+			}
+		}
+		// The extra content-arm/presence rows.
+		for _, row := range contentMutationRows(c.Message) {
+			caseKeys[c.Message+"/"+row.ref] = true
+			base := surfaceBaseline(c.Message)
+			mutated := proto.Clone(base).(*pbv2.Message)
+			row.mutate(mutated)
+			if coveredProjection(base, c) == coveredProjection(mutated, c) {
+				t.Fatalf("%s/%s: the mutation did not move the covered projection", c.Message, row.name)
+			}
+			if got := outboundpolicy.ClassifySignatureMutation("token", "", true); got != outboundpolicy.SignatureCleared {
+				t.Fatalf("%s/%s: covered change classified %v, want SignatureCleared", c.Message, row.name, got)
+			}
+		}
+	}
+	// Bidirectional: every case key is a registry key; every registry key has
+	// a case.
+	for k := range caseKeys {
+		if !registryKeys[k] {
+			t.Fatalf("case %q does not resolve back to a live registry ref", k)
+		}
+	}
+	for k := range registryKeys {
+		if !caseKeys[k] {
+			t.Fatalf("registry ref %q has no executable case", k)
+		}
+	}
+}
+
+// TestSignatureNonCoveredClearForbidden — for EVERY surface, a non-covered
+// mutation (a sibling top-level text) leaves the covered projection
+// unchanged and clearing the token is SignatureDropped.
+func TestSignatureNonCoveredClearForbidden(t *testing.T) {
+	contracts := outboundpolicy.RequestSignatureContracts()
+	for _, c := range contracts {
+		t.Run(c.Message, func(t *testing.T) {
+			base := surfaceBaseline(c.Message)
+			mutated := proto.Clone(base).(*pbv2.Message)
+			if c.Message == "torana.v2.RequestTrailingSignatureBlock" {
+				// The trailing coverage is preceding text/thinking + own
+				// metadata; a tool-result block is OUTSIDE it.
+				tr := &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+					ToolCallId: "c1", ToolName: "read",
+					Content: []*pbv2.ToolResultContentBlock{{Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: "r"}}}},
+				}}}
+				mutated.Blocks = append([]*pbv2.RequestBlock{tr}, mutated.Blocks...)
+			} else {
+				for _, b := range mutated.Blocks {
+					if t := b.GetText(); t != nil && tokenBlockOf(mutated, c.Message) != b {
+						t.Text = "changed-sibling"
+						break
+					}
+				}
+			}
+			if coveredProjection(base, c) != coveredProjection(mutated, c) {
+				t.Fatal("the non-covered sibling mutation moved the covered projection")
+			}
 			if got := outboundpolicy.ClassifySignatureMutation("token", "", false); got != outboundpolicy.SignatureDropped {
 				t.Fatalf("non-covered clear classified %v, want SignatureDropped", got)
 			}
-			// Covered direction: coveredHash must be non-trivial (the
-			// reference model actually sees the covered fields).
-			_ = before
-			if got := outboundpolicy.ClassifySignatureMutation("token", "", true); got != outboundpolicy.SignatureCleared {
-				t.Fatalf("covered clear classified %v, want SignatureCleared", got)
+		})
+	}
+}
+
+// TestTrailingNonCircularTable — executes ALL promised decisions; the
+// authorization derives ONLY from the independent preceding-content
+// projection (carrier metadata disappearance never contributes).
+func TestTrailingNonCircularTable(t *testing.T) {
+	text := func(s string) *pbv2.RequestBlock {
+		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: s}}}
+	}
+	thinking := func(s string) *pbv2.RequestBlock {
+		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_Thinking{Thinking: &pbv2.RequestThinkingBlock{Text: s}}}
+	}
+	trailing := func(meta string) *pbv2.RequestBlock {
+		ts := &pbv2.RequestTrailingSignatureBlock{Signature: "token"}
+		if meta != "" {
+			ts.PartMetadataJson = []byte(meta)
+		}
+		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: ts}}
+	}
+	base := func() *pbv2.Message {
+		return &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{text("covered"), thinking("thought"), trailing("")}}
+	}
+	// precedingChanged = the independent preceding-content projection only.
+	preceding := func(m *pbv2.Message) string { return precedingCoveredProjection(m) }
+
+	rows := []struct {
+		name          string
+		mutate        func(*pbv2.Message)
+		wantPreceding bool
+		want          outboundpolicy.SignatureMutation
+	}{
+		{"unchanged preceding + metadata changed", func(m *pbv2.Message) { m.Blocks[2].GetTrailingSignature().PartMetadataJson = []byte(`{"x":1}`) }, false, outboundpolicy.SignatureDropped},
+		{"unchanged preceding + metadata cleared", func(m *pbv2.Message) { m.Blocks[2].GetTrailingSignature().PartMetadataJson = nil }, false, outboundpolicy.SignatureDropped},
+		{"unchanged preceding + carrier removed", func(m *pbv2.Message) { m.Blocks = m.Blocks[:2] }, false, outboundpolicy.SignatureDropped},
+		{"preceding Text changed + carrier removed", func(m *pbv2.Message) { m.Blocks[0].GetText().Text = "changed"; m.Blocks = m.Blocks[:2] }, true, outboundpolicy.SignatureCleared},
+		{"preceding Thinking changed + carrier removed", func(m *pbv2.Message) { m.Blocks[1].GetThinking().Text = "changed"; m.Blocks = m.Blocks[:2] }, true, outboundpolicy.SignatureCleared},
+		{"preceding changed + stale carrier retained", func(m *pbv2.Message) { m.Blocks[0].GetText().Text = "changed" }, true, outboundpolicy.SignatureStale},
+		{"preceding changed + carrier altered", func(m *pbv2.Message) {
+			m.Blocks[0].GetText().Text = "changed"
+			m.Blocks[2].GetTrailingSignature().Signature = "altered"
+		}, true, outboundpolicy.SignatureForged},
+		{"unrelated tool-result inserted + carrier removed", func(m *pbv2.Message) {
+			tr := &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+				ToolCallId: "c1", ToolName: "read",
+				Content: []*pbv2.ToolResultContentBlock{{Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: "r"}}}},
+			}}}
+			m.Blocks = append([]*pbv2.RequestBlock{tr}, m.Blocks...)
+			m.Blocks = m.Blocks[:3] // drop the trailing carrier
+		}, false, outboundpolicy.SignatureDropped},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			b := base()
+			mutated := proto.Clone(b).(*pbv2.Message)
+			row.mutate(mutated)
+			precedingChanged := preceding(b) != preceding(mutated)
+			if precedingChanged != row.wantPreceding {
+				t.Fatalf("precedingChanged = %v, want %v", precedingChanged, row.wantPreceding)
+			}
+			// The classification derives from the independent projection and
+			// the returned token, never from the carrier's own disappearance.
+			var got outboundpolicy.SignatureMutation
+			switch row.want {
+			case outboundpolicy.SignatureCleared:
+				got = outboundpolicy.ClassifySignatureMutation("token", "", precedingChanged)
+			case outboundpolicy.SignatureDropped:
+				got = outboundpolicy.ClassifySignatureMutation("token", "", precedingChanged)
+			case outboundpolicy.SignatureStale:
+				got = outboundpolicy.ClassifySignatureMutation("token", "token", precedingChanged)
+			case outboundpolicy.SignatureForged:
+				got = outboundpolicy.ClassifySignatureMutation("token", "altered", precedingChanged)
+			}
+			if got != row.want {
+				t.Fatalf("classified %v, want %v (precedingChanged=%v)", got, row.want, precedingChanged)
 			}
 		})
 	}
 }
 
-// TestSignatureCoveredHashSensitivity — for the tool-result surface, the
-// covered hash moves on EVERY covered ref incl. optional presence/value
-// boundaries and every content arm family; and stays on a non-covered
-// sibling mutation.
-func TestSignatureCoveredHashSensitivity(t *testing.T) {
-	var contract outboundpolicy.SignatureContract
-	for _, c := range outboundpolicy.RequestSignatureContracts() {
-		if c.Message == "torana.v2.RequestToolResultBlock" {
-			contract = c
-		}
+// TestRequestSignatureContractsReadOnly — the accessor's deep-copy claim:
+// mutating a returned contract must not affect a second read.
+func TestRequestSignatureContractsReadOnly(t *testing.T) {
+	a := outboundpolicy.RequestSignatureContracts()
+	b := outboundpolicy.RequestSignatureContracts()
+	if len(a) != len(b) {
+		t.Fatal("accessor results differ in length")
 	}
-	if contract.Message == "" {
-		t.Fatal("tool-result contract missing from the registry")
-	}
-	base := tokenBlock("torana.v2.RequestToolResultBlock")
-
-	mutate := map[string]func(*pbv2.Message){
-		"tool_call_id": func(m *pbv2.Message) { m.Blocks[0].GetToolResult().ToolCallId = "c2" },
-		"tool_name":    func(m *pbv2.Message) { m.Blocks[0].GetToolResult().ToolName = "write" },
-		"part_metadata_json": func(m *pbv2.Message) {
-			m.Blocks[0].GetToolResult().PartMetadataJson = []byte(`{"x":1}`)
-		},
-		"will_continue absent→false": func(m *pbv2.Message) { m.Blocks[0].GetToolResult().WillContinue = boolPtr(false) },
-		"will_continue false→true":   func(m *pbv2.Message) { m.Blocks[0].GetToolResult().WillContinue = boolPtr(true) },
-		"scheduling absent→present":  func(m *pbv2.Message) { m.Blocks[0].GetToolResult().Scheduling = strPtr("SILENT") },
-		"scheduling value":           func(m *pbv2.Message) { m.Blocks[0].GetToolResult().Scheduling = strPtr("WHEN_IDLE") },
-		"content text": func(m *pbv2.Message) {
-			m.Blocks[0].GetToolResult().Content[0].GetText().Text = "changed"
-		},
-		"content unknown arm": func(m *pbv2.Message) {
-			m.Blocks[0].GetToolResult().Content = append(m.Blocks[0].GetToolResult().Content, &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_Unknown{Unknown: &pbv2.ToolResultUnknownBlock{Kind: "k", PayloadJson: []byte(`{}`)}}})
-		},
-		"content marker arm": func(m *pbv2.Message) {
-			m.Blocks[0].GetToolResult().Content = append(m.Blocks[0].GetToolResult().Content, &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.ToolResultCacheBreakpoint{MarkerJson: []byte(`{"type":"ephemeral"}`)}}})
-		},
-	}
-	for name, fn := range mutate {
-		t.Run(name, func(t *testing.T) {
-			m := cloneMsg(base)
-			fn(m)
-			if coveredHash(m, contract) == coveredHash(base, contract) {
-				t.Fatalf("covered mutation %q did not move the covered hash", name)
-			}
-		})
-	}
-	// Non-covered: a sibling block (top-level text) is not in the tool-result
-	// contract — the hash must NOT move.
-	t.Run("non-covered sibling text", func(t *testing.T) {
-		m := &pbv2.Message{Role: "user", Blocks: []*pbv2.RequestBlock{
-			{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "sibling"}}},
-			base.Blocks[0],
-		}}
-		m2 := cloneMsg(m)
-		m2.Blocks[0].GetText().Text = "changed-sibling"
-		if coveredHash(m, contract) != coveredHash(m2, contract) {
-			t.Fatal("a non-covered sibling mutation moved the covered hash")
-		}
-	})
-}
-
-// TestTrailingNonCircularRule — the trailing carrier cannot self-authorize:
-// its removal is authorized ONLY when an independently changed preceding
-// text/thinking ref moves the covered hash; its own metadata
-// mutation/disappearance alone does not.
-func TestTrailingNonCircularRule(t *testing.T) {
-	base := tokenBlock("torana.v2.RequestTrailingSignatureBlock")
-
-	// Own-metadata change alone: the SameMessage meta ref moves, but no
-	// TrailingStandalone ref does — removal must NOT be authorized. The
-	// reference model proves it by checking that the TRAILING refs' hash
-	// (preceding text/thinking only) did not move.
-	metaChanged := cloneMsg(base)
-	metaChanged.Blocks[1].GetTrailingSignature().PartMetadataJson = []byte(`{"x":1}`)
-	trailingOnly := func(m *pbv2.Message) string {
-		h := sha256.New()
-		for _, b := range m.Blocks {
-			if t := b.GetText(); t != nil {
-				h.Write([]byte(t.Text))
-			}
-			if th := b.GetThinking(); th != nil {
-				h.Write([]byte(th.Text))
-			}
-		}
-		return hex.EncodeToString(h.Sum(nil))
-	}
-	if trailingOnly(metaChanged) != trailingOnly(base) {
-		t.Fatal("the trailing reference model sees its own metadata as covered content")
-	}
-	// Independent preceding text change: the trailing refs' hash moves —
-	// removal is authorized (with the content-write grant).
-	textChanged := cloneMsg(base)
-	textChanged.Blocks[0].GetText().Text = "changed-covered"
-	if trailingOnly(textChanged) == trailingOnly(base) {
-		t.Fatal("the independent preceding-text change did not move the trailing refs")
-	}
-	if got := outboundpolicy.ClassifySignatureMutation("token", "", true); got != outboundpolicy.SignatureCleared {
-		t.Fatalf("authorized removal classified %v, want SignatureCleared", got)
+	a[0].Content[0].Ref = "tampered"
+	c := outboundpolicy.RequestSignatureContracts()
+	if c[0].Content[0].Ref == "tampered" {
+		t.Fatal("the accessor aliases its internal registry")
 	}
 }
-
-func cloneMsg(m *pbv2.Message) *pbv2.Message {
-	return proto.Clone(m).(*pbv2.Message)
-}
-
-func boolPtr(b bool) *bool    { return &b }
-func strPtr(s string) *string { return &s }
-
-var _ = sdk.SectionToolResultsWrite

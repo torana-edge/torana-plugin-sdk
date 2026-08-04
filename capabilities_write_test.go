@@ -178,3 +178,20 @@ func TestCacheControlWriteFieldInventory(t *testing.T) {
 		t.Fatal("ir.cache_control.write is absent from Permissions — hosts build their allowlist from it")
 	}
 }
+
+// TestToolResultsWritePermissionRequestable — the dedicated grant is
+// requestable end to end: present in WritePermissions, Permissions,
+// IsWritePermission, and IsPermission. A constant omitted from the source
+// slice cannot be caught by the union tests (they iterate the slice), so
+// the constant is pinned directly.
+func TestToolResultsWritePermissionRequestable(t *testing.T) {
+	if !contains(WritePermissions, string(SectionToolResultsWrite)) {
+		t.Fatalf("%q is missing from WritePermissions — a manifest requesting it is rejected", SectionToolResultsWrite)
+	}
+	if !IsWritePermission(string(SectionToolResultsWrite)) {
+		t.Fatalf("%q is rejected by IsWritePermission", SectionToolResultsWrite)
+	}
+	if !IsPermission(string(SectionToolResultsWrite)) {
+		t.Fatalf("%q is rejected by IsPermission (host allowlists are built from Permissions)", SectionToolResultsWrite)
+	}
+}

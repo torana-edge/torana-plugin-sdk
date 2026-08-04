@@ -46,6 +46,7 @@ var WritePermissions = []string{
 	"ir.model.write",
 	"ir.params.write",
 	"ir.stream.write",
+	"ir.tool_results.write",
 	"ir.tools.write",
 }
 
