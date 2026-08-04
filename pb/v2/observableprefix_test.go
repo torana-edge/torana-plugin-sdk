@@ -825,14 +825,13 @@ func TestObservablePrefixMarkerPresence(t *testing.T) {
 // contract is not weakened on the theory that current validation makes
 // marshal failure unlikely.
 func TestObservablePrefixMarshalErrorNormalization(t *testing.T) {
-	orig := marshalProjection
-	defer func() { marshalProjection = orig }()
-	marshalProjection = func(out *ChatRequest, has bool) ([]byte, bool, error) {
-		return nil, false, errors.New("seam marshal failure")
-	}
+	// The internal With helper injects a failing marshal function — no
+	// production global, no restore, no mutex.
 	base := baseObservableRequest()
 	before := proto.Clone(base).(*ChatRequest)
-	b, has, err := RequestObservablePrefix(base)
+	b, has, err := marshalProjectionWith(base, true, func(*ChatRequest) ([]byte, error) {
+		return nil, errors.New("seam marshal failure")
+	})
 	if err == nil || !strings.Contains(err.Error(), "seam marshal failure") {
 		t.Fatalf("seam error not surfaced: %v", err)
 	}
