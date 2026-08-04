@@ -82,7 +82,7 @@ func richToolResultMsg() *pbv2.Message {
 			ToolCallId:       "c1",
 			ToolName:         "read",
 			WillContinue:     proto.Bool(false),
-			Scheduling:       proto.String("normal"),
+			Scheduling:       proto.String("WHEN_IDLE"), // normative vocabulary
 			PartMetadataJson: []byte(`{"outer":{"b":1,"a":2}}`),
 			Signature:        "result-sig",
 			Content: []*pbv2.ToolResultContentBlock{
@@ -112,6 +112,10 @@ func richToolResultMsg() *pbv2.Message {
 // unrelated sibling result all stay EXACT.
 func TestReplaceToolResultTextRichStructuralEquality(t *testing.T) {
 	original := richToolResultMsg()
+	// The rich original is genuinely IN-DOMAIN before mutation.
+	if err := (&pbv2.ChatRequest{Model: "m", Messages: []*pbv2.Message{original}}).ValidateReplacement(); err != nil {
+		t.Fatalf("the rich original is not a valid request: %v", err)
+	}
 	actual := proto.Clone(original).(*pbv2.Message)
 	changed, err := ReplaceToolResultText(actual, 1, "after")
 	if err != nil || !changed {
@@ -123,6 +127,13 @@ func TestReplaceToolResultTextRichStructuralEquality(t *testing.T) {
 	expected.Blocks = expected.Blocks[:len(expected.Blocks)-1] // trailing block removed
 	if !proto.Equal(actual, expected) {
 		t.Fatalf("mutation is not exactly the three authorized changes\n got: %v\nwant: %v", actual, expected)
+	}
+	// Both the actual and the independent expected stay IN-DOMAIN.
+	if err := (&pbv2.ChatRequest{Model: "m", Messages: []*pbv2.Message{actual}}).ValidateReplacement(); err != nil {
+		t.Fatalf("the mutated request left the replacement domain: %v", err)
+	}
+	if err := (&pbv2.ChatRequest{Model: "m", Messages: []*pbv2.Message{expected}}).ValidateReplacement(); err != nil {
+		t.Fatalf("the expected request left the replacement domain: %v", err)
 	}
 	// The byte-identical replay is a structural no-op on the RICH message.
 	before := proto.Clone(actual).(*pbv2.Message)
