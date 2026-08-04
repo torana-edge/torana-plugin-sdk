@@ -490,6 +490,12 @@ func TestReplaceLastCacheBreakpointRichStructural(t *testing.T) {
 			},
 		}
 	}
+	validate := func(t *testing.T, name string, req *pbv2.ChatRequest) {
+		t.Helper()
+		if err := req.ValidateReplacement(); err != nil {
+			t.Fatalf("%s is not in the replacement domain: %v", name, err)
+		}
+	}
 
 	// NESTED row: the nested marker is the LAST carrier; only the containing
 	// result signature is cleared; everything else is byte-identical.
@@ -498,6 +504,7 @@ func TestReplaceLastCacheBreakpointRichStructural(t *testing.T) {
 		// The nested marker must be the LAST carrier: drop the top-level
 		// marker block (blocks[5]).
 		actual.Messages[0].Blocks = append(actual.Messages[0].Blocks[:5], actual.Messages[0].Blocks[6:]...)
+		validate(t, "nested input", actual)
 		changed, err := pbv2.ReplaceLastCacheBreakpoint(actual, []byte(`{"type":"1h"}`))
 		if err != nil || !changed {
 			t.Fatalf("changed=%v err=%v", changed, err)
@@ -506,6 +513,8 @@ func TestReplaceLastCacheBreakpointRichStructural(t *testing.T) {
 		expected.Messages[0].Blocks = append(expected.Messages[0].Blocks[:5], expected.Messages[0].Blocks[6:]...)
 		expected.Messages[0].Blocks[4].GetToolResult().Content[1].GetCacheBreakpoint().MarkerJson = []byte(`{"type":"1h"}`)
 		expected.Messages[0].Blocks[4].GetToolResult().Signature = "" // the containing result
+		validate(t, "nested expected", expected)
+		validate(t, "nested actual", actual)
 		if !proto.Equal(actual, expected) {
 			t.Fatalf("nested mutation is not exactly the two permitted changes")
 		}
@@ -525,26 +534,29 @@ func TestReplaceLastCacheBreakpointRichStructural(t *testing.T) {
 		if got := actual.Messages[1].Blocks[0].GetToolResult().Signature; got != "unrelated-sig" {
 			t.Fatalf("unrelated result signature disturbed: %q", got)
 		}
-		// Weakened tamper rows: each protected carrier is non-vacuous.
-		tampered := proto.Clone(expected).(*pbv2.ChatRequest)
-		tampered.Messages[0].Blocks[0].GetText().Signature = ""
-		if proto.Equal(actual, tampered) {
-			t.Fatal("weakened: a disturbed text signature went undetected")
+		// COMPLETE weakened tamper table: every protected carrier is
+		// independently non-vacuous.
+		tampers := []struct {
+			name   string
+			tamper func(*pbv2.ChatRequest)
+		}{
+			{"text signature", func(r *pbv2.ChatRequest) { r.Messages[0].Blocks[0].GetText().Signature = "" }},
+			{"thinking signature", func(r *pbv2.ChatRequest) { r.Messages[0].Blocks[1].GetThinking().Signature = "" }},
+			{"tool-use signature", func(r *pbv2.ChatRequest) { r.Messages[0].Blocks[2].GetToolUse().Signature = "" }},
+			{"unknown signature", func(r *pbv2.ChatRequest) { r.Messages[0].Blocks[3].GetUnknown().Signature = "" }},
+			{"containing result signature", func(r *pbv2.ChatRequest) { r.Messages[0].Blocks[4].GetToolResult().Signature = "stale-sig" }},
+			{"unrelated result signature", func(r *pbv2.ChatRequest) { r.Messages[1].Blocks[0].GetToolResult().Signature = "" }},
+			{"trailing signature value", func(r *pbv2.ChatRequest) { r.Messages[0].Blocks[5].GetTrailingSignature().Signature = "altered" }},
+			{"trailing metadata", func(r *pbv2.ChatRequest) { r.Messages[0].Blocks[5].GetTrailingSignature().PartMetadataJson = nil }},
 		}
-		tampered = proto.Clone(expected).(*pbv2.ChatRequest)
-		tampered.Messages[0].Blocks[5].GetTrailingSignature().PartMetadataJson = nil
-		if proto.Equal(actual, tampered) {
-			t.Fatal("weakened: a disturbed trailing metadata went undetected")
-		}
-		tampered = proto.Clone(expected).(*pbv2.ChatRequest)
-		tampered.Messages[0].Blocks[5].GetTrailingSignature().Signature = "altered"
-		if proto.Equal(actual, tampered) {
-			t.Fatal("weakened: an altered trailing signature went undetected")
-		}
-		tampered = proto.Clone(expected).(*pbv2.ChatRequest)
-		tampered.Messages[1].Blocks[0].GetToolResult().Signature = ""
-		if proto.Equal(actual, tampered) {
-			t.Fatal("weakened: a disturbed unrelated result signature went undetected")
+		for _, tc := range tampers {
+			t.Run("tamper/"+tc.name, func(t *testing.T) {
+				tampered := proto.Clone(expected).(*pbv2.ChatRequest)
+				tc.tamper(tampered)
+				if proto.Equal(actual, tampered) {
+					t.Fatalf("weakened: a disturbed %s went undetected", tc.name)
+				}
+			})
 		}
 	})
 

@@ -190,6 +190,20 @@ func coveredProjection(msg *pbv2.Message, contract outboundpolicy.SignatureContr
 func boolPtr(b bool) *bool    { return &b }
 func strPtr(s string) *string { return &s }
 
+func scopeName(s outboundpolicy.SignatureScope) string {
+	switch s {
+	case outboundpolicy.SignatureScopeSameMessage:
+		return "SameMessage"
+	case outboundpolicy.SignatureScopeTrailingStandalone:
+		return "TrailingStandalone"
+	case outboundpolicy.SignatureScopeCurrentContentBlock:
+		return "CurrentContentBlock"
+	case outboundpolicy.SignatureScopeToolCallBlockByIndex:
+		return "ToolCallBlockByIndex"
+	}
+	return "Unspecified"
+}
+
 func b2i(b bool) int {
 	if b {
 		return 1
@@ -354,9 +368,19 @@ func contentMutationRows(surface string) []struct {
 		mutate func(*pbv2.Message)
 	}{
 		{"will_continue", "absent→present(false)", func(m *pbv2.Message) { tokenBlockOf(m, surface).GetToolResult().WillContinue = boolPtr(false) }},
-		{"will_continue", "false→true", func(m *pbv2.Message) { tokenBlockOf(m, surface).GetToolResult().WillContinue = boolPtr(true) }},
+		{"will_continue", "false→true", func(m *pbv2.Message) {
+			// REAL value transition: seed present-false, flip to present-true.
+			tr := tokenBlockOf(m, surface).GetToolResult()
+			tr.WillContinue = boolPtr(false)
+			tr.WillContinue = boolPtr(true)
+		}},
 		{"scheduling", "absent→present", func(m *pbv2.Message) { tokenBlockOf(m, surface).GetToolResult().Scheduling = strPtr("SILENT") }},
-		{"scheduling", "value", func(m *pbv2.Message) { tokenBlockOf(m, surface).GetToolResult().Scheduling = strPtr("WHEN_IDLE") }},
+		{"scheduling", "value", func(m *pbv2.Message) {
+			// REAL value transition: seed present-SILENT, change the value.
+			tr := tokenBlockOf(m, surface).GetToolResult()
+			tr.Scheduling = strPtr("SILENT")
+			tr.Scheduling = strPtr("WHEN_IDLE")
+		}},
 		{"content", "text value", func(m *pbv2.Message) { tokenBlockOf(m, surface).GetToolResult().Content[0].GetText().Text = "changed" }},
 		{"content", "unknown arm", func(m *pbv2.Message) {
 			tokenBlockOf(m, surface).GetToolResult().Content = append(tokenBlockOf(m, surface).GetToolResult().Content, trUnknownContent())
@@ -380,13 +404,13 @@ func TestSignatureMatrixBidirectionalInventory(t *testing.T) {
 	registryKeys := map[string]bool{}
 	for _, c := range contracts {
 		for _, ref := range c.Content {
-			registryKeys[c.Message+"/"+ref.Ref] = true
+			registryKeys[c.Message+"/"+scopeName(ref.Scope)+"/"+ref.Ref] = true
 		}
 	}
 	caseKeys := map[string]bool{}
 	for _, c := range contracts {
 		for _, ref := range c.Content {
-			caseKeys[c.Message+"/"+ref.Ref] = true
+			caseKeys[c.Message+"/"+scopeName(ref.Scope)+"/"+ref.Ref] = true
 			base := surfaceBaseline(c.Message)
 			if base == nil {
 				t.Fatalf("no baseline for %s", c.Message)
@@ -398,13 +422,24 @@ func TestSignatureMatrixBidirectionalInventory(t *testing.T) {
 			if before == after {
 				t.Fatalf("%s/%s: the mutation did not move the covered projection (vacuous case)", c.Message, ref.Ref)
 			}
+			if c.Message == "torana.v2.RequestTrailingSignatureBlock" && ref.Ref == "part_metadata_json" {
+				// The registry declares the trailing own metadata COVERED,
+				// but the approved non-circular rule rejects changing it
+				// alone: the covered projection moved, yet the classifier
+				// with the ACTUAL inputs (token retained, preceding
+				// unchanged) must NOT be SignatureCleared.
+				if got := trailingDecision(base, mutated); got != "meta-rejected" {
+					t.Fatalf("%s/%s: own-meta change classified %v, want meta-rejected", c.Message, ref.Ref, got)
+				}
+				continue
+			}
 			if got := outboundpolicy.ClassifySignatureMutation("token", "", before != after); got != outboundpolicy.SignatureCleared {
 				t.Fatalf("%s/%s: covered change classified %v, want SignatureCleared", c.Message, ref.Ref, got)
 			}
 		}
 		// The extra content-arm/presence rows.
 		for _, row := range contentMutationRows(c.Message) {
-			caseKeys[c.Message+"/"+row.ref] = true
+			caseKeys[c.Message+"/SameMessage/"+row.ref] = true
 			base := surfaceBaseline(c.Message)
 			mutated := proto.Clone(base).(*pbv2.Message)
 			row.mutate(mutated)
@@ -413,6 +448,18 @@ func TestSignatureMatrixBidirectionalInventory(t *testing.T) {
 			}
 			if got := outboundpolicy.ClassifySignatureMutation("token", "", true); got != outboundpolicy.SignatureCleared {
 				t.Fatalf("%s/%s: covered change classified %v, want SignatureCleared", c.Message, row.name, got)
+			}
+			// The VALUE rows must keep presence present while the value
+			// changes (they are not absent→present repeats).
+			switch row.name {
+			case "false→true":
+				if tr := tokenBlockOf(mutated, c.Message).GetToolResult(); tr.WillContinue == nil || !*tr.WillContinue {
+					t.Fatalf("%s: the false→true row lost presence", row.name)
+				}
+			case "value":
+				if tr := tokenBlockOf(mutated, c.Message).GetToolResult(); tr.Scheduling == nil || *tr.Scheduling != "WHEN_IDLE" {
+					t.Fatalf("%s: the scheduling value row lost presence", row.name)
+				}
 			}
 		}
 	}
@@ -465,9 +512,51 @@ func TestSignatureNonCoveredClearForbidden(t *testing.T) {
 	}
 }
 
-// TestTrailingNonCircularTable — executes ALL promised decisions; the
-// authorization derives ONLY from the independent preceding-content
-// projection (carrier metadata disappearance never contributes).
+// trailingState returns the actual token + metadata of the trailing carrier
+// ("" when absent).
+func trailingState(m *pbv2.Message) (token, meta string) {
+	for _, b := range m.Blocks {
+		if ts := b.GetTrailingSignature(); ts != nil {
+			return ts.Signature, string(ts.PartMetadataJson)
+		}
+	}
+	return "", ""
+}
+
+// trailingDecision is the INDEPENDENT trailing-decision reference function:
+// it derives the verdict from the ACTUAL before/after messages — the
+// preceding Text/Thinking projection change, the carrier presence, the
+// actual old/new token values, and the actual old/new carrier metadata —
+// enforcing the approved non-circular table directly. Carrier metadata
+// disappearance NEVER contributes to its own authorization.
+func trailingDecision(base, mutated *pbv2.Message) string {
+	precedingChanged := precedingCoveredProjection(base) != precedingCoveredProjection(mutated)
+	oldTok, oldMeta := trailingState(base)
+	newTok, newMeta := trailingState(mutated)
+	switch {
+	case oldTok == "":
+		return "no-carrier"
+	case newTok == "":
+		// Carrier removal: authorized ONLY by an independently changed
+		// preceding text/thinking ref.
+		if precedingChanged {
+			return "cleared"
+		}
+		return "dropped"
+	case newTok != oldTok:
+		return "forged"
+	case precedingChanged:
+		return "stale" // retained over lawfully changed covered content
+	case oldMeta != newMeta:
+		return "meta-rejected" // own-metadata mutation alone never authorizes
+	default:
+		return "intact"
+	}
+}
+
+// TestTrailingNonCircularTable — the approved table executed: every row
+// mutates the baseline and the verdict is DERIVED from the actual before/
+// after state (never chosen classifier inputs).
 func TestTrailingNonCircularTable(t *testing.T) {
 	text := func(s string) *pbv2.RequestBlock {
 		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: s}}}
@@ -475,68 +564,45 @@ func TestTrailingNonCircularTable(t *testing.T) {
 	thinking := func(s string) *pbv2.RequestBlock {
 		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_Thinking{Thinking: &pbv2.RequestThinkingBlock{Text: s}}}
 	}
-	trailing := func(meta string) *pbv2.RequestBlock {
-		ts := &pbv2.RequestTrailingSignatureBlock{Signature: "token"}
-		if meta != "" {
-			ts.PartMetadataJson = []byte(meta)
-		}
-		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: ts}}
+	trailing := func() *pbv2.RequestBlock {
+		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: &pbv2.RequestTrailingSignatureBlock{Signature: "token", PartMetadataJson: []byte(`{"t":1}`)}}}
 	}
 	base := func() *pbv2.Message {
-		return &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{text("covered"), thinking("thought"), trailing("")}}
+		return &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{text("covered"), thinking("thought"), trailing()}}
 	}
-	// precedingChanged = the independent preceding-content projection only.
-	preceding := func(m *pbv2.Message) string { return precedingCoveredProjection(m) }
 
 	rows := []struct {
-		name          string
-		mutate        func(*pbv2.Message)
-		wantPreceding bool
-		want          outboundpolicy.SignatureMutation
+		name   string
+		mutate func(*pbv2.Message)
+		want   string
 	}{
-		{"unchanged preceding + metadata changed", func(m *pbv2.Message) { m.Blocks[2].GetTrailingSignature().PartMetadataJson = []byte(`{"x":1}`) }, false, outboundpolicy.SignatureDropped},
-		{"unchanged preceding + metadata cleared", func(m *pbv2.Message) { m.Blocks[2].GetTrailingSignature().PartMetadataJson = nil }, false, outboundpolicy.SignatureDropped},
-		{"unchanged preceding + carrier removed", func(m *pbv2.Message) { m.Blocks = m.Blocks[:2] }, false, outboundpolicy.SignatureDropped},
-		{"preceding Text changed + carrier removed", func(m *pbv2.Message) { m.Blocks[0].GetText().Text = "changed"; m.Blocks = m.Blocks[:2] }, true, outboundpolicy.SignatureCleared},
-		{"preceding Thinking changed + carrier removed", func(m *pbv2.Message) { m.Blocks[1].GetThinking().Text = "changed"; m.Blocks = m.Blocks[:2] }, true, outboundpolicy.SignatureCleared},
-		{"preceding changed + stale carrier retained", func(m *pbv2.Message) { m.Blocks[0].GetText().Text = "changed" }, true, outboundpolicy.SignatureStale},
-		{"preceding changed + carrier altered", func(m *pbv2.Message) {
+		{"unchanged preceding + metadata value changed", func(m *pbv2.Message) { m.Blocks[2].GetTrailingSignature().PartMetadataJson = []byte(`{"t":2}`) }, "meta-rejected"},
+		{"unchanged preceding + metadata cleared", func(m *pbv2.Message) { m.Blocks[2].GetTrailingSignature().PartMetadataJson = nil }, "meta-rejected"},
+		{"unchanged preceding + whole carrier removed", func(m *pbv2.Message) { m.Blocks = m.Blocks[:2] }, "dropped"},
+		{"preceding Text independently changed + carrier removed", func(m *pbv2.Message) { m.Blocks[0].GetText().Text = "changed"; m.Blocks = m.Blocks[:2] }, "cleared"},
+		{"preceding Thinking independently changed + carrier removed", func(m *pbv2.Message) { m.Blocks[1].GetThinking().Text = "changed"; m.Blocks = m.Blocks[:2] }, "cleared"},
+		{"preceding changed + stale token retained", func(m *pbv2.Message) { m.Blocks[0].GetText().Text = "changed" }, "stale"},
+		{"preceding changed + token altered", func(m *pbv2.Message) {
 			m.Blocks[0].GetText().Text = "changed"
 			m.Blocks[2].GetTrailingSignature().Signature = "altered"
-		}, true, outboundpolicy.SignatureForged},
+		}, "forged"},
 		{"unrelated tool-result inserted + carrier removed", func(m *pbv2.Message) {
 			tr := &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
 				ToolCallId: "c1", ToolName: "read",
 				Content: []*pbv2.ToolResultContentBlock{{Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: "r"}}}},
 			}}}
 			m.Blocks = append([]*pbv2.RequestBlock{tr}, m.Blocks...)
-			m.Blocks = m.Blocks[:3] // drop the trailing carrier
-		}, false, outboundpolicy.SignatureDropped},
+			m.Blocks = m.Blocks[:3]
+		}, "dropped"},
+		{"no mutation", func(m *pbv2.Message) {}, "intact"},
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
 			b := base()
 			mutated := proto.Clone(b).(*pbv2.Message)
 			row.mutate(mutated)
-			precedingChanged := preceding(b) != preceding(mutated)
-			if precedingChanged != row.wantPreceding {
-				t.Fatalf("precedingChanged = %v, want %v", precedingChanged, row.wantPreceding)
-			}
-			// The classification derives from the independent projection and
-			// the returned token, never from the carrier's own disappearance.
-			var got outboundpolicy.SignatureMutation
-			switch row.want {
-			case outboundpolicy.SignatureCleared:
-				got = outboundpolicy.ClassifySignatureMutation("token", "", precedingChanged)
-			case outboundpolicy.SignatureDropped:
-				got = outboundpolicy.ClassifySignatureMutation("token", "", precedingChanged)
-			case outboundpolicy.SignatureStale:
-				got = outboundpolicy.ClassifySignatureMutation("token", "token", precedingChanged)
-			case outboundpolicy.SignatureForged:
-				got = outboundpolicy.ClassifySignatureMutation("token", "altered", precedingChanged)
-			}
-			if got != row.want {
-				t.Fatalf("classified %v, want %v (precedingChanged=%v)", got, row.want, precedingChanged)
+			if got := trailingDecision(b, mutated); got != row.want {
+				t.Fatalf("trailingDecision = %q, want %q", got, row.want)
 			}
 		})
 	}

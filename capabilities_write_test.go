@@ -194,4 +194,15 @@ func TestToolResultsWritePermissionRequestable(t *testing.T) {
 	if !IsPermission(string(SectionToolResultsWrite)) {
 		t.Fatalf("%q is rejected by IsPermission (host allowlists are built from Permissions)", SectionToolResultsWrite)
 	}
+	// DIRECT containment in Permissions (the slice hosts build allowlists
+	// from), in addition to the helper predicates.
+	found := false
+	for _, p := range Permissions {
+		if p == string(SectionToolResultsWrite) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("%q is not literally contained in Permissions", SectionToolResultsWrite)
+	}
 }
