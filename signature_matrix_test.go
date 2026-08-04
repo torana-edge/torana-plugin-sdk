@@ -352,9 +352,10 @@ func mutatorFor(surface, ref string, scope outboundpolicy.SignatureScope) func(*
 // contentMutationRows additionally covers the presence/value boundaries and
 // every content arm family (the registry's optional + repeated refs).
 func contentMutationRows(surface string) []struct {
-	ref    string // the registry ref this row refines
-	name   string
-	mutate func(*pbv2.Message)
+	ref     string // the registry ref this row refines
+	name    string
+	prepare func(*pbv2.Message) // prepares the baseline (presence seeding)
+	mutate  func(*pbv2.Message) // applies the transition to a clone
 } {
 	trText := func(s string) *pbv2.ToolResultContentBlock {
 		return &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: s}}}
@@ -363,32 +364,23 @@ func contentMutationRows(surface string) []struct {
 		return nil
 	}
 	return []struct {
-		ref    string // the registry ref this row refines
-		name   string
-		mutate func(*pbv2.Message)
+		ref     string // the registry ref this row refines
+		name    string
+		prepare func(*pbv2.Message) // prepares the baseline (presence seeding)
+		mutate  func(*pbv2.Message) // applies the transition to a clone
 	}{
-		{"will_continue", "absent→present(false)", func(m *pbv2.Message) { tokenBlockOf(m, surface).GetToolResult().WillContinue = boolPtr(false) }},
-		{"will_continue", "false→true", func(m *pbv2.Message) {
-			// REAL value transition: seed present-false, flip to present-true.
-			tr := tokenBlockOf(m, surface).GetToolResult()
-			tr.WillContinue = boolPtr(false)
-			tr.WillContinue = boolPtr(true)
-		}},
-		{"scheduling", "absent→present", func(m *pbv2.Message) { tokenBlockOf(m, surface).GetToolResult().Scheduling = strPtr("SILENT") }},
-		{"scheduling", "value", func(m *pbv2.Message) {
-			// REAL value transition: seed present-SILENT, change the value.
-			tr := tokenBlockOf(m, surface).GetToolResult()
-			tr.Scheduling = strPtr("SILENT")
-			tr.Scheduling = strPtr("WHEN_IDLE")
-		}},
-		{"content", "text value", func(m *pbv2.Message) { tokenBlockOf(m, surface).GetToolResult().Content[0].GetText().Text = "changed" }},
-		{"content", "unknown arm", func(m *pbv2.Message) {
+		{"will_continue", "absent→present(false)", nil, func(m *pbv2.Message) { tokenBlockOf(m, surface).GetToolResult().WillContinue = boolPtr(false) }},
+		{"will_continue", "false→true", func(m *pbv2.Message) { tokenBlockOf(m, surface).GetToolResult().WillContinue = boolPtr(false) }, func(m *pbv2.Message) { tokenBlockOf(m, surface).GetToolResult().WillContinue = boolPtr(true) }},
+		{"scheduling", "absent→present", nil, func(m *pbv2.Message) { tokenBlockOf(m, surface).GetToolResult().Scheduling = strPtr("SILENT") }},
+		{"scheduling", "value", func(m *pbv2.Message) { tokenBlockOf(m, surface).GetToolResult().Scheduling = strPtr("SILENT") }, func(m *pbv2.Message) { tokenBlockOf(m, surface).GetToolResult().Scheduling = strPtr("WHEN_IDLE") }},
+		{"content", "text value", nil, func(m *pbv2.Message) { tokenBlockOf(m, surface).GetToolResult().Content[0].GetText().Text = "changed" }},
+		{"content", "unknown arm", nil, func(m *pbv2.Message) {
 			tokenBlockOf(m, surface).GetToolResult().Content = append(tokenBlockOf(m, surface).GetToolResult().Content, trUnknownContent())
 		}},
-		{"content", "marker arm", func(m *pbv2.Message) {
+		{"content", "marker arm", nil, func(m *pbv2.Message) {
 			tokenBlockOf(m, surface).GetToolResult().Content = append(tokenBlockOf(m, surface).GetToolResult().Content, trMarkerContent(`{"type":"ephemeral"}`))
 		}},
-		{"content", "text→marker topology", func(m *pbv2.Message) {
+		{"content", "text→marker topology", nil, func(m *pbv2.Message) {
 			tr := tokenBlockOf(m, surface).GetToolResult()
 			tr.Content = []*pbv2.ToolResultContentBlock{trMarkerContent(`{"type":"ephemeral"}`), trText("r")}
 		}},
@@ -440,25 +432,43 @@ func TestSignatureMatrixBidirectionalInventory(t *testing.T) {
 		// The extra content-arm/presence rows.
 		for _, row := range contentMutationRows(c.Message) {
 			caseKeys[c.Message+"/SameMessage/"+row.ref] = true
+			// SEPARATE baseline prepare + after mutation: the value rows
+			// transition present→present with only the value changing.
 			base := surfaceBaseline(c.Message)
-			mutated := proto.Clone(base).(*pbv2.Message)
-			row.mutate(mutated)
-			if coveredProjection(base, c) == coveredProjection(mutated, c) {
+			if row.prepare != nil {
+				row.prepare(base)
+			}
+			after := proto.Clone(base).(*pbv2.Message)
+			row.mutate(after)
+			beforeProj := coveredProjection(base, c)
+			afterProj := coveredProjection(after, c)
+			changed := beforeProj != afterProj
+			if !changed {
 				t.Fatalf("%s/%s: the mutation did not move the covered projection", c.Message, row.name)
 			}
-			if got := outboundpolicy.ClassifySignatureMutation("token", "", true); got != outboundpolicy.SignatureCleared {
+			if got := outboundpolicy.ClassifySignatureMutation("token", "", changed); got != outboundpolicy.SignatureCleared {
 				t.Fatalf("%s/%s: covered change classified %v, want SignatureCleared", c.Message, row.name, got)
 			}
-			// The VALUE rows must keep presence present while the value
-			// changes (they are not absent→present repeats).
+			// The VALUE rows: both pointers non-nil, the intended value pair,
+			// presence kept.
 			switch row.name {
 			case "false→true":
-				if tr := tokenBlockOf(mutated, c.Message).GetToolResult(); tr.WillContinue == nil || !*tr.WillContinue {
-					t.Fatalf("%s: the false→true row lost presence", row.name)
+				trBase := tokenBlockOf(base, c.Message).GetToolResult()
+				trAfter := tokenBlockOf(after, c.Message).GetToolResult()
+				if trBase.WillContinue == nil || trAfter.WillContinue == nil {
+					t.Fatalf("%s: presence lost on either side", row.name)
+				}
+				if *trBase.WillContinue != false || *trAfter.WillContinue != true {
+					t.Fatalf("%s: the intended false→true pair is not what was compared (%v→%v)", row.name, *trBase.WillContinue, *trAfter.WillContinue)
 				}
 			case "value":
-				if tr := tokenBlockOf(mutated, c.Message).GetToolResult(); tr.Scheduling == nil || *tr.Scheduling != "WHEN_IDLE" {
-					t.Fatalf("%s: the scheduling value row lost presence", row.name)
+				trBase := tokenBlockOf(base, c.Message).GetToolResult()
+				trAfter := tokenBlockOf(after, c.Message).GetToolResult()
+				if trBase.Scheduling == nil || trAfter.Scheduling == nil {
+					t.Fatalf("%s: presence lost on either side", row.name)
+				}
+				if *trBase.Scheduling != "SILENT" || *trAfter.Scheduling != "WHEN_IDLE" {
+					t.Fatalf("%s: the intended SILENT→WHEN_IDLE pair is not what was compared (%q→%q)", row.name, *trBase.Scheduling, *trAfter.Scheduling)
 				}
 			}
 		}
@@ -502,10 +512,11 @@ func TestSignatureNonCoveredClearForbidden(t *testing.T) {
 					}
 				}
 			}
-			if coveredProjection(base, c) != coveredProjection(mutated, c) {
+			changed := coveredProjection(base, c) != coveredProjection(mutated, c)
+			if changed {
 				t.Fatal("the non-covered sibling mutation moved the covered projection")
 			}
-			if got := outboundpolicy.ClassifySignatureMutation("token", "", false); got != outboundpolicy.SignatureDropped {
+			if got := outboundpolicy.ClassifySignatureMutation("token", "", changed); got != outboundpolicy.SignatureDropped {
 				t.Fatalf("non-covered clear classified %v, want SignatureDropped", got)
 			}
 		})
