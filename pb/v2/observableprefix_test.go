@@ -180,10 +180,11 @@ func TestObservablePrefixInventoryRegressions(t *testing.T) {
 // classification is a ruling, not a serialization side effect).
 func TestMarkerCarrierInventory(t *testing.T) {
 	type holder struct {
-		name    string
-		desc    protoreflect.MessageDescriptor
-		fields  func(protoreflect.MessageDescriptor) []protoreflect.FieldDescriptor
-		carrier map[string]bool
+		name        string
+		desc        protoreflect.MessageDescriptor
+		fields      func(protoreflect.MessageDescriptor) []protoreflect.FieldDescriptor
+		carrier     map[string]bool
+		trueCarrier string // exactly one carrier per holder
 	}
 	holders := []holder{
 		{"ToolDef", (&ToolDef{}).ProtoReflect().Descriptor(), func(d protoreflect.MessageDescriptor) []protoreflect.FieldDescriptor {
@@ -198,7 +199,7 @@ func TestMarkerCarrierInventory(t *testing.T) {
 			"parameters_json":    false,
 			"strict":             false,
 			"cache_control_json": true,
-		}},
+		}, ""},
 		{"RequestBlock", (&RequestBlock{}).ProtoReflect().Descriptor(), func(d protoreflect.MessageDescriptor) []protoreflect.FieldDescriptor {
 			var out []protoreflect.FieldDescriptor
 			oneofs := d.Oneofs()
@@ -221,7 +222,7 @@ func TestMarkerCarrierInventory(t *testing.T) {
 			"cache_breakpoint":   true,
 			"unknown":            false,
 			"trailing_signature": false,
-		}},
+		}, ""},
 		{"ToolResultContentBlock", (&ToolResultContentBlock{}).ProtoReflect().Descriptor(), func(d protoreflect.MessageDescriptor) []protoreflect.FieldDescriptor {
 			var out []protoreflect.FieldDescriptor
 			oneofs := d.Oneofs()
@@ -239,7 +240,7 @@ func TestMarkerCarrierInventory(t *testing.T) {
 			"text":             false,
 			"unknown":          false,
 			"cache_breakpoint": true,
-		}},
+		}, ""},
 	}
 	for _, h := range holders {
 		t.Run(h.name, func(t *testing.T) {
@@ -247,13 +248,25 @@ func TestMarkerCarrierInventory(t *testing.T) {
 			seen := make(map[string]bool, len(fields))
 			for _, fd := range fields {
 				name := string(fd.Name())
-				if _, ruling := h.carrier[name]; !ruling {
+				isCarrier, ruling := h.carrier[name]
+				if !ruling {
 					t.Fatalf("%s field %q is missing from the carrier ruling — a deliberate classification is required", h.name, name)
+				}
+				// The bool VALUE is executable: exactly one true carrier per
+				// holder (marking everything false must fail).
+				if isCarrier {
+					if h.trueCarrier != "" {
+						t.Fatalf("%s has two true carriers (%q and %q) — exactly one is allowed", h.name, h.trueCarrier, name)
+					}
+					h.trueCarrier = name
 				}
 				seen[name] = true
 			}
 			if len(seen) != len(h.carrier) {
 				t.Fatalf("%s carrier table names %d fields, holder has %d — stale ruling", h.name, len(h.carrier), len(seen))
+			}
+			if h.trueCarrier == "" {
+				t.Fatalf("%s has NO true carrier — the classification is not executable", h.name)
 			}
 		})
 	}
@@ -395,12 +408,16 @@ func TestObservablePrefixStructuralReference(t *testing.T) {
 		})
 	}
 
-	// Boundary movement: ACTUALLY removing the former last marker must move
-	// the boundary.
+	// Boundary movement: for each pair, content BETWEEN the old and new
+	// boundaries must be visible on one side and invisible on the other.
+	// Removing the former last marker alone cannot prove this — marker bytes
+	// themselves vanished — so each row mutates between-boundary content and
+	// asserts it folds BEFORE the removal and is excluded AFTER it.
 	movement := []struct {
-		name  string
-		input func() *ChatRequest
-		drop  func(*ChatRequest) // removes the LAST marker
+		name    string
+		input   func() *ChatRequest
+		drop    func(*ChatRequest) // removes the LAST marker
+		between func(*ChatRequest) // mutates content between the two boundaries
 	}{
 		{
 			"tool to outer",
@@ -410,6 +427,7 @@ func TestObservablePrefixStructuralReference(t *testing.T) {
 				return r
 			},
 			func(r *ChatRequest) { r.Messages[0].Blocks = r.Messages[0].Blocks[:1] },
+			func(r *ChatRequest) { r.Messages[0].Blocks[0].GetText().Text = "a2" },
 		},
 		{
 			"tool to nested",
@@ -421,6 +439,7 @@ func TestObservablePrefixStructuralReference(t *testing.T) {
 			func(r *ChatRequest) {
 				r.Messages[0].Blocks[0].GetToolResult().Content = r.Messages[0].Blocks[0].GetToolResult().Content[:1]
 			},
+			func(r *ChatRequest) { r.Messages[0].Blocks[0].GetToolResult().Content[0].GetText().Text = "r0x" },
 		},
 		{
 			"outer to nested",
@@ -430,6 +449,7 @@ func TestObservablePrefixStructuralReference(t *testing.T) {
 			func(r *ChatRequest) {
 				r.Messages[0].Blocks[1].GetToolResult().Content = r.Messages[0].Blocks[1].GetToolResult().Content[:1]
 			},
+			func(r *ChatRequest) { r.Messages[0].Blocks[1].GetToolResult().Content[0].GetText().Text = "r0x" },
 		},
 		{
 			"two messages",
@@ -440,6 +460,7 @@ func TestObservablePrefixStructuralReference(t *testing.T) {
 				)
 			},
 			func(r *ChatRequest) { r.Messages[1].Blocks = r.Messages[1].Blocks[:1] },
+			func(r *ChatRequest) { r.Messages[1].Blocks[0].GetText().Text = "second2" },
 		},
 		{
 			"two outer markers in one message",
@@ -447,6 +468,7 @@ func TestObservablePrefixStructuralReference(t *testing.T) {
 				return baseReq([]*RequestBlock{marker(`{"type":"ephemeral"}`), text("mid"), marker(`{"type":"standard"}`)})
 			},
 			func(r *ChatRequest) { r.Messages[0].Blocks = r.Messages[0].Blocks[:2] },
+			func(r *ChatRequest) { r.Messages[0].Blocks[1].GetText().Text = "mid2" },
 		},
 		{
 			"two nested markers in one tool result",
@@ -456,23 +478,25 @@ func TestObservablePrefixStructuralReference(t *testing.T) {
 			func(r *ChatRequest) {
 				r.Messages[0].Blocks[0].GetToolResult().Content = r.Messages[0].Blocks[0].GetToolResult().Content[:2]
 			},
+			func(r *ChatRequest) { r.Messages[0].Blocks[0].GetToolResult().Content[1].GetText().Text = "mid2" },
 		},
 	}
 	for _, row := range movement {
 		t.Run("movement/"+row.name, func(t *testing.T) {
 			with := row.input()
-			without := row.input()
-			row.drop(without)
-			gotWith, err := RequestObservablePrefix(with)
-			if err != nil {
-				t.Fatalf("with marker: %v", err)
+			withBetween := row.input()
+			row.between(withBetween)
+			gotWith := observablePrefix(t, with)
+			gotWithBetween := observablePrefix(t, withBetween)
+			if bytes.Equal(gotWith, gotWithBetween) {
+				t.Fatal("between-boundary content is invisible BEFORE the removal — the boundary does not include it")
 			}
-			gotWithout, err := RequestObservablePrefix(without)
-			if err != nil {
-				t.Fatalf("without marker: %v", err)
-			}
-			if bytes.Equal(gotWith, gotWithout) {
-				t.Fatal("removing the former last marker did not move the boundary")
+			row.drop(with)
+			row.drop(withBetween)
+			gotDropped := observablePrefix(t, with)
+			gotDroppedBetween := observablePrefix(t, withBetween)
+			if !bytes.Equal(gotDropped, gotDroppedBetween) {
+				t.Fatal("between-boundary content is still visible AFTER the removal — the boundary did not move")
 			}
 		})
 	}
@@ -710,15 +734,17 @@ func TestObservablePrefixFailClosedAndNonAliasing(t *testing.T) {
 	if !proto.Equal(base, before) {
 		t.Fatal("RequestObservablePrefix mutated its input")
 	}
-	// Mutating the RETURNED slice must not affect the input request.
-	mutated := append([]byte(nil), prefix...)
-	mutated[0] = 'X'
+	// Mutating the ACTUAL returned slice (not a copy) must not affect the
+	// input request: retain a copy for comparison, then write into the
+	// returned bytes directly.
+	retained := append([]byte(nil), prefix...)
+	prefix[0] = 'X'
+	prefix[1] = 'Y'
 	if !proto.Equal(base, before) {
 		t.Fatal("mutating the returned prefix corrupted the input request")
 	}
 	// Retaining a copy of the first result: input mutation must move the
 	// next result away from the retained copy.
-	retained := append([]byte(nil), prefix...)
 	base.Messages[0].Blocks[0].GetText().Text = "changed"
 	after := observablePrefix(t, base)
 	if bytes.Equal(after, retained) {

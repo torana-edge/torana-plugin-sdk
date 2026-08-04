@@ -270,7 +270,8 @@ Applies a cache-breakpoint marker **exactly**:
 - The marker mutation requires the `ir.cache_control.write` grant (see the
   capability table).
 
- Mutating signed
+Opaque signatures (`thinking_signature`, `ToolCall.signature`,
+`ToolCallRef.signature`) bind provider tokens to content. Mutating signed
 content while leaving the signature in place is invalid — the host must reject
 that mutation or clear the signature. On the stream path, `ToolCallRef.signature`
 binds `id`/`name` and `ToolCallDelta.arguments_delta` for the **same unique
