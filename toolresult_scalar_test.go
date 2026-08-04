@@ -124,9 +124,12 @@ func TestReplaceToolResultTextRichStructuralEquality(t *testing.T) {
 	expected := proto.Clone(original).(*pbv2.Message)
 	expected.Blocks[1].GetToolResult().Content[1].GetText().Text = "after"
 	expected.Blocks[1].GetToolResult().Signature = ""
-	expected.Blocks = expected.Blocks[:len(expected.Blocks)-1] // trailing block removed
+	// EXACTLY TWO authorized changes: the text value and the result
+	// signature clear. The trailing-signature carrier is PRESERVED
+	// byte-for-byte (it covers only preceding text/thinking + its own
+	// metadata, NOT tool results).
 	if !proto.Equal(actual, expected) {
-		t.Fatalf("mutation is not exactly the three authorized changes\n got: %v\nwant: %v", actual, expected)
+		t.Fatalf("mutation is not exactly the two authorized changes\n got: %v\nwant: %v", actual, expected)
 	}
 	// Both the actual and the independent expected stay IN-DOMAIN.
 	if err := (&pbv2.ChatRequest{Model: "m", Messages: []*pbv2.Message{actual}}).ValidateReplacement(); err != nil {
@@ -158,7 +161,6 @@ func TestReplaceToolResultTextWeakenedProductionMutation(t *testing.T) {
 	expected := proto.Clone(original).(*pbv2.Message)
 	expected.Blocks[1].GetToolResult().Content[1].GetText().Text = "after"
 	expected.Blocks[1].GetToolResult().Signature = ""
-	expected.Blocks = expected.Blocks[:len(expected.Blocks)-1]
 
 	for name, tamper := range map[string]func(*pbv2.Message){
 		"marker byte": func(m *pbv2.Message) {
@@ -240,7 +242,7 @@ func TestReplaceToolResultTextAtomicErrors(t *testing.T) {
 // still in the SDK replacement domain (ValidateReplacement green). No stale
 // token survives.
 func TestReplaceToolResultTextProvenance(t *testing.T) {
-	msg := &pbv2.Message{Role: "user", Blocks: []*pbv2.RequestBlock{
+	msg := &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{
 		{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "covered"}}},
 		{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
 			ToolCallId:       "c1",
@@ -261,17 +263,18 @@ func TestReplaceToolResultTextProvenance(t *testing.T) {
 	if string(tr.PartMetadataJson) != `{"custom":1}` {
 		t.Fatalf("part_metadata_json was not preserved: %s", tr.PartMetadataJson)
 	}
-	for _, b := range msg.Blocks {
-		if b.GetTrailingSignature() != nil {
-			t.Fatal("a stale trailing-signature block survived the change")
-		}
+	// The trailing-signature carrier is PRESERVED: its covered content
+	// (preceding text/thinking + own metadata) did not change.
+	last := msg.Blocks[len(msg.Blocks)-1]
+	if ts := last.GetTrailingSignature(); ts == nil || ts.Signature != "trailing-token" {
+		t.Fatal("the trailing-signature carrier was disturbed by a result-text change")
 	}
 	if err := (&pbv2.ChatRequest{Model: "m", Messages: []*pbv2.Message{msg}}).ValidateReplacement(); err != nil {
 		t.Fatalf("the changed result left the replacement domain: %v", err)
 	}
 
 	// The no-op keeps every token byte-for-byte.
-	msg2 := &pbv2.Message{Role: "user", Blocks: []*pbv2.RequestBlock{
+	msg2 := &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{
 		{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "covered"}}},
 		{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
 			ToolCallId:       "c1",
@@ -313,4 +316,303 @@ func TestReplaceToolResultTextRevertProof(t *testing.T) {
 	if proto.Equal(msg, tampered2) {
 		t.Fatal("revert proof: a stale signature went undetected")
 	}
+}
+
+// TestReplaceLastCacheBreakpointProvenance — the corrected provenance rules:
+// a nested marker real change clears ONLY the containing result signature
+// (trailing carrier + unrelated tokens preserved); top-level and tool-def
+// marker real changes clear NO signatures; no-op preserves everything;
+// errors atomic.
+func TestReplaceLastCacheBreakpointProvenance(t *testing.T) {
+	trText := func(s string) *pbv2.ToolResultContentBlock {
+		return &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: s}}}
+	}
+	trMarker := func(m string) *pbv2.ToolResultContentBlock {
+		return &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.ToolResultCacheBreakpoint{MarkerJson: []byte(m)}}}
+	}
+	resultBlock := func(sig string, content ...*pbv2.ToolResultContentBlock) *pbv2.RequestBlock {
+		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+			ToolCallId: "c1", Signature: sig, Content: content,
+		}}}
+	}
+	textBlock := func(s string) *pbv2.RequestBlock {
+		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: s}}}
+	}
+	trailingBlock := func() *pbv2.RequestBlock {
+		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: &pbv2.RequestTrailingSignatureBlock{Signature: "trailing-token"}}}
+	}
+	signedResultMsg := func() *pbv2.Message {
+		m := &pbv2.Message{Role: "user"}
+		m.Blocks = []*pbv2.RequestBlock{resultBlock("result-sig", trText("r"), trMarker(`{"type":"ephemeral"}`))}
+		return m
+	}
+
+	// Nested marker real change: ONLY the containing result signature is
+	// cleared; the trailing carrier and unrelated tokens are preserved.
+	t.Run("nested marker clears only the result signature", func(t *testing.T) {
+		req := &pbv2.ChatRequest{Model: "m", Messages: []*pbv2.Message{
+			signedResultMsg(),
+			{Role: "assistant", Blocks: []*pbv2.RequestBlock{textBlock("covered"), trailingBlock()}},
+		}}
+		changed, err := pbv2.ReplaceLastCacheBreakpoint(req, []byte(`{"type":"standard"}`))
+		if err != nil || !changed {
+			t.Fatalf("changed=%v err=%v", changed, err)
+		}
+		if got := req.Messages[0].Blocks[0].GetToolResult().Signature; got != "" {
+			t.Fatalf("stale result signature survived: %q", got)
+		}
+		last := req.Messages[1].Blocks[len(req.Messages[1].Blocks)-1]
+		if ts := last.GetTrailingSignature(); ts == nil || ts.Signature != "trailing-token" {
+			t.Fatal("the trailing carrier was disturbed by a nested marker change")
+		}
+		if got := req.Messages[0].Blocks[0].GetToolResult().Content[0].GetText().Text; got != "r" {
+			t.Fatalf("unrelated content disturbed: %q", got)
+		}
+	})
+
+	// Top-level marker real change: NO signature is cleared.
+	t.Run("top-level marker preserves every token", func(t *testing.T) {
+		req := &pbv2.ChatRequest{Model: "m", Messages: []*pbv2.Message{{Role: "assistant", Blocks: []*pbv2.RequestBlock{
+			textBlock("covered"),
+			resultBlock("result-sig", trText("r")),
+			{Kind: &pbv2.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.RequestCacheBreakpoint{MarkerJson: []byte(`{"type":"ephemeral"}`)}}},
+			trailingBlock(),
+		}}}}
+		changed, err := pbv2.ReplaceLastCacheBreakpoint(req, []byte(`{"type":"standard"}`))
+		if err != nil || !changed {
+			t.Fatalf("changed=%v err=%v", changed, err)
+		}
+		if got := req.Messages[0].Blocks[1].GetToolResult().Signature; got != "result-sig" {
+			t.Fatalf("a top-level marker change cleared a result token: %q", got)
+		}
+		last := req.Messages[0].Blocks[len(req.Messages[0].Blocks)-1]
+		if ts := last.GetTrailingSignature(); ts == nil || ts.Signature != "trailing-token" {
+			t.Fatal("the trailing carrier was disturbed")
+		}
+	})
+
+	// Tool-definition marker real change: no message token changes. The
+	// result carries NO nested marker, so the tool-def carrier is the LAST
+	// one in serialization order.
+	t.Run("tool-def marker clears nothing", func(t *testing.T) {
+		plain := &pbv2.Message{Role: "user"}
+		plain.Blocks = []*pbv2.RequestBlock{resultBlock("result-sig", trText("r"))}
+		req := &pbv2.ChatRequest{Model: "m",
+			Tools:    []*pbv2.ToolDef{{Name: "read", ParametersJson: []byte(`{}`), CacheControlJson: []byte(`{"type":"ephemeral"}`)}},
+			Messages: []*pbv2.Message{plain},
+		}
+		changed, err := pbv2.ReplaceLastCacheBreakpoint(req, []byte(`{"type":"standard"}`))
+		if err != nil || !changed {
+			t.Fatalf("changed=%v err=%v", changed, err)
+		}
+		if got := req.Messages[0].Blocks[0].GetToolResult().Signature; got != "result-sig" {
+			t.Fatalf("a tool-def marker change cleared a message token: %q", got)
+		}
+	})
+
+	// Byte-identical replay: everything preserved.
+	t.Run("no-op preserves everything", func(t *testing.T) {
+		req := &pbv2.ChatRequest{Model: "m", Messages: []*pbv2.Message{signedResultMsg()}}
+		before := proto.Clone(req).(*pbv2.ChatRequest)
+		changed, err := pbv2.ReplaceLastCacheBreakpoint(req, []byte(`{"type":"ephemeral"}`))
+		if err != nil || changed {
+			t.Fatalf("changed=%v err=%v", changed, err)
+		}
+		if !proto.Equal(req, before) {
+			t.Fatal("a no-op marker replay mutated the request")
+		}
+	})
+
+	// Errors atomic.
+	t.Run("errors atomic", func(t *testing.T) {
+		req := &pbv2.ChatRequest{Model: "m", Messages: []*pbv2.Message{signedResultMsg()}}
+		before := proto.Clone(req).(*pbv2.ChatRequest)
+		if _, err := pbv2.ReplaceLastCacheBreakpoint(req, []byte(`not json`)); err == nil {
+			t.Fatal("a malformed marker was accepted")
+		}
+		if !proto.Equal(req, before) {
+			t.Fatal("an error path mutated the request")
+		}
+	})
+}
+
+// TestReplaceLastCacheBreakpointRichStructural — the STRUCTURAL preservation
+// proof: one rich request carrying ALL five embedded signature surfaces, a
+// trailing carrier WITH metadata, unrelated blocks/results, and mixed marker
+// carriers. For tool-def, top-level, nested, and no-op rows an INDEPENDENT
+// expected clone changes ONLY the permitted marker (and, for nested, only
+// the containing result signature); proto.Equal(actual, expected) proves
+// "every signature", "unrelated tokens", and "entire trailing carrier".
+// Weakened tamper rows prove each protected carrier is non-vacuous.
+func TestReplaceLastCacheBreakpointRichStructural(t *testing.T) {
+	text := func(s string) *pbv2.RequestBlock {
+		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: s, Signature: "text-sig"}}}
+	}
+	thinking := func(s string) *pbv2.RequestBlock {
+		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_Thinking{Thinking: &pbv2.RequestThinkingBlock{Text: s, Signature: "think-sig"}}}
+	}
+	toolUse := func() *pbv2.RequestBlock {
+		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_ToolUse{ToolUse: &pbv2.RequestToolUseBlock{Id: "c9", Name: "write", ArgumentsJson: []byte(`{}`), Signature: "tu-sig"}}}
+	}
+	unknown := func() *pbv2.RequestBlock {
+		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_Unknown{Unknown: &pbv2.RequestUnknownBlock{Kind: "k", PayloadJson: []byte(`{}`), Signature: "unk-sig"}}}
+	}
+	trText := func(s string) *pbv2.ToolResultContentBlock {
+		return &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: s}}}
+	}
+	trMarker := func(m string) *pbv2.ToolResultContentBlock {
+		return &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.ToolResultCacheBreakpoint{MarkerJson: []byte(m)}}}
+	}
+	result := func(sig, marker string, hasMarker bool) *pbv2.RequestBlock {
+		content := []*pbv2.ToolResultContentBlock{trText("r")}
+		if hasMarker {
+			content = append(content, trMarker(marker))
+		}
+		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+			ToolCallId: "c1", ToolName: "read", Signature: sig, Content: content,
+		}}}
+	}
+	topMarker := func(m string) *pbv2.RequestBlock {
+		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.RequestCacheBreakpoint{MarkerJson: []byte(m)}}}
+	}
+	trailing := func() *pbv2.RequestBlock {
+		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: &pbv2.RequestTrailingSignatureBlock{Signature: "trailing-sig", PartMetadataJson: []byte(`{"t":1}`)}}}
+	}
+
+	// The rich request: all five embedded signatures + trailing-with-meta +
+	// unrelated blocks + BOTH a top-level marker and a nested marker.
+	rich := func() *pbv2.ChatRequest {
+		return &pbv2.ChatRequest{Model: "m",
+			Tools: []*pbv2.ToolDef{{Name: "read", ParametersJson: []byte(`{}`), CacheControlJson: []byte(`{"type":"ephemeral"}`)}},
+			Messages: []*pbv2.Message{
+				{Role: "assistant", Blocks: []*pbv2.RequestBlock{text("covered"), thinking("thought"), toolUse(), unknown(), result("result-sig", `{"type":"standard"}`, true), topMarker(`{"type":"ephemeral"}`), trailing()}},
+				{Role: "user", Blocks: []*pbv2.RequestBlock{result("unrelated-sig", "", false)}},
+			},
+		}
+	}
+	validate := func(t *testing.T, name string, req *pbv2.ChatRequest) {
+		t.Helper()
+		if err := req.ValidateReplacement(); err != nil {
+			t.Fatalf("%s is not in the replacement domain: %v", name, err)
+		}
+	}
+
+	// NESTED row: the nested marker is the LAST carrier; only the containing
+	// result signature is cleared; everything else is byte-identical.
+	t.Run("nested marker structural", func(t *testing.T) {
+		actual := rich()
+		// The nested marker must be the LAST carrier: drop the top-level
+		// marker block (blocks[5]).
+		actual.Messages[0].Blocks = append(actual.Messages[0].Blocks[:5], actual.Messages[0].Blocks[6:]...)
+		validate(t, "nested input", actual)
+		changed, err := pbv2.ReplaceLastCacheBreakpoint(actual, []byte(`{"type":"1h"}`))
+		if err != nil || !changed {
+			t.Fatalf("changed=%v err=%v", changed, err)
+		}
+		expected := rich()
+		expected.Messages[0].Blocks = append(expected.Messages[0].Blocks[:5], expected.Messages[0].Blocks[6:]...)
+		expected.Messages[0].Blocks[4].GetToolResult().Content[1].GetCacheBreakpoint().MarkerJson = []byte(`{"type":"1h"}`)
+		expected.Messages[0].Blocks[4].GetToolResult().Signature = "" // the containing result
+		validate(t, "nested expected", expected)
+		validate(t, "nested actual", actual)
+		if !proto.Equal(actual, expected) {
+			t.Fatalf("nested mutation is not exactly the two permitted changes")
+		}
+		// Every other signature surface survives.
+		if got := actual.Messages[0].Blocks[0].GetText().Signature; got != "text-sig" {
+			t.Fatalf("text signature disturbed: %q", got)
+		}
+		if got := actual.Messages[0].Blocks[3].GetUnknown().Signature; got != "unk-sig" {
+			t.Fatalf("unknown signature disturbed: %q", got)
+		}
+		if got := actual.Messages[0].Blocks[5].GetTrailingSignature().Signature; got != "trailing-sig" {
+			t.Fatalf("trailing signature disturbed: %q", got)
+		}
+		if got := string(actual.Messages[0].Blocks[5].GetTrailingSignature().PartMetadataJson); got != `{"t":1}` {
+			t.Fatalf("trailing metadata disturbed: %q", got)
+		}
+		if got := actual.Messages[1].Blocks[0].GetToolResult().Signature; got != "unrelated-sig" {
+			t.Fatalf("unrelated result signature disturbed: %q", got)
+		}
+		// COMPLETE weakened tamper table: every protected carrier is
+		// independently non-vacuous.
+		tampers := []struct {
+			name   string
+			tamper func(*pbv2.ChatRequest)
+		}{
+			{"text signature", func(r *pbv2.ChatRequest) { r.Messages[0].Blocks[0].GetText().Signature = "" }},
+			{"thinking signature", func(r *pbv2.ChatRequest) { r.Messages[0].Blocks[1].GetThinking().Signature = "" }},
+			{"tool-use signature", func(r *pbv2.ChatRequest) { r.Messages[0].Blocks[2].GetToolUse().Signature = "" }},
+			{"unknown signature", func(r *pbv2.ChatRequest) { r.Messages[0].Blocks[3].GetUnknown().Signature = "" }},
+			{"containing result signature", func(r *pbv2.ChatRequest) { r.Messages[0].Blocks[4].GetToolResult().Signature = "stale-sig" }},
+			{"unrelated result signature", func(r *pbv2.ChatRequest) { r.Messages[1].Blocks[0].GetToolResult().Signature = "" }},
+			{"trailing signature value", func(r *pbv2.ChatRequest) { r.Messages[0].Blocks[5].GetTrailingSignature().Signature = "altered" }},
+			{"trailing metadata", func(r *pbv2.ChatRequest) { r.Messages[0].Blocks[5].GetTrailingSignature().PartMetadataJson = nil }},
+		}
+		for _, tc := range tampers {
+			t.Run("tamper/"+tc.name, func(t *testing.T) {
+				tampered := proto.Clone(expected).(*pbv2.ChatRequest)
+				tc.tamper(tampered)
+				if proto.Equal(actual, tampered) {
+					t.Fatalf("weakened: a disturbed %s went undetected", tc.name)
+				}
+			})
+		}
+	})
+
+	// TOP-LEVEL row: the top-level marker is the last carrier (the nested
+	// marker is dropped from this variant); NO signature changes.
+	t.Run("top-level marker structural", func(t *testing.T) {
+		base := rich()
+		base.Messages[0].Blocks[4].GetToolResult().Content = []*pbv2.ToolResultContentBlock{trText("r")} // no nested marker
+		actual := base
+		changed, err := pbv2.ReplaceLastCacheBreakpoint(actual, []byte(`{"type":"1h"}`))
+		if err != nil || !changed {
+			t.Fatalf("changed=%v err=%v", changed, err)
+		}
+		expected := rich()
+		expected.Messages[0].Blocks[4].GetToolResult().Content = []*pbv2.ToolResultContentBlock{trText("r")}
+		expected.Messages[0].Blocks[5].GetCacheBreakpoint().MarkerJson = []byte(`{"type":"1h"}`)
+		if !proto.Equal(actual, expected) {
+			t.Fatal("top-level mutation is not exactly the permitted marker change")
+		}
+		if got := actual.Messages[0].Blocks[4].GetToolResult().Signature; got != "result-sig" {
+			t.Fatalf("a top-level marker change cleared a result signature: %q", got)
+		}
+	})
+
+	// TOOL-DEF row: the tool-def marker is the only carrier.
+	t.Run("tool-def marker structural", func(t *testing.T) {
+		base := rich()
+		base.Messages[0].Blocks[4].GetToolResult().Content = []*pbv2.ToolResultContentBlock{trText("r")}
+		base.Messages[0].Blocks = append(base.Messages[0].Blocks[:5], base.Messages[0].Blocks[6:]...) // drop the top-level marker
+		actual := base
+		changed, err := pbv2.ReplaceLastCacheBreakpoint(actual, []byte(`{"type":"1h"}`))
+		if err != nil || !changed {
+			t.Fatalf("changed=%v err=%v", changed, err)
+		}
+		expected := rich()
+		expected.Messages[0].Blocks[4].GetToolResult().Content = []*pbv2.ToolResultContentBlock{trText("r")}
+		expected.Messages[0].Blocks = append(expected.Messages[0].Blocks[:5], expected.Messages[0].Blocks[6:]...)
+		expected.Tools[0].CacheControlJson = []byte(`{"type":"1h"}`)
+		if !proto.Equal(actual, expected) {
+			t.Fatal("tool-def mutation is not exactly the permitted marker change")
+		}
+		if got := actual.Messages[0].Blocks[4].GetToolResult().Signature; got != "result-sig" {
+			t.Fatalf("a tool-def marker change cleared a result signature: %q", got)
+		}
+	})
+
+	// NO-OP row: byte-identical replay preserves everything.
+	t.Run("no-op structural", func(t *testing.T) {
+		actual := rich()
+		before := proto.Clone(actual).(*pbv2.ChatRequest)
+		changed, err := pbv2.ReplaceLastCacheBreakpoint(actual, []byte(`{"type":"ephemeral"}`))
+		if err != nil || changed {
+			t.Fatalf("changed=%v err=%v", changed, err)
+		}
+		if !proto.Equal(actual, before) {
+			t.Fatal("a no-op marker replay mutated the rich request")
+		}
+	})
 }

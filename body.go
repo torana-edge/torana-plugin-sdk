@@ -293,8 +293,11 @@ func ReplaceToolResultText(msg *pbv2.Message, block int, text string) (bool, err
 		return false, nil // structural no-op: every provenance token preserved
 	}
 	tb.Text = text
-	tr.Signature = "" // stale: the result content changed
-	clearTrailingSignature(msg)
+	// The trailing-signature carrier covers ONLY preceding text/thinking and
+	// its own metadata — NOT tool-result content — so it is PRESERVED
+	// byte-for-byte here; only the containing result signature is cleared
+	// (its covered content changed).
+	tr.Signature = ""
 	return true, nil
 }
 

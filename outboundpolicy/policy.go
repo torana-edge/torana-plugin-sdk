@@ -507,6 +507,36 @@ var requestSignatureContracts = []struct {
 	}},
 }
 
+// RequestSignatureContracts returns the request-domain signature binding
+// table (message, signature field, covered refs with scopes) as read-only
+// copies — the registry the exhaustive reference matrix and the host's
+// inventory tests are driven from.
+func RequestSignatureContracts() []SignatureContract {
+	out := make([]SignatureContract, 0, len(requestSignatureContracts))
+	for _, c := range requestSignatureContracts {
+		refs := make([]SignatureContractRef, 0, len(c.content))
+		for _, r := range c.content {
+			refs = append(refs, SignatureContractRef{Scope: r.scope, Ref: r.ref})
+		}
+		out = append(out, SignatureContract{Message: c.message, Field: c.field, Content: refs})
+	}
+	return out
+}
+
+// SignatureContract is the exported read-only shape of one request-domain
+// signature binding.
+type SignatureContract struct {
+	Message string
+	Field   string
+	Content []SignatureContractRef
+}
+
+// SignatureContractRef is one covered-field ref of a signature binding.
+type SignatureContractRef struct {
+	Scope SignatureScope
+	Ref   string
+}
+
 // requestCoveredFieldKinds pins the descriptor-derived covered-field rules:
 // the exact field-kind/cardinality/presence class every pinned ref must
 // satisfy. A plain string/bytes ref is the default (framed value); the

@@ -205,6 +205,7 @@ opaque signatures) are **host-owned** — immutable under plugin mutation
 
 | Capability | Covers |
 | --- | --- |
+| `ir.tool_results.write` | The tool-result TEXT VALUE ONLY: position-preserving changes to `ToolResultTextBlock.text` at the exact (message, block, content) position, independent of the enclosing message role (the official compactors request ONLY this grant for result text). It does NOT authorize topology, cache markers, roles, metadata, identities, unknown arms, `will_continue`/`scheduling`, or ordinary prompt text — those stay under their own grants. |
 | `ir.cache_control.write` | The cache breakpoint marker ONLY, on its three ordered carriers: `ToolDef.cache_control_json` (tools-first section), `RequestBlock.cache_breakpoint` (outer block), and the nested `ToolResultContentBlock.cache_breakpoint` inside a tool result. It does NOT authorise message or tool content/schema changes, and the message-role grants / `ir.tools.write` do NOT authorise these marker fields — a plugin that changes a breakpoint marker must hold this grant, and nothing else it changes is covered by it. |
 | `ir.messages.write.{user,assistant,system,tool,developer,other}` | Message **content** of that role (request and response). Not response role or signatures. |
 | `ir.tools.write` | Tool definitions on the request. |
@@ -277,9 +278,20 @@ block's single text arm, by message block index:
   does not move;
 - a byte-identical value is a structural no-op (`changed=false`) preserving
   every provenance token;
-- a real change preserves `part_metadata_json` but clears the tool-result
-  signature and any final trailing-signature block whose covered scope
-  changed — no stale token survives.
+- a real change preserves `part_metadata_json` and the ENTIRE final
+  trailing-signature carrier (which covers only preceding text/thinking and
+  its own metadata — NOT tool results), and clears only the containing
+  tool-result signature — no stale token survives.
+
+### Cache-marker provenance (ReplaceLastCacheBreakpoint)
+
+- a tool-definition marker real change clears NO message token;
+- a top-level message marker real change preserves EVERY signature
+  token/carrier (markers are outside the trailing coverage);
+- a NESTED tool-result marker real change clears ONLY the containing
+  tool-result signature; the trailing carrier and unrelated tokens are
+  preserved;
+- a byte-identical replay preserves everything; every error is atomic.
 
 ### `ReplaceLastCacheBreakpoint(req, marker) (changed bool, err error)`
 
