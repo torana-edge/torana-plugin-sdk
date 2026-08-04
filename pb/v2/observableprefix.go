@@ -103,7 +103,18 @@ func truncateMessage(m *Message, lastBlock, lastNested int) *Message {
 }
 
 // RequestObservablePrefix returns the deterministic protobuf serialization of
-// the provider-visible cached prefix:
+// the provider-visible cached prefix, plus whether the request carries a
+// cache-breakpoint carrier (hasBreakpoint):
+//
+//   - hasBreakpoint is TRUE when the LAST carrier in the
+//     tools-first/outer/nested serialization order exists (the prefix is
+//     closed at it), FALSE for a no-marker request (the whole request is the
+//     automatic-cache prefix). It is a pure ORACLE — the same traversal the
+//     projection uses, with no mutation — so a consumer can decline a
+//     no-marker request BEFORE any state access without re-implementing the
+//     carrier model (cache_tier_selector's decline-before-state contract).
+//
+// Otherwise unchanged:
 //
 //   - the owning gate: ValidateReplacement runs on the request FIRST, so an
 //     out-of-domain request is an ERROR (never a partial projection — the
@@ -122,9 +133,9 @@ func truncateMessage(m *Message, lastBlock, lastNested int) *Message {
 //
 // The returned bytes are a fresh deterministic serialization of a fresh
 // proto.Clone: the input is never mutated and never aliased by the result.
-func RequestObservablePrefix(req *ChatRequest) ([]byte, error) {
+func RequestObservablePrefix(req *ChatRequest) (prefix []byte, hasBreakpoint bool, err error) {
 	if err := req.ValidateReplacement(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	out := proto.Clone(req).(*ChatRequest)
 	// The ONLY cleared fields: stream and host metadata are not part of the
@@ -135,16 +146,19 @@ func RequestObservablePrefix(req *ChatRequest) ([]byte, error) {
 	last := lastCacheMarker(out)
 	if last == nil {
 		// No marker: the whole request is the prefix.
-		return proto.MarshalOptions{Deterministic: true}.Marshal(out)
+		b, err := proto.MarshalOptions{Deterministic: true}.Marshal(out)
+		return b, false, err
 	}
 	if last.kind == markerCarrierTool {
 		out.Tools = out.Tools[:last.tool+1]
 		out.Messages = nil
-		return proto.MarshalOptions{Deterministic: true}.Marshal(out)
+		b, err := proto.MarshalOptions{Deterministic: true}.Marshal(out)
+		return b, true, err
 	}
 	out.Messages = out.Messages[:last.msg+1]
 	out.Messages[last.msg] = truncateMessage(out.Messages[last.msg], last.block, last.nested)
-	return proto.MarshalOptions{Deterministic: true}.Marshal(out)
+	b, err := proto.MarshalOptions{Deterministic: true}.Marshal(out)
+	return b, true, err
 }
 
 // ReplaceLastCacheBreakpoint replaces the marker on the LAST EXISTING carrier

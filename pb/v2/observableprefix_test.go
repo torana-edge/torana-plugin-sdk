@@ -50,11 +50,21 @@ func baseObservableRequest() *ChatRequest {
 
 func observablePrefix(t *testing.T, req *ChatRequest) []byte {
 	t.Helper()
-	b, err := RequestObservablePrefix(req)
+	b, _, err := RequestObservablePrefix(req)
 	if err != nil {
 		t.Fatalf("RequestObservablePrefix: %v", err)
 	}
 	return b
+}
+
+// observablePrefixFull returns all three values for the presence pins.
+func observablePrefixFull(t *testing.T, req *ChatRequest) ([]byte, bool) {
+	t.Helper()
+	b, has, err := RequestObservablePrefix(req)
+	if err != nil {
+		t.Fatalf("RequestObservablePrefix: %v", err)
+	}
+	return b, has
 }
 
 // checkObservablePrefixInventory validates the include/exclude tables
@@ -397,7 +407,7 @@ func TestObservablePrefixStructuralReference(t *testing.T) {
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
-			got, err := RequestObservablePrefix(row.input)
+			got, _, err := RequestObservablePrefix(row.input)
 			if err != nil {
 				t.Fatalf("RequestObservablePrefix: %v", err)
 			}
@@ -713,7 +723,7 @@ func TestObservablePrefixSafetySettingsArray(t *testing.T) {
 	// {} is NOT a valid safety-settings value (array shape) — fail-closed.
 	bad := proto.Clone(base).(*ChatRequest)
 	bad.SafetySettingsJson = []byte(`{}`)
-	if _, err := RequestObservablePrefix(bad); err == nil {
+	if _, _, err := RequestObservablePrefix(bad); err == nil {
 		t.Fatal("object-shaped safety_settings_json was not rejected")
 	}
 }
@@ -722,7 +732,7 @@ func TestObservablePrefixFailClosedAndNonAliasing(t *testing.T) {
 	// Out-of-domain request: error, never a partial projection.
 	bad := baseObservableRequest()
 	bad.MaxTokens = proto.Int32(0)
-	if _, err := RequestObservablePrefix(bad); err == nil {
+	if _, _, err := RequestObservablePrefix(bad); err == nil {
 		t.Fatal("out-of-domain request produced a prefix")
 	}
 
@@ -749,6 +759,53 @@ func TestObservablePrefixFailClosedAndNonAliasing(t *testing.T) {
 	after := observablePrefix(t, base)
 	if bytes.Equal(after, retained) {
 		t.Fatal("prefix result aliased the input request")
+	}
+}
+
+// TestObservablePrefixMarkerPresence — the hasBreakpoint oracle: true when
+// the LAST carrier in tools-first/outer/nested order exists, false for a
+// no-marker request; a pure read (the input is never mutated).
+func TestObservablePrefixMarkerPresence(t *testing.T) {
+	rows := []struct {
+		name string
+		req  *ChatRequest
+		want bool
+	}{
+		{"no marker", func() *ChatRequest {
+			r := baseObservableRequest()
+			r.Messages[1].Blocks = r.Messages[1].Blocks[:1]
+			return r
+		}(), false},
+		{"tool carrier", func() *ChatRequest {
+			r := baseObservableRequest()
+			r.Messages[1].Blocks = r.Messages[1].Blocks[:1]
+			r.Tools[0].CacheControlJson = []byte(`{"type":"ephemeral"}`)
+			return r
+		}(), true},
+		{"outer carrier", baseObservableRequest(), true},
+		{"nested carrier (later than outer)", func() *ChatRequest {
+			r := baseObservableRequest()
+			r.Messages[1].Blocks = append(r.Messages[1].Blocks, &RequestBlock{Kind: &RequestBlock_ToolResult{ToolResult: &RequestToolResultBlock{
+				ToolCallId: "c1",
+				Content: []*ToolResultContentBlock{
+					{Kind: &ToolResultContentBlock_Text{Text: &ToolResultTextBlock{Text: "a"}}},
+					{Kind: &ToolResultContentBlock_CacheBreakpoint{CacheBreakpoint: &ToolResultCacheBreakpoint{MarkerJson: []byte(`{"type":"ephemeral"}`)}}},
+				},
+			}}})
+			return r
+		}(), true},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			before := proto.Clone(row.req).(*ChatRequest)
+			_, has := observablePrefixFull(t, row.req)
+			if has != row.want {
+				t.Fatalf("hasBreakpoint = %v, want %v", has, row.want)
+			}
+			if !proto.Equal(row.req, before) {
+				t.Fatal("the presence oracle mutated its input")
+			}
+		})
 	}
 }
 
