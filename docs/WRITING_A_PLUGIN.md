@@ -15,7 +15,8 @@ granted to its exact build.
 - **Go 1.24 or newer.** `-buildmode=c-shared` for `wasip1` — which the reactor
   model requires, see [PLUGIN_SEMANTICS.md](PLUGIN_SEMANTICS.md) — does not exist
   before 1.24. Torana itself builds with 1.26.
-- **Rust stable plus `wasm32-wasip1`** for the supported Rust authoring path.
+- **Rust is not currently supported.** The bundled crate is ABI v1 and cannot
+  run on the v2-only Edge host.
 - **The `torana` binary**, which is both the proxy and the plugin CLI.
 
 ---
@@ -142,9 +143,9 @@ Every plugin directory must contain a `plugin.json` file describing its metadata
 - **`id`**: Stable machine-readable plugin identifier.
 - **`version`**: Semantic version string (e.g. `"0.1.0"`).
 - **`description`**: Human-readable description.
-- **`abi_version`**: Torana plugin ABI version. Go guests use `"v2"`
-  (`run_hook` / `supported_hooks`). Rust guests remain `"v1"` until Migration C —
-  do not mix a v2 export surface with a v1 manifest (or the reverse).
+- **`abi_version`**: Torana plugin ABI version. The current host accepts `"v2"`
+  (`run_hook` / `supported_hooks`). The repository's Rust v1 guest is
+  historical and incompatible; do not use a v1 manifest for a current plugin.
 - **`minimum_torana_version`**: Optional oldest compatible Torana Edge version.
 - **`maximum_torana_version`**: Optional newest compatible Torana Edge version.
 - **`failure_mode`**: Recommended operator policy, `"pass"` or `"block"`.
@@ -213,7 +214,7 @@ opaque signatures) are **host-owned** — immutable under plugin mutation
 | `ir.params.write` | Request sampling params and request provider extension blobs. |
 | `ir.stream.write` | **Additive** topology grant: Suppress, fan-out, kind change, block boundaries/indexes. Required **in addition to** content grants for what was changed/removed/added. Cannot alone alter host-owned facts. |
 
-Stream composition (Migration B verifies by field diff): `required = topology
+Stream composition is verified by field diff: `required = topology
 (when cardinality/order/boundaries/kind change) ∪ every semantic section
 changed/removed/added`. A one-for-one `TextDelta` rewrite needs only
 `ir.messages.write.assistant`. When `AfterResponse.mutable` is false, a
@@ -623,41 +624,10 @@ torana plugin build . -o plugin.wasm
 
 ### Rust
 
-Create a `cdylib` crate:
-
-```toml
-[package]
-name = "my-torana-plugin"
-version = "0.1.0"
-edition = "2021"
-
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-torana-plugin-sdk = "0.3"
-```
-
-Register and export a hook:
-
-```rust
-use torana_plugin_sdk::{export_before_request, pb};
-
-fn before(request: &mut pb::ChatRequest) -> bool {
-    // Return true only when request was changed.
-    false
-}
-
-export_before_request!(before);
-```
-
-Build the bundle:
-
-```bash
-rustup target add wasm32-wasip1
-cargo build --release --target wasm32-wasip1
-cp target/wasm32-wasip1/release/my_torana_plugin.wasm plugin.wasm
-```
+Rust plugin authoring is not currently supported. The crate in this repository
+implements ABI v1, while the current Edge host accepts ABI v2 only. Use the Go
+v2 SDK until a complete Rust v2 port is available; changing a manifest string
+does not make a v1 binary compatible.
 
 ---
 

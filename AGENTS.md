@@ -1,79 +1,41 @@
 # Notes for AI coding agents
 
-If you are generating or modifying a **Torana plugin**, read
-[`docs/WASM_PLUGIN_GUIDE.md`](docs/WASM_PLUGIN_GUIDE.md) before writing code, and
-check your output against the checklist at the end of it.
+The current Torana Edge host accepts ABI v2 plugins. Use the Go SDK and
+`pb/v2`; declare `"abi_version": "v2"`. The Rust crate in this repository is
+still ABI v1 and is not compatible with the current host.
 
-That guide exists for a specific reason. The WASM boundary is the part models get
-wrong most reliably, and every mistake fails *silently* — a wrong allocator, an
-unpacked return value, or a mishandled pointer produces plausible empty output
-rather than an error. Nothing crashes. The plugin loads, reports healthy, and does
-nothing.
+Before changing a plugin, read in order:
 
-Order to read in:
+1. `docs/WASM_PLUGIN_GUIDE.md`
+2. `docs/WRITING_A_PLUGIN.md`
+3. `docs/PLUGIN_SEMANTICS.md`
 
-1. [`docs/WASM_PLUGIN_GUIDE.md`](docs/WASM_PLUGIN_GUIDE.md) — the boundary, and why it fails quietly
-2. [`docs/WRITING_A_PLUGIN.md`](docs/WRITING_A_PLUGIN.md) — scaffold, manifest, build, install
-3. [`docs/PLUGIN_SEMANTICS.md`](docs/PLUGIN_SEMANTICS.md) — hook behaviour, protobuf decoding, prompt-cache and tool-output safety
-4. [`ABI.md`](ABI.md) — frozen **v1** trampoline contract (Rust until Migration C).
-   Go authors: use `pb/v2` + this PR's guides; do not follow ABI.md as the
-   active Go ABI.
+`ABI.md` is a historical v1 reference, not the active contract.
 
-If you are writing in **Go or Rust**, use the SDK in this repository rather than
-reimplementing the boundary. It already handles allocation, the packed return,
-and protobuf round-tripping.
+## Boundaries that must stay explicit
 
-## Two failure modes worth naming up front
+- Use typed v2 result constructors. An empty `HookResult` is pass-through; a
+  non-nil handler error traps and the host applies the approved failure mode.
+- Request mutations must be deterministic. Nondeterminism destroys provider
+  cache identity and costs users money.
+- Use provenance-aware mutation helpers for signed content and cache markers.
+- Request every host-call and narrow IR write permission actually exercised;
+  the host remains authoritative even on the all-grants path.
+- Treat typed refusals, malformed frames, local validation defects, and
+  provider outcomes as different classes. Never branch on error text.
 
-Both produce a plugin that loads, reports healthy, and is wrong.
+## Extending the SDK
 
-**Returning zero means pass-through.** On the **v2** Go path, use typed
-result constructors (`PassRequest`, `ReplaceRequest`, `PassEvent`,
-`SuppressEvent`, `EmitEvents`, `ServeHTTP`, `TickIdle`, …). A zero/empty
-`HookResult` encodes to zero bytes and means pass-through. Do **not** look for
-v1 `handled` flags — those exist only on the v1 trampoline still used by Rust
-guests. A non-nil handler error traps so the host applies `failure_mode`.
+- Keep `sdk.go` and the non-WASI stubs in sync.
+- Regenerate checked-in protobuf code with `scripts/generate-go.sh` and verify
+  a second generation is byte-identical.
+- Add descriptor/reflection inventory tests when fields, permissions, signed
+  surfaces, or ordered carriers change.
+- Update both author guides and host integration coverage.
+- Changes spanning SDK, Edge, and official plugins land in that dependency
+  order with exact revision pins and a final cross-repository gate.
 
-**Anything you write into a request must be deterministic.** The same input must
-produce byte-identical output every time. Writing a timestamp, a random value, or
-the request ID into a request changes the prefix bytes, which invalidates the
-provider's prompt cache and costs the operator money on *every* subsequent turn.
-The proxy enforces this with a test; a plugin that fails it will not ship.
-
-## If you are extending the SDK itself
-
-Adding a hook or host call touches more places than it looks:
-
-- `sdk.go` is `//go:build wasip1`. Every export there needs a matching no-op in
-  `sdk_other.go`, or plugins stop compiling for host-side tests.
-- Regenerate protobuf with `./scripts/generate-go.sh` and commit the result — CI
-  diffs it. Use the exact `protoc-gen-go` version in the generated file header.
-- **`proto/torana/v1` is held unchanged for the duration of the migration, then
-  deleted.** It is not a supported surface. torana-edge and the official plugins
-  still import it while they move to v2 one repo at a time, and CI runs
-  `buf breaking` against `main` for this path so that migration is not disturbed
-  mid-flight. That is the only reason it is protected.
-  - **Do not add v1 features, fixes, or a v1→v2 compatibility layer.** Work that
-    would touch v1 belongs in v2.
-  - The coordinated cut deletes v1. `scripts/check-abi-breaking.sh` then protects
-    **only v2** (scoped with `--path`), so comparing against a `main` that still
-    contains v1 does not report the intentional deletion as a breaking change.
-    After that PR merges, `main` has only v2 and the restriction can be
-    simplified.
-  - Torana has not launched, so there is no installed base to preserve. The
-    published `v0.2.0` tag keeps working regardless — module proxy tags are
-    immutable, so deleting v1 from the tree cannot reach anyone who pinned it.
-- **`proto/torana/v2` is unreleased and may still be reshaped.** Nothing pins it
-  and nothing consumes it, so freezing it would preserve design mistakes rather
-  than prevent them — its shape has already improved several times under review.
-  While `proto/torana/v1` still exists, CI protects only v1. The hard guarantee
-  that no `v0.3.x` (or later) tag can ship before the cut is
-  `scripts/assert-v2-cut-for-release.sh` in `release.yml`, which runs **before**
-  any package or publish step. It proves behaviour, not string presence:
-  `check-abi-breaking.sh --print-path` must return `proto/torana/v2`, `ci.yml`
-  must actually `run:` that script, both v2 sources must exist, both v1 sources
-  and `pb/torana.pb.go` must be gone. A guard that lived only on `pull_request`
-  would notice too late.
-- Update `docs/WASM_PLUGIN_GUIDE.md` too. It is the document that makes this SDK
-  usable by weaker models, and a capability missing from its checklist silently
-  makes the guide insufficient.
+ABI v1 remains only because the unported Rust crate consumes it. Do not add v1
+features or compatibility layers. Before a public release that promises Rust,
+port it completely to v2; otherwise remove/archive the v1 surface and describe
+Rust as unsupported.

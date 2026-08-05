@@ -1,7 +1,11 @@
 # Torana Plugin SDK for Rust
 
-Rust bindings and safe hook wrappers for Torana's stable WASM Plugin ABI v1.
-The crate requires Rust 1.85 or newer and `protoc`.
+Historical Rust bindings and wrappers for Torana's WASM Plugin ABI v1.
+The current Torana Edge host accepts ABI v2 only, so this crate is not a
+supported or compatible authoring path. It remains in the repository pending a
+complete v2 port or removal. Do not use it for a current Edge deployment.
+
+For archival builds, the crate requires Rust 1.85 or newer and `protoc`.
 
 Add the crate and build for WASI Preview 1:
 

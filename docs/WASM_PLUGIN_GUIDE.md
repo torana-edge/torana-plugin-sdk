@@ -7,25 +7,27 @@ dropped mutations, a silently discarded field. Nothing crashes; the plugin just
 quietly does nothing.
 
 If you are an agent generating or modifying a Torana plugin, read this first and
-check your work against the checklist at the end. If you are writing a Go or Rust
+check your work against the checklist at the end. If you are writing a Go
 plugin, the SDK already implements all of this — start at
 [WRITING_A_PLUGIN.md](WRITING_A_PLUGIN.md) and you will not need most of it.
 
 This document is a critical reference for implementing WebAssembly (WASM) plugins in Torana Edge. **AI Coding Agents MUST read this document before generating or modifying Torana WASM plugins.**
 
-**ABI versioning (read this before the sections below).** Sections 1–5 describe
-the **v1 trampoline ABI** still used by **Rust** guests today: five named hook
+**ABI versioning (read this before the sections below).** The current Edge host
+accepts ABI v2 only. Sections 1–5 preserve the **historical v1 trampoline ABI**
+still implemented by the unported Rust crate: five named hook
 exports (`run_before_request`, …), a separate `request_id` argument, and v1
 result messages (`StreamEventResult.handled`, `TickResult.handled`). See
 [`proto/torana/v1/torana.proto`](../proto/torana/v1/torana.proto) and
-[`ABI.md`](../ABI.md).
+[`ABI.md`](../ABI.md). That crate cannot run on the current host and is not a
+supported authoring path.
 
-**Go guests (Migration A) use the v2 export surface:** `run_hook(ptr,size)->u64`,
+**Supported Go guests use the v2 export surface:** `run_hook(ptr,size)->u64`,
 `supported_hooks()->u32`, and single-action `HookResult` over
 [`proto/torana/v2/torana.proto`](../proto/torana/v2/torana.proto). Declare
 `"abi_version": "v2"` in `plugin.json`. Do not mix v1 exports with a v2
-manifest (or the reverse). Section 6 is the write-grant / host-call vocabulary
-that Migration B enforces on the host.
+manifest. Section 6 is the current write-grant / host-call vocabulary enforced
+by the host.
 ## 1. The Core Architecture (Linear Memory) — v1 trampoline
 WASM plugins in Torana run inside a highly restricted sandbox (using `wazero`). 
 The Go host (Torana) and the guest (the plugin) do NOT share variables, structs, or garbage collection. They only share a single, flat byte array called **Linear Memory**.
@@ -195,10 +197,10 @@ fn my_tick_handler(tick: &pb::TickRequest) -> Result<Option<pb::TickResult>, Box
 }
 ```
 
-## 6. IR write grants (v2 preview)
+## 6. IR write grants (v2)
 
 Vocabulary for [`proto/torana/v2/torana.proto`](../proto/torana/v2/torana.proto).
-Enforcement is Migration B. Declare every `ir.*.write` capability you need in
+Enforcement is current. Declare every `ir.*.write` capability you need in
 `plugin.json`. Content grants reuse the same names across hooks where the
 authority matches (assistant text on request and response). Topology is separate:
 
@@ -302,9 +304,8 @@ dispatch.
 3. Did I pack the return pointer and size into a `u64`?
 4. Did I return `0` for passthrough?
 5. Did I parse and serialize Protobuf properly within the memory bounds?
-6. Did I pick **either** the v1 trampoline boundary (Rust) **or** the v2 export
-   shape (Go: `run_hook` + `supported_hooks`) — not a hybrid — and declare
-   matching `abi_version` plus every `env.*` / `ir.*.write` I need?
+6. Did I use the supported v2 export shape (`run_hook` + `supported_hooks`),
+   declare `abi_version: "v2"`, and request every `env.*` / `ir.*.write` I need?
 7. If I Suppress or fan-out stream events (v2), did I request `ir.stream.write`
    **and** the content grants for what I change/remove/add (and avoid altering
    host-owned facts)?
@@ -314,7 +315,6 @@ dispatch.
 9. If I read meta or cache, did I branch on `sdk.IsNotFound(herr)` rather than
    testing whether the value is `""`? A stored empty string is a real value,
    and a permission denial is not a cache miss.
-10. If I implemented a tick on **v1**: set `handled = true` on any intentional
-   result. On **v2 Go**: use `TickIdle` / `TickDid`. `env.meta_*` works on the
-   synthetic tick scope in both ABIs, but original request/response and caller
-   credentials still do not.
+10. If I implemented a tick, did I use `TickIdle` / `TickDid`? `env.meta_*`
+   works on the synthetic tick scope, but original request/response and caller
+   credentials do not.
