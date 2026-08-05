@@ -24,6 +24,15 @@ func TestCompiledGoGuestImplementsRunHook(t *testing.T) {
 	exerciseRunHook(t, path)
 }
 
+func TestCompiledRustGuestImplementsRunHook(t *testing.T) {
+	path := os.Getenv("TORANA_RUST_GUEST")
+	if path == "" {
+		t.Log("TORANA_RUST_GUEST unset; exercised in CI")
+		return
+	}
+	exerciseRunHook(t, path)
+}
+
 // manifestHooks reads the hook set a guest's manifest declares.
 //
 // This is the ONLY source of truth the bitmap is checked against. Deriving the
@@ -100,8 +109,23 @@ func TestGuestBitmapMatchesManifest(t *testing.T) {
 	manifest := os.Getenv("TORANA_GO_GUEST_MANIFEST")
 	if guest == "" || manifest == "" {
 		t.Log("TORANA_GO_GUEST/TORANA_GO_GUEST_MANIFEST unset; exercised in CI")
+	} else {
+		assertGuestBitmapMatchesManifest(t, guest, manifest)
+	}
+}
+
+func TestRustGuestBitmapMatchesManifest(t *testing.T) {
+	guest := os.Getenv("TORANA_RUST_GUEST")
+	manifest := os.Getenv("TORANA_RUST_GUEST_MANIFEST")
+	if guest == "" || manifest == "" {
+		t.Log("TORANA_RUST_GUEST/TORANA_RUST_GUEST_MANIFEST unset; exercised in CI")
 		return
 	}
+	assertGuestBitmapMatchesManifest(t, guest, manifest)
+}
+
+func assertGuestBitmapMatchesManifest(t *testing.T, guest, manifest string) {
+	t.Helper()
 	declared := manifestHooks(t, manifest)
 
 	ctx := context.Background()

@@ -15,8 +15,8 @@ granted to its exact build.
 - **Go 1.24 or newer.** `-buildmode=c-shared` for `wasip1` — which the reactor
   model requires, see [PLUGIN_SEMANTICS.md](PLUGIN_SEMANTICS.md) — does not exist
   before 1.24. Torana itself builds with 1.26.
-- **Rust is not currently supported.** The bundled crate is ABI v1 and cannot
-  run on the v2-only Edge host.
+- **Rust 1.85+** with `protoc` and the `wasm32-wasip1` target. The Rust logger
+  and all-hooks guest run through the same host conformance harness as Go.
 - **The `torana` binary**, which is both the proxy and the plugin CLI.
 
 ---
@@ -625,10 +625,30 @@ torana plugin build . -o plugin.wasm
 
 ### Rust
 
-Rust plugin authoring is not currently supported. The crate in this repository
-implements ABI v1, while the current Edge host accepts ABI v2 only. Use the Go
-v2 SDK until a complete Rust v2 port is available; changing a manifest string
-does not make a v1 binary compatible.
+Use `torana-plugin-sdk` and compile a `cdylib` for `wasm32-wasip1`. A plugin
+provides one typed dispatcher and declares its exact hook bitmap with
+`export_plugin_v2!`; the macro exports `supported_hooks` and `run_hook`.
+
+```rust
+use torana_plugin_sdk::{export_plugin_v2, pbv2, HOOK_BEFORE_REQUEST};
+
+fn dispatch(input: pbv2::HookInput) -> Result<Option<pbv2::HookResult>, String> {
+    let Some(pbv2::hook_input::Payload::ChatRequest(request)) = input.payload else {
+        return Err("received an undeclared hook".into());
+    };
+    torana_plugin_sdk::log(&format!("model: {}", request.model),
+                           torana_plugin_sdk::LOG_INFO);
+    Ok(None)
+}
+
+export_plugin_v2!(HOOK_BEFORE_REQUEST, dispatch);
+```
+
+Combine multiple hooks by OR-ing the exported hook constants and matching the
+corresponding `HookInput.payload` arms. Return `Ok(None)` to pass through. A
+mutation returns the single `HookResult.action` valid for that hook. Host calls
+use protobuf arguments and `host_call_v2`; typed refusals preserve the stable
+`ErrorCode` classification.
 
 ---
 

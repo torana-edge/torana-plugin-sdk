@@ -105,15 +105,15 @@ jobs:
       # anything — which makes them useless for testing decode behaviour, since
       # "ignored the codec error" and "no handler" look identical from outside.
       #
-      # Migration A moved the Go guest to a single run_hook export. The Rust
-      # guest remains on v1 exports until the Rust SDK migrates; host tests
-      # currently exercise TORANA_GO_GUEST only.
+      # Exercise both language SDKs against the same ABI-v2 host harness.
       - run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -buildvcs=false -o /tmp/go-allhooks.wasm ./conformance/guests/go-allhooks
       - run: cargo build --target wasm32-wasip1 --target-dir /tmp/rust-allhooks-target --manifest-path conformance/guests/rust-allhooks/Cargo.toml
       - run: go test ./conformance/host
         env:
           TORANA_GO_GUEST: /tmp/go-allhooks.wasm
           TORANA_GO_GUEST_MANIFEST: conformance/guests/go-allhooks/plugin.json
+          TORANA_RUST_GUEST: /tmp/rust-allhooks-target/wasm32-wasip1/debug/torana-rust-allhooks.wasm
+          TORANA_RUST_GUEST_MANIFEST: conformance/guests/rust-allhooks/plugin.json
       # The example plugins are what release.yml actually publishes. Pointing
       # the conformance vars at the all-hooks guests above would leave the
       # shipped artifacts with only a compile check, so run the run_hook ABI

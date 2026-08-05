@@ -60,12 +60,28 @@ func TestGoLoggerManifestMatchesV2Surface(t *testing.T) {
 	}
 }
 
-func TestRustLoggerRemainsV1UntilMigrationC(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("examples", "rust-logger", "plugin.json"))
+func TestRustLoggerManifestMatchesV2Surface(t *testing.T) {
+	manifestPath := filepath.Join("examples", "rust-logger", "plugin.json")
+	raw, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), `"abi_version": "v1"`) {
-		t.Fatal("rust-logger must stay on abi_version v1 until Migration C")
+	if !strings.Contains(string(raw), `"abi_version": "v2"`) {
+		t.Fatal("rust-logger must declare abi_version v2")
+	}
+	src, err := os.ReadFile(filepath.Join("examples", "rust-logger", "src", "main.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(src)
+	for _, required := range []string{"export_plugin_v2!", "HOOK_BEFORE_REQUEST", "pbv2::HookInput"} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("rust-logger source is missing %q", required)
+		}
+	}
+	for _, obsolete := range []string{"export_before_request!", "pb::ChatRequest"} {
+		if strings.Contains(body, obsolete) {
+			t.Fatalf("rust-logger source retains ABI-v1 surface %q", obsolete)
+		}
 	}
 }

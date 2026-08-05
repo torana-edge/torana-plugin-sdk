@@ -1,7 +1,6 @@
 # Torana Plugin SDK
 
-The versioned SDK for Torana WASM plugins. The supported path for the current
-Torana Edge host is the Go ABI v2 SDK, templates, and conformance fixtures.
+The versioned Go and Rust SDKs for Torana WASM Plugin ABI v2.
 
 ```bash
 go test ./...
@@ -26,10 +25,10 @@ protobuf API as `github.com/torana-edge/torana-plugin-sdk/pb/v2`. Go guests
 export the v2 surface (`run_hook`, `supported_hooks`). Declare
 `"abi_version": "v2"` in `plugin.json`.
 
-The Rust crate in `rust/torana-plugin-sdk` still speaks the ABI v1 trampoline.
-The current Edge host accepts ABI v2 only, so that crate is historical and
-unsupported until it is fully ported or deliberately removed. Do not advertise
-or ship it as a compatible authoring path.
+The Rust crate in `rust/torana-plugin-sdk` exports the same ABI-v2 surface. Its
+logger and all-hooks guest run through the shared host conformance harness in
+CI, so Rust support is exercised as an executable contract rather than only a
+compile example.
 
 After changing the ABI, regenerate the checked-in Go bindings with
 `./scripts/generate-go.sh`, then run the conformance suite.
