@@ -780,9 +780,8 @@ func TestPolicyContainerRejectedOnScalar(t *testing.T) {
 	if fd == nil || fd.Kind() == protoreflect.MessageKind {
 		t.Fatal("expected scalar model field")
 	}
-	// Direct invariant the inventory walk enforces:
-	if containerPolicy().Kind() == PolicyContainer && fd.Kind() != protoreflect.MessageKind {
-		// ok — this is the condition Validate checks
+	if containerPolicy().Kind() != PolicyContainer {
+		t.Fatal("container policy must report PolicyContainer")
 	}
 	bad := map[string]FieldPolicy{"model": containerPolicy()}
 	old := outboundMessageFieldPolicies["torana.v2.ChatResponse"]
