@@ -40,9 +40,7 @@ func TestValidateFailsWhenFieldPolicyMissing(t *testing.T) {
 		}
 		bad[k] = v
 	}
-	outboundMessageFieldPolicies["torana.v2.ChatResponse"] = bad
-	defer func() { outboundMessageFieldPolicies["torana.v2.ChatResponse"] = old }()
-	err := Validate()
+	err := validateChatResponsePolicies(bad)
 	if err == nil {
 		t.Fatal("expected Validate to fail when a proto field lacks a policy")
 	}
@@ -783,11 +781,13 @@ func TestPolicyContainerRejectedOnScalar(t *testing.T) {
 	if containerPolicy().Kind() != PolicyContainer {
 		t.Fatal("container policy must report PolicyContainer")
 	}
-	bad := map[string]FieldPolicy{"model": containerPolicy()}
 	old := outboundMessageFieldPolicies["torana.v2.ChatResponse"]
-	outboundMessageFieldPolicies["torana.v2.ChatResponse"] = bad
-	defer func() { outboundMessageFieldPolicies["torana.v2.ChatResponse"] = old }()
-	if err := Validate(); err == nil {
+	bad := map[string]FieldPolicy{}
+	for k, v := range old {
+		bad[k] = v
+	}
+	bad["model"] = containerPolicy()
+	if err := validateChatResponsePolicies(bad); err == nil {
 		t.Fatal("expected PolicyContainer-on-scalar to fail Validate")
 	}
 }
@@ -799,9 +799,7 @@ func TestPolicyFixedContainerRejectedOnSingularMessage(t *testing.T) {
 		bad[k] = v
 	}
 	bad["message"] = fixedContainerPolicy()
-	outboundMessageFieldPolicies["torana.v2.ChatResponse"] = bad
-	defer func() { outboundMessageFieldPolicies["torana.v2.ChatResponse"] = old }()
-	err := Validate()
+	err := validateChatResponsePolicies(bad)
 	if err == nil {
 		t.Fatal("expected PolicyFixedContainer on singular message to fail Validate")
 	}
@@ -817,9 +815,7 @@ func TestPolicyFixedContainerRejectedOnScalar(t *testing.T) {
 		bad[k] = v
 	}
 	bad["model"] = fixedContainerPolicy()
-	outboundMessageFieldPolicies["torana.v2.ChatResponse"] = bad
-	defer func() { outboundMessageFieldPolicies["torana.v2.ChatResponse"] = old }()
-	if err := Validate(); err == nil {
+	if err := validateChatResponsePolicies(bad); err == nil {
 		t.Fatal("expected PolicyFixedContainer-on-scalar to fail Validate")
 	}
 }
@@ -831,9 +827,22 @@ func TestPolicyDelegateRejectedOnScalar(t *testing.T) {
 		bad[k] = v
 	}
 	bad["model"] = delegatePolicy(DelegateStream)
-	outboundMessageFieldPolicies["torana.v2.ChatResponse"] = bad
-	defer func() { outboundMessageFieldPolicies["torana.v2.ChatResponse"] = old }()
-	if err := Validate(); err == nil {
+	if err := validateChatResponsePolicies(bad); err == nil {
 		t.Fatal("expected PolicyDelegate-on-scalar to fail Validate")
 	}
+}
+
+func validateChatResponsePolicies(fields map[string]FieldPolicy) error {
+	policies := make(map[protoreflect.FullName]map[string]FieldPolicy, len(outboundMessageFieldPolicies))
+	for message, original := range outboundMessageFieldPolicies {
+		policies[message] = original
+	}
+	policies["torana.v2.ChatResponse"] = fields
+	descs := outboundDescriptors()
+	return validateMessageCompleteness(
+		descs["torana.v2.ChatResponse"],
+		map[protoreflect.FullName]bool{},
+		descs,
+		policies,
+	)
 }
