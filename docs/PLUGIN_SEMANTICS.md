@@ -159,18 +159,13 @@ Two more things:
 - **Return `TickIdle()`** (or a zero `TickResult`) when there is nothing to do.
   Intentional work uses `TickDid(...)`. A zero-byte `HookResult` means
   pass-through — there is no v1 `handled` flag on the Go v2 path.
-- **`failure_mode` and ticks — current host behaviour, changing in Migration B.**
-  Today the host ignores `failure_mode` for ticks: a trapping tick is logged and
+- **`failure_mode` and ticks.** The host treats a tick as background work rather
+  than an in-flight request: a trapping tick is logged and
   the other plugins' ticks continue. The reasoning was that `failure_mode`
   selects whether a failing plugin blocks or passes *the request*, and a tick
   has no request.
-
-  This is **pre-Migration-B behaviour, not the v2 contract.** v1's tick handling
-  was one of the inconsistencies v2 set out to remove — `ABI.md` claimed
-  `failure_mode` was universal while `run_on_tick` ignored it and
-  `run_on_http_request` mapped every error to 503. Migration B makes failure
-  handling uniform across hooks. Do not write a plugin that relies on a trapping
-  tick being silently tolerated.
+  Do not treat a trapped tick as completed work or retry spend automatically;
+  durable tick state must make replay and unknown outcomes explicit.
 Ticks require the `env.background_tick` permission and are off unless the
 operator also sets `plugins.runtime.tick_interval_seconds`. Both are deliberate:
 code running outside any request is work an operator cannot see in a trace, and

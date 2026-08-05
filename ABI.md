@@ -1,4 +1,8 @@
-# Torana Plugin ABI v1
+# Historical Torana Plugin ABI v1
+
+> **Unsupported by the current host.** Torana Edge is ABI v2-only. This file
+> documents the older trampoline still implemented by the unported Rust crate;
+> it is retained for provenance, not as a supported plugin-authoring contract.
 
 The ABI is the contract between a Torana host and a WASI Preview 1 plugin.
 It is versioned independently from the proxy. `abi_version: "v1"` means that
@@ -78,8 +82,9 @@ packed return, memory ownership across the boundary — is covered in
 coding agents and humans implementing a plugin or an SDK from scratch. Every
 failure mode there is silent, so it ends in a checklist worth actually running.
 
-Go and Rust authors do not need it: the SDK in this repository already implements
-the boundary. Start at [docs/WRITING_A_PLUGIN.md](docs/WRITING_A_PLUGIN.md).
+Current plugin authors do not need it: use the Go ABI v2 SDK and start at
+[docs/WRITING_A_PLUGIN.md](docs/WRITING_A_PLUGIN.md). The Rust v1 implementation
+is retained only as historical source and cannot load in the current host.
 
 ## Compatibility
 
