@@ -107,7 +107,8 @@ closed or re-emit the assembled original.
   value deletes the key.
 - `env.meta_append` (permission `env.meta_set`) — append/read tool-call argument
   fragments by block index.
-- `env.cache_set` / `env.cache_get` — shared across plugins and requests
+- `env.cache_set` / `env.cache_get` — private to one plugin across requests
+- `env.shared_cache_set` / `env.shared_cache_get` — explicitly shared across plugins and requests
   (with a TTL). Use for cross-request handoff, e.g. the compactor caches
   intents by `tool_call_id` that the keyword_compactor reads next turn.
 
@@ -143,7 +144,8 @@ means most of what a plugin normally relies on is simply absent.
 | `env.original_request` | the caller's pristine request | **empty** |
 | `env.original_response` | the raw upstream body | **empty** |
 | `env.plugin_config` | your config | your config |
-| `env.cache_get` / `env.cache_set` | shared, cross-request | shared, cross-request |
+| `env.cache_get` / `env.cache_set` | plugin-private, cross-request | plugin-private, cross-request |
+| `env.shared_cache_get` / `env.shared_cache_set` | shared, cross-request | shared, cross-request |
 
 There is also **no caller credential**. Host calls that would normally fall back
 to the caller's own API key have nothing to fall back to, so anything a tick

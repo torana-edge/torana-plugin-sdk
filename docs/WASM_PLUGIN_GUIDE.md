@@ -283,18 +283,22 @@ the command string.
 
 Metadata and cache reads/writes are also typed: `MetaGetArgs`, `MetaSetArgs`,
 `CacheGetArgs`, `CacheSetArgs`, reached through `sdk.MetaGet` / `sdk.MetaSet` /
-`sdk.CacheGet` / `sdk.CacheSet`. **A key is required; an empty value is not an
+`sdk.CacheGet` / `sdk.CacheSet` or the explicit cross-plugin
+`sdk.SharedCacheGet` / `sdk.SharedCacheSet`. **A key is required; an empty value is not an
 error.** Absence and emptiness are different results and the host must keep them
 apart: an absent key answers `error{code: NOT_FOUND}`, a key holding `""`
 answers the `value` arm with empty bytes. Guests branch with `sdk.IsNotFound`.
-Meta is request-scoped and namespaced per plugin; cache is one flat namespace
-shared by every plugin, so an unprefixed cache key is one another plugin can
-overwrite (`sdk.ContentAddressedCacheKey`).
+Meta is request-scoped and namespaced per plugin. Ordinary cache calls are also
+plugin-private and survive across requests. Shared cache calls use a separate
+flat namespace and require their own grants; reserve them for a documented
+producer/consumer contract and use `sdk.ContentAddressedCacheKey` for
+content-derived keys.
 
 Go authors use typed results (`PassRequest` / `ReplaceRequest` / …), handler
 `(Result, error)` signatures (errors trap), fire-and-forget verdict helpers that
 panic on local/protocol failure, `HostCall(cmd, proto.Message)`,
-`MetaGet`/`MetaSet`/`CacheGet`/`CacheSet` (never raw `HostCall`) and
+`MetaGet`/`MetaSet`/`CacheGet`/`CacheSet`/`SharedCacheGet`/`SharedCacheSet`
+(never raw `HostCall`) and
 `StreamHandler` / `StreamAssembler` for host-backed stream assembly.
 `sdktest.Harness.Run(fn)` runs helper code that makes host calls outside a hook
 dispatch.

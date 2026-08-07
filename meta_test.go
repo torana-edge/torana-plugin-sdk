@@ -88,4 +88,10 @@ func TestHelpersRejectAnEmptyKeyWithoutCallingTheHost(t *testing.T) {
 	if _, err := CacheSet("", "v"); err == nil {
 		t.Error("CacheSet(\"\", …) was accepted")
 	}
+	if _, _, err := SharedCacheGet(""); err == nil {
+		t.Error("SharedCacheGet(\"\") was accepted")
+	}
+	if _, err := SharedCacheSet("", "v"); err == nil {
+		t.Error("SharedCacheSet(\"\", …) was accepted")
+	}
 }

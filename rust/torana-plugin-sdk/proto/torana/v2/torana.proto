@@ -866,8 +866,7 @@ message SetIdentityArgs {
   string identity = 1;
 }
 
-// Typed argument bodies for the request-scoped metadata and shared cache
-// commands.
+// Typed argument bodies for request-scoped metadata and cache commands.
 //
 // v2 requires every host call to carry a proto message. Before these existed
 // there was no public way to reach these four commands at all: HostCall takes a
@@ -882,16 +881,18 @@ message SetIdentityArgs {
 //
 //   env.meta_get / env.meta_set   permission: env.meta_get / env.meta_set
 //   env.cache_get / env.cache_set permission: env.cache_get / env.cache_set
+//   env.shared_cache_get / env.shared_cache_set
+//                                  permission: matching command name
 //
-// Meta is request-scoped and private to the calling plugin (the host namespaces
-// the key). Cache is shared across requests and NOT namespaced — two plugins
-// naming the same key see each other's value, which is what makes it a cache
-// rather than plugin state.
+// Meta is request-scoped and private to the calling plugin. CacheGet/CacheSet
+// are cross-request and private to the calling plugin. SharedCacheGet/
+// SharedCacheSet deliberately expose one cross-plugin namespace for approved
+// producer/consumer contracts. Both cache families reuse these argument bodies.
 
 // Typed argument bodies for durable plugin state.
 //
 // State is per-plugin and survives restarts, unlike request-scoped metadata and
-// the shared cache. Absence follows the same contract as those:
+// the cache services. Absence follows the same contract as those:
 //
 //   key absent            -> HostCallResult.error{code: NOT_FOUND}
 //   key present, value "" -> HostCallResult.value arm, empty bytes
