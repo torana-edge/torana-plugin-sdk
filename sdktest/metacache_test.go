@@ -2,6 +2,7 @@ package sdktest_test
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 
 	sdk "github.com/torana-edge/torana-plugin-sdk"
@@ -48,6 +49,23 @@ func TestCacheSetThenGetReturnsTheStoredValue(t *testing.T) {
 	})
 }
 
+func TestSharedCacheSetThenGetUsesExplicitCommands(t *testing.T) {
+	h := sdktest.New(t)
+	h.Run(func() {
+		if herr, err := sdk.SharedCacheSet("contract:key", "v"); err != nil || herr != nil {
+			t.Fatalf("SharedCacheSet: err=%v herr=%v", err, herr)
+		}
+		got, herr, err := sdk.SharedCacheGet("contract:key")
+		if err != nil || herr != nil || got != "v" {
+			t.Fatalf("SharedCacheGet = %q, herr=%v err=%v", got, herr, err)
+		}
+	})
+	commands := []string{h.Calls()[0].Command, h.Calls()[1].Command}
+	if !reflect.DeepEqual(commands, []string{"env.shared_cache_set", "env.shared_cache_get"}) {
+		t.Fatalf("commands = %v", commands)
+	}
+}
+
 // The distinction this change exists to preserve. A missing key and a stored
 // empty string must not produce the same answer, or a plugin cannot tell
 // "nothing stored" from "I stored nothing" — the v1 ambiguity v2 removes.
@@ -59,6 +77,7 @@ func TestAbsenceIsNotEmptiness(t *testing.T) {
 	}{
 		{"meta", sdk.MetaSet, sdk.MetaGet},
 		{"cache", sdk.CacheSet, sdk.CacheGet},
+		{"shared cache", sdk.SharedCacheSet, sdk.SharedCacheGet},
 	} {
 		t.Run(store.name, func(t *testing.T) {
 			sdktest.New(t).Run(func() {

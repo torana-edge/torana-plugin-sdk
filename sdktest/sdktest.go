@@ -347,6 +347,7 @@ func typedHostReply(cmd string) bool {
 	case "env.block_request", "env.respond_request", "env.route_request",
 		"env.set_identity", pbv2.MetaAppendCommand,
 		"env.meta_get", "env.meta_set", "env.cache_get", "env.cache_set",
+		"env.shared_cache_get", "env.shared_cache_set",
 		"env.state_get", "env.state_set", "env.state_delete", "env.state_keys",
 		"env.now", "env.plugin_config",
 		"env.original_request", "env.original_response":
@@ -503,6 +504,23 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 		}
 		h.cache[a.Key] = a.Value
 		return hostCallResultValue(nil), nil
+	case "env.shared_cache_get":
+		var a pbv2.CacheGetArgs
+		if err := proto.Unmarshal(args, &a); err != nil || a.Validate() != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid CacheGetArgs"), nil
+		}
+		v, ok := h.cache[a.Key]
+		if !ok {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_FOUND, "cache key not found"), nil
+		}
+		return hostCallResultValue([]byte(v)), nil
+	case "env.shared_cache_set":
+		var a pbv2.CacheSetArgs
+		if err := proto.Unmarshal(args, &a); err != nil || a.Validate() != nil {
+			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid CacheSetArgs"), nil
+		}
+		h.cache[a.Key] = a.Value
+		return hostCallResultValue(nil), nil
 
 	case "env.state_get":
 		var a pbv2.StateGetArgs
@@ -623,14 +641,14 @@ func (h *Harness) builtin(cmd, args string) string {
 	case "env.meta_get":
 		return h.meta[args]
 
-	case "env.cache_set":
+	case "env.cache_set", "env.shared_cache_set":
 		k, v, ok := decodeKV(args)
 		if !ok {
 			return `{"status":"error","message":"invalid payload"}`
 		}
 		h.cache[k] = v
 		return `{"status":"ok"}`
-	case "env.cache_get":
+	case "env.cache_get", "env.shared_cache_get":
 		return h.cache[args]
 
 	case "env.state_set":

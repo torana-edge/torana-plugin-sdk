@@ -64,6 +64,8 @@ var Permissions = append([]string{
 	"env.route_request",
 	"env.serve_http",
 	"env.set_identity",
+	"env.shared_cache_get",
+	"env.shared_cache_set",
 	"env.state_get",
 	"env.state_keys",
 	"env.state_set",

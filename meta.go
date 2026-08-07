@@ -4,17 +4,17 @@ import (
 	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
 )
 
-// Request-scoped metadata and the shared cache.
+// Request-scoped metadata plus private and explicitly shared caches.
 //
 // Meta is scoped to one request and private to the calling plugin — the host
 // namespaces the key, so two plugins using "state" do not collide. It is the
 // right place for anything that must survive between hooks of the same request
 // but must not outlive it.
 //
-// Cache is shared across requests AND across plugins, and is NOT namespaced.
-// Two plugins naming the same key see each other's value. That is what makes it
-// a cache rather than plugin state: callers who do not intend sharing must
-// namespace the key themselves. For durable per-plugin storage use State*.
+// CacheGet/CacheSet are shared across requests but namespaced to the exact
+// executing plugin. SharedCacheGet/SharedCacheSet are the separate,
+// separately-granted cross-plugin channel. For durable per-plugin storage use
+// State*.
 //
 // Reads return (value, *HostError, error); writes return (*HostError, error).
 //
@@ -66,7 +66,7 @@ func MetaSet(key, value string) (*pbv2.HostError, error) {
 	return herr, err
 }
 
-// CacheGet reads a key from the shared cache.
+// CacheGet reads a key from this plugin's private cross-request cache.
 //
 // A miss returns a NOT_FOUND HostError, not an empty value — the same
 // distinction as MetaGet, and the reason a cached empty string is usable at
@@ -79,11 +79,27 @@ func CacheGet(key string) (string, *pbv2.HostError, error) {
 	return string(raw), nil, nil
 }
 
-// CacheSet writes a key to the shared cache.
-//
-// The cache is shared with every other plugin, so a key that is not namespaced
-// is a key another plugin can overwrite.
+// CacheSet writes a key to this plugin's private cross-request cache.
 func CacheSet(key, value string) (*pbv2.HostError, error) {
 	_, herr, err := HostCall("env.cache_set", &pbv2.CacheSetArgs{Key: key, Value: value})
+	return herr, err
+}
+
+// SharedCacheGet reads a key from the explicit cross-plugin cache namespace.
+// Most plugins should use CacheGet. Shared cache capabilities are appropriate
+// only when two separately approved plugins intentionally exchange data under
+// a documented key contract.
+func SharedCacheGet(key string) (string, *pbv2.HostError, error) {
+	raw, herr, err := HostCall("env.shared_cache_get", &pbv2.CacheGetArgs{Key: key})
+	if err != nil || herr != nil {
+		return "", herr, err
+	}
+	return string(raw), nil, nil
+}
+
+// SharedCacheSet writes a key to the explicit cross-plugin cache namespace.
+// Possessing private env.cache_set never authorizes this operation.
+func SharedCacheSet(key, value string) (*pbv2.HostError, error) {
+	_, herr, err := HostCall("env.shared_cache_set", &pbv2.CacheSetArgs{Key: key, Value: value})
 	return herr, err
 }
