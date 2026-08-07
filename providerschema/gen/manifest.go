@@ -167,7 +167,7 @@ func validateManifest(m *Manifest) error {
 		return fmt.Errorf("manifest: upstream %q is not a github.com URL", m.Upstream)
 	}
 	repo := strings.TrimPrefix(m.Upstream, "https://github.com/")
-	if repo == "" || strings.Contains(repo, "/") == false || strings.Count(repo, "/") != 1 {
+	if repo == "" || !strings.Contains(repo, "/") || strings.Count(repo, "/") != 1 {
 		return fmt.Errorf("manifest: upstream %q is not owner/repo", m.Upstream)
 	}
 	if len(m.Files) != len(requiredArtifacts) {

@@ -1119,7 +1119,7 @@ func Validate() error {
 	}
 	seen := map[protoreflect.FullName]bool{}
 	for _, root := range roots {
-		if err := validateMessageCompleteness(root.ProtoReflect().Descriptor(), seen, descs); err != nil {
+		if err := validateMessageCompleteness(root.ProtoReflect().Descriptor(), seen, descs, outboundMessageFieldPolicies); err != nil {
 			return err
 		}
 	}
@@ -1350,6 +1350,7 @@ func validateMessageCompleteness(
 	desc protoreflect.MessageDescriptor,
 	seen map[protoreflect.FullName]bool,
 	descs map[protoreflect.FullName]protoreflect.MessageDescriptor,
+	policies map[protoreflect.FullName]map[string]FieldPolicy,
 ) error {
 	name := desc.FullName()
 	if seen[name] {
@@ -1357,7 +1358,7 @@ func validateMessageCompleteness(
 	}
 	seen[name] = true
 
-	fields, ok := outboundMessageFieldPolicies[name]
+	fields, ok := policies[name]
 	if !ok {
 		return fmt.Errorf("%s is reachable from an outbound root but has no field-policy registry", name)
 	}
@@ -1406,7 +1407,7 @@ func validateMessageCompleteness(
 				if !ok {
 					return fmt.Errorf("%s.%s delegate target %s has no descriptor", name, fname, target)
 				}
-				if err := validateMessageCompleteness(td, seen, descs); err != nil {
+				if err := validateMessageCompleteness(td, seen, descs, policies); err != nil {
 					return err
 				}
 			}
@@ -1419,10 +1420,10 @@ func validateMessageCompleteness(
 			continue
 		}
 		child := fd.Message()
-		if _, ok := outboundMessageFieldPolicies[child.FullName()]; !ok {
+		if _, ok := policies[child.FullName()]; !ok {
 			return fmt.Errorf("%s.%s points at unregistered nested message %s", name, fname, child.FullName())
 		}
-		if err := validateMessageCompleteness(child, seen, descs); err != nil {
+		if err := validateMessageCompleteness(child, seen, descs, policies); err != nil {
 			return err
 		}
 	}
