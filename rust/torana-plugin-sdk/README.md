@@ -1,11 +1,8 @@
 # Torana Plugin SDK for Rust
 
-Historical Rust bindings and wrappers for Torana's WASM Plugin ABI v1.
-The current Torana Edge host accepts ABI v2 only, so this crate is not a
-supported or compatible authoring path. It remains in the repository pending a
-complete v2 port or removal. Do not use it for a current Edge deployment.
-
-For archival builds, the crate requires Rust 1.85 or newer and `protoc`.
+Rust bindings, safe memory plumbing, typed host-call results, and a single-hook
+dispatcher for Torana's WASM Plugin ABI v2. The crate requires Rust 1.85 or
+newer and `protoc`.
 
 Add the crate and build for WASI Preview 1:
 
@@ -21,6 +18,29 @@ torana-plugin-sdk = "0.3"
 rustup target add wasm32-wasip1
 cargo build --release --target wasm32-wasip1
 ```
+
+Declare the hooks your dispatcher handles and export the v2 surface:
+
+```rust
+use torana_plugin_sdk::{export_plugin_v2, pbv2, HOOK_BEFORE_REQUEST};
+
+fn dispatch(input: pbv2::HookInput) -> Result<Option<pbv2::HookResult>, String> {
+    match input.payload {
+        Some(pbv2::hook_input::Payload::ChatRequest(request)) => {
+            println!("model: {}", request.model);
+            Ok(None) // exact pass-through
+        }
+        _ => Err("received an undeclared hook".into()),
+    }
+}
+
+export_plugin_v2!(HOOK_BEFORE_REQUEST, dispatch);
+```
+
+`Ok(None)` is the only pass-through spelling. A returned `HookResult` must use
+the action belonging to the dispatched hook. Use `host_call_v2` for
+protobuf-framed host calls and branch on `HostCallError::Refused(error).code`,
+never the diagnostic text.
 
 See the repository's
 [Rust authoring guide](https://github.com/torana-edge/torana-plugin-sdk/blob/main/docs/WRITING_A_PLUGIN.md#rust)

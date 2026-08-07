@@ -14,15 +14,14 @@ plugin, the SDK already implements all of this — start at
 This document is a critical reference for implementing WebAssembly (WASM) plugins in Torana Edge. **AI Coding Agents MUST read this document before generating or modifying Torana WASM plugins.**
 
 **ABI versioning (read this before the sections below).** The current Edge host
-accepts ABI v2 only. Sections 1–5 preserve the **historical v1 trampoline ABI**
-still implemented by the unported Rust crate: five named hook
-exports (`run_before_request`, …), a separate `request_id` argument, and v1
+accepts ABI v2 only. Sections 1–5 preserve the **historical v1 trampoline ABI**:
+five named hook exports (`run_before_request`, …), a separate `request_id`
+argument, and v1
 result messages (`StreamEventResult.handled`, `TickResult.handled`). See
 [`proto/torana/v1/torana.proto`](../proto/torana/v1/torana.proto) and
-[`ABI.md`](../ABI.md). That crate cannot run on the current host and is not a
-supported authoring path.
+[`ABI.md`](../ABI.md). Those exports cannot run on the current host.
 
-**Supported Go guests use the v2 export surface:** `run_hook(ptr,size)->u64`,
+**Supported Go and Rust guests use the v2 export surface:** `run_hook(ptr,size)->u64`,
 `supported_hooks()->u32`, and single-action `HookResult` over
 [`proto/torana/v2/torana.proto`](../proto/torana/v2/torana.proto). Declare
 `"abi_version": "v2"` in `plugin.json`. Do not mix v1 exports with a v2

@@ -1,4 +1,4 @@
-//! Rust bindings for the stable Torana Plugin ABI v1.
+//! Rust bindings and WASI Preview 1 trampolines for Torana Plugin ABI v2.
 //!
 //! The SDK deliberately exposes only the host calls granted by Torana. A
 //! plugin cannot gain a capability by importing a function that the operator
@@ -10,12 +10,135 @@ use core::{ptr, slice};
 #[doc(hidden)]
 pub use prost;
 
-pub mod pb {
-    include!(concat!(env!("OUT_DIR"), "/torana.v1.rs"));
-}
-
 pub mod pbv2 {
     include!(concat!(env!("OUT_DIR"), "/torana.v2.rs"));
+}
+
+/// Error returned by an ABI-v2 host call.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HostCallError {
+    /// The host refused the operation with a stable, machine-readable code.
+    Refused(pbv2::HostError),
+    /// The host returned a frame that violates the ABI-v2 result contract.
+    Protocol(String),
+}
+
+impl core::fmt::Display for HostCallError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Refused(err) => write!(f, "host call refused ({})", err.code),
+            Self::Protocol(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for HostCallError {}
+
+/// ABI-v2 hook bitmap bits. Bit N corresponds to `pbv2::Hook` value N.
+pub const HOOK_BEFORE_REQUEST: u32 = 1 << (pbv2::Hook::BeforeRequest as u32);
+pub const HOOK_AFTER_RESPONSE: u32 = 1 << (pbv2::Hook::AfterResponse as u32);
+pub const HOOK_ON_STREAM_CHUNK: u32 = 1 << (pbv2::Hook::OnStreamChunk as u32);
+pub const HOOK_ON_HTTP_REQUEST: u32 = 1 << (pbv2::Hook::OnHttpRequest as u32);
+pub const HOOK_ON_TICK: u32 = 1 << (pbv2::Hook::OnTick as u32);
+const ALL_V2_HOOKS: u32 = HOOK_BEFORE_REQUEST
+    | HOOK_AFTER_RESPONSE
+    | HOOK_ON_STREAM_CHUNK
+    | HOOK_ON_HTTP_REQUEST
+    | HOOK_ON_TICK;
+
+/// Returns the hook selected by a valid ABI-v2 input envelope.
+pub fn hook_of(input: &pbv2::HookInput) -> Result<pbv2::Hook, String> {
+    use pbv2::hook_input::Payload;
+    match input.payload.as_ref() {
+        Some(Payload::ChatRequest(_)) => Ok(pbv2::Hook::BeforeRequest),
+        Some(Payload::AfterResponse(_)) => Ok(pbv2::Hook::AfterResponse),
+        Some(Payload::StreamEvent(_)) => Ok(pbv2::Hook::OnStreamChunk),
+        Some(Payload::HttpRequest(_)) => Ok(pbv2::Hook::OnHttpRequest),
+        Some(Payload::TickRequest(_)) => Ok(pbv2::Hook::OnTick),
+        None => Err("torana sdk: HookInput requires a payload".to_owned()),
+    }
+}
+
+fn validate_hook_result(hook: pbv2::Hook, result: &pbv2::HookResult) -> Result<(), String> {
+    use pbv2::hook_result::Action;
+    let valid = matches!(
+        (hook, result.action.as_ref()),
+        (pbv2::Hook::BeforeRequest, Some(Action::ReplaceRequest(_)))
+            | (pbv2::Hook::AfterResponse, Some(Action::ReplaceResponse(_)))
+            | (pbv2::Hook::OnStreamChunk, Some(Action::EmitEvents(_)))
+            | (pbv2::Hook::OnStreamChunk, Some(Action::Suppress(_)))
+            | (pbv2::Hook::OnHttpRequest, Some(Action::ServeHttp(_)))
+            | (pbv2::Hook::OnTick, Some(Action::TickOutcome(_)))
+    );
+    if valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "torana sdk: HookResult action does not match {}",
+            hook.as_str_name()
+        ))
+    }
+}
+
+/// Decodes, dispatches, validates, and encodes one ABI-v2 hook invocation.
+///
+/// Returning `Ok(None)` from `handler` is the sole pass-through representation.
+/// This ordinary Rust function owns the contract logic so it is testable off
+/// WASM; [`export_plugin_v2!`] only supplies the two required exports.
+#[doc(hidden)]
+pub fn __dispatch_v2<E: core::fmt::Display>(
+    input: &[u8],
+    hooks: u32,
+    handler: fn(pbv2::HookInput) -> Result<Option<pbv2::HookResult>, E>,
+) -> Result<Vec<u8>, String> {
+    use prost::Message;
+
+    if hooks == 0 || hooks & !ALL_V2_HOOKS != 0 {
+        return Err(
+            "torana sdk: supported hook bitmap is empty or contains unknown bits".to_owned(),
+        );
+    }
+    let input = pbv2::HookInput::decode(input)
+        .map_err(|err| format!("torana sdk: decode run_hook: {err}"))?;
+    let hook = hook_of(&input)?;
+    if hooks & (1 << hook as u32) == 0 {
+        return Err(format!(
+            "torana sdk: dispatched unregistered hook {}",
+            hook.as_str_name()
+        ));
+    }
+    let Some(result) = handler(input).map_err(|err| format!("torana plugin: {err}"))? else {
+        return Ok(Vec::new());
+    };
+    validate_hook_result(hook, &result)?;
+    let mut output = Vec::new();
+    result
+        .encode(&mut output)
+        .map_err(|err| format!("torana sdk: encode run_hook: {err}"))?;
+    if output.is_empty() {
+        return Err("torana sdk: non-pass HookResult encoded to empty bytes".to_owned());
+    }
+    Ok(output)
+}
+
+/// Exports the two functions required by ABI v2: `supported_hooks` and
+/// `run_hook`. The handler receives the typed HookInput and returns `Ok(None)`
+/// for pass-through or one hook-appropriate HookResult.
+#[macro_export]
+macro_rules! export_plugin_v2 {
+    ($hooks:expr, $handler:path) => {
+        #[no_mangle]
+        pub extern "C" fn supported_hooks() -> u32 {
+            $hooks
+        }
+
+        #[no_mangle]
+        pub extern "C" fn run_hook(ptr: u32, len: u32) -> u64 {
+            let output = $crate::__dispatch_v2($crate::__input(ptr, len), $hooks, $handler)
+                .unwrap_or_else(|error| panic!("{error}"));
+            $crate::__result(&output)
+        }
+    };
 }
 
 pub const LOG_DEBUG: i32 = 0;
@@ -213,7 +336,81 @@ pub fn emit_metric(name: &str, kind: i32, value: f64, labels: &serde_json::Value
     }
 }
 
-pub fn host_call(command: &str, arguments: &str) -> Option<String> {
+fn decode_host_call_result(bytes: &[u8]) -> Result<Vec<u8>, HostCallError> {
+    use pbv2::host_call_result::Result as ResultArm;
+    use prost::Message;
+
+    validate_host_call_result_wire(bytes)?;
+    let result = pbv2::HostCallResult::decode(bytes)
+        .map_err(|err| HostCallError::Protocol(format!("decode HostCallResult: {err}")))?;
+    match result.result {
+        Some(ResultArm::Value(value)) => Ok(value),
+        Some(ResultArm::Error(error)) => {
+            if !matches!(error.code, 1..=6) {
+                return Err(HostCallError::Protocol(format!(
+                    "HostError code {} is not classified by this SDK",
+                    error.code
+                )));
+            }
+            Err(HostCallError::Refused(error))
+        }
+        None => Err(HostCallError::Protocol(
+            "HostCallResult requires a result arm".to_owned(),
+        )),
+    }
+}
+
+fn validate_host_call_result_wire(mut bytes: &[u8]) -> Result<(), HostCallError> {
+    while !bytes.is_empty() {
+        let (key, key_len) = read_varint(bytes)?;
+        bytes = &bytes[key_len..];
+        let field = key >> 3;
+        let wire = key & 7;
+        if !matches!(field, 1 | 2) || wire != 2 {
+            return Err(HostCallError::Protocol(
+                "HostCallResult carries an unknown or malformed result arm".to_owned(),
+            ));
+        }
+        let (length, length_len) = read_varint(bytes)?;
+        bytes = &bytes[length_len..];
+        let length = usize::try_from(length).map_err(|_| {
+            HostCallError::Protocol("HostCallResult field length overflows usize".to_owned())
+        })?;
+        if length > bytes.len() {
+            return Err(HostCallError::Protocol(
+                "HostCallResult field is truncated".to_owned(),
+            ));
+        }
+        bytes = &bytes[length..];
+    }
+    Ok(())
+}
+
+fn read_varint(bytes: &[u8]) -> Result<(u64, usize), HostCallError> {
+    let mut value = 0u64;
+    for (index, byte) in bytes.iter().copied().take(10).enumerate() {
+        if index == 9 && byte > 1 {
+            break;
+        }
+        value |= u64::from(byte & 0x7f) << (index * 7);
+        if byte & 0x80 == 0 {
+            return Ok((value, index + 1));
+        }
+    }
+    Err(HostCallError::Protocol(
+        "HostCallResult contains an invalid varint".to_owned(),
+    ))
+}
+
+/// Invokes a host command with protobuf arguments and decodes the ABI-v2
+/// `HostCallResult` envelope. Empty successful values remain distinguishable
+/// from typed refusals; callers must branch on [`HostCallError::Refused`]'s
+/// code, never its diagnostic message.
+pub fn host_call_v2<M: prost::Message>(
+    command: &str,
+    arguments: &M,
+) -> Result<Vec<u8>, HostCallError> {
+    let arguments = arguments.encode_to_vec();
     let packed = unsafe {
         raw_host_call(
             command.as_ptr() as u32,
@@ -223,253 +420,15 @@ pub fn host_call(command: &str, arguments: &str) -> Option<String> {
         )
     };
     if packed == 0 {
-        return None;
+        return Err(HostCallError::Protocol(
+            "host_call returned no HostCallResult frame".to_owned(),
+        ));
     }
     let ptr = (packed >> 32) as u32;
     let len = packed as u32;
-    let value = String::from_utf8_lossy(__input(ptr, len)).into_owned();
+    let bytes = __input(ptr, len).to_vec();
     dealloc(ptr, len);
-    Some(value)
-}
-
-/// The exact envelope the host returns when a capability is refused.
-///
-/// It is valid JSON, so anything that merely parses the host's reply accepts it
-/// as data. Every wrapper that can be denied has to recognise it.
-pub const PERMISSION_DENIED: &str = r#"{"status":"error","message":"permission denied"}"#;
-
-/// Reports whether a host-call reply is the refusal envelope rather than a
-/// result.
-pub fn is_permission_denied(reply: &str) -> bool {
-    reply == PERMISSION_DENIED
-}
-
-/// Returns this plugin's configuration blob, or an empty object when none is
-/// set or `env.plugin_config` was not granted.
-pub fn plugin_config() -> serde_json::Value {
-    host_call("env.plugin_config", "")
-        // Without this the refusal envelope parses cleanly and is handed back
-        // AS the configuration: a valid JSON object with none of the plugin's
-        // expected fields, so it silently runs on defaults instead of
-        // reporting a missing grant. The Go SDK checks this and Rust did not,
-        // which made it a divergence rather than a shared gap.
-        .filter(|value| !is_permission_denied(value))
-        .and_then(|value| serde_json::from_str(&value).ok())
-        .unwrap_or_else(|| serde_json::json!({}))
-}
-
-fn set_verdict(
-    request: &mut pb::ChatRequest,
-    key: &str,
-    value: serde_json::Value,
-) -> Result<(), serde_json::Error> {
-    let mut meta = if request.torana_meta_json.is_empty() {
-        serde_json::Map::new()
-    } else {
-        serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(
-            &request.torana_meta_json,
-        )?
-    };
-    meta.insert(key.to_owned(), value);
-    request.torana_meta_json = serde_json::to_vec(&meta)?;
-    Ok(())
-}
-
-pub fn block_request(
-    request: &mut pb::ChatRequest,
-    status: i32,
-    code: &str,
-    message: &str,
-) -> Result<(), serde_json::Error> {
-    set_verdict(
-        request,
-        "_block",
-        serde_json::json!({"status": status, "code": code, "message": message}),
-    )
-}
-
-pub fn route_request(
-    request: &mut pb::ChatRequest,
-    provider: &str,
-    model: &str,
-) -> Result<(), serde_json::Error> {
-    set_verdict(
-        request,
-        "_route",
-        serde_json::json!({"provider": provider, "model": model}),
-    )
-}
-
-pub fn respond_request(
-    request: &mut pb::ChatRequest,
-    content: &str,
-) -> Result<(), serde_json::Error> {
-    set_verdict(request, "_respond", serde_json::json!({"content": content}))
-}
-
-/// Generates the ABI-v1 request trampoline for a stateless handler. `true`
-/// returns the encoded mutated request; `false` means pass-through.
-#[macro_export]
-macro_rules! export_before_request {
-    ($handler:path) => {
-        #[no_mangle]
-        pub extern "C" fn run_before_request(_request_id: u64, ptr: u32, len: u32) -> u64 {
-            use $crate::prost::Message;
-            let mut request = $crate::pb::ChatRequest::decode($crate::__input(ptr, len))
-                .expect("torana sdk: decode run_before_request");
-            if !$handler(&mut request) {
-                return 0;
-            }
-            let mut out = Vec::new();
-            request
-                .encode(&mut out)
-                .expect("torana sdk: encode run_before_request");
-            $crate::__result(&out)
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! export_before_request_result {
-    ($handler:path) => {
-        #[no_mangle]
-        pub extern "C" fn run_before_request(_request_id: u64, ptr: u32, len: u32) -> u64 {
-            use $crate::prost::Message;
-            let mut request = $crate::pb::ChatRequest::decode($crate::__input(ptr, len))
-                .expect("torana sdk: decode run_before_request");
-            if !$handler(&mut request).expect("torana plugin: run_before_request") {
-                return 0;
-            }
-            let mut out = Vec::new();
-            request
-                .encode(&mut out)
-                .expect("torana sdk: encode run_before_request");
-            $crate::__result(&out)
-        }
-    };
-}
-
-/// Exports `run_after_response`, called with a completed non-streaming response.
-///
-/// The handler receives a `pb::ChatRequest`, which is deliberate rather than a
-/// mistake — there is no `pb::ChatResponse` in the v1 contract. Torana
-/// normalises a provider's reply into the same message shape it uses for a
-/// request: the assistant's turn arrives as `messages`, its tool calls as
-/// `tool_calls`, and provider metadata under `torana_meta_json["_response"]`.
-///
-/// One shape means a plugin that rewrites message content works identically in
-/// both directions, and the host's provider adapters have one target instead of
-/// two. Return `Ok(false)` for pass-through.
-#[macro_export]
-macro_rules! export_after_response {
-    ($handler:path) => {
-        #[no_mangle]
-        pub extern "C" fn run_after_response(_request_id: u64, ptr: u32, len: u32) -> u64 {
-            use $crate::prost::Message;
-            let mut response = $crate::pb::ChatRequest::decode($crate::__input(ptr, len))
-                .expect("torana sdk: decode run_after_response");
-            if !$handler(&mut response).expect("torana plugin: run_after_response") {
-                return 0;
-            }
-            let mut out = Vec::new();
-            response
-                .encode(&mut out)
-                .expect("torana sdk: encode run_after_response");
-            $crate::__result(&out)
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! export_stream_chunk {
-    ($handler:path) => {
-        #[no_mangle]
-        pub extern "C" fn run_on_stream_chunk(_request_id: u64, ptr: u32, len: u32) -> u64 {
-            use $crate::prost::Message;
-            let event = $crate::pb::StreamEvent::decode($crate::__input(ptr, len))
-                .expect("torana sdk: decode run_on_stream_chunk");
-            let Some(response) = $handler(&event).expect("torana plugin: run_on_stream_chunk")
-            else {
-                return 0;
-            };
-            // handled=false means "I did not act". The host discards the payload
-            // either way and the Go SDK returns 0 here, so encoding a result
-            // that will be thrown away both wastes an allocation and made the
-            // two SDKs put different bytes on the wire for the same handler
-            // return value.
-            if !response.handled {
-                return 0;
-            }
-            let mut out = Vec::new();
-            response
-                .encode(&mut out)
-                .expect("torana sdk: encode run_on_stream_chunk");
-            $crate::__result(&out)
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! export_http_request {
-    ($handler:path) => {
-        #[no_mangle]
-        pub extern "C" fn run_on_http_request(_request_id: u64, ptr: u32, len: u32) -> u64 {
-            use $crate::prost::Message;
-            let request = $crate::pb::HttpRequest::decode($crate::__input(ptr, len))
-                .expect("torana sdk: decode run_on_http_request");
-            let Some(response) = $handler(&request).expect("torana plugin: run_on_http_request")
-            else {
-                return 0;
-            };
-            // handled=false means "I did not act". The host discards the payload
-            // either way and the Go SDK returns 0 here, so encoding a result
-            // that will be thrown away both wastes an allocation and made the
-            // two SDKs put different bytes on the wire for the same handler
-            // return value.
-            if !response.handled {
-                return 0;
-            }
-            let mut out = Vec::new();
-            response
-                .encode(&mut out)
-                .expect("torana sdk: encode run_on_http_request");
-            $crate::__result(&out)
-        }
-    };
-}
-
-/// Exports the `run_on_tick` hook, which the host fires periodically with no
-/// request in flight. Requires the `env.background_tick` permission.
-///
-/// The handler returns `Ok(None)` for "nothing to do this tick". A returned
-/// `TickResult` must have `handled = true`, or the host cannot distinguish it
-/// from doing nothing — an all-defaults message encodes to zero bytes.
-#[macro_export]
-macro_rules! export_tick {
-    ($handler:path) => {
-        #[no_mangle]
-        pub extern "C" fn run_on_tick(_request_id: u64, ptr: u32, len: u32) -> u64 {
-            use $crate::prost::Message;
-            let tick = $crate::pb::TickRequest::decode($crate::__input(ptr, len))
-                .expect("torana sdk: decode run_on_tick");
-            let Some(result) = $handler(&tick).expect("torana plugin: run_on_tick") else {
-                return 0;
-            };
-            // handled=false means "I did not act". The host discards the payload
-            // either way and the Go SDK returns 0 here, so encoding a result
-            // that will be thrown away both wastes an allocation and made the
-            // two SDKs put different bytes on the wire for the same handler
-            // return value.
-            if !result.handled {
-                return 0;
-            }
-            let mut out = Vec::new();
-            result
-                .encode(&mut out)
-                .expect("torana sdk: encode run_on_tick");
-            $crate::__result(&out)
-        }
-    };
+    decode_host_call_result(&bytes)
 }
 
 #[cfg(test)]
@@ -587,37 +546,126 @@ mod tests {
         assert_eq!(len, 0);
     }
 
-    // The host signals a refused capability with this exact JSON. It is valid
-    // JSON, so anything that merely parses the reply accepts it as data — which
-    // is how plugin_config came to hand it back as the plugin's configuration.
-    #[test]
-    fn permission_denied_envelope_is_recognised() {
-        assert!(is_permission_denied(PERMISSION_DENIED));
-        assert!(is_permission_denied(
-            r#"{"status":"error","message":"permission denied"}"#
-        ));
-    }
-
-    #[test]
-    fn permission_denied_does_not_over_match() {
-        // Mistaking a plugin's own data for a refusal would discard a
-        // legitimate result.
-        for reply in [
-            "",
-            "{}",
-            r#"{"status":"ok"}"#,
-            r#"{"status":"error","message":"something else"}"#,
-            r#"{"message":"permission denied"}"#,
-            r#"prefix{"status":"error","message":"permission denied"}"#,
-        ] {
-            assert!(!is_permission_denied(reply), "over-matched {reply}");
-        }
-    }
-
     #[test]
     fn input_of_an_empty_or_null_buffer_is_an_empty_slice() {
         assert!(__input(0, 0).is_empty());
         assert!(__input(0, 10).is_empty());
         assert!(__input(10, 0).is_empty());
+    }
+
+    fn pass(_input: pbv2::HookInput) -> Result<Option<pbv2::HookResult>, String> {
+        Ok(None)
+    }
+
+    fn replace(input: pbv2::HookInput) -> Result<Option<pbv2::HookResult>, String> {
+        let request = match input.payload {
+            Some(pbv2::hook_input::Payload::ChatRequest(request)) => request,
+            _ => return Err("wrong payload".to_owned()),
+        };
+        Ok(Some(pbv2::HookResult {
+            action: Some(pbv2::hook_result::Action::ReplaceRequest(request)),
+        }))
+    }
+
+    fn wrong_action(_input: pbv2::HookInput) -> Result<Option<pbv2::HookResult>, String> {
+        Ok(Some(pbv2::HookResult {
+            action: Some(pbv2::hook_result::Action::Suppress(pbv2::Suppress {})),
+        }))
+    }
+
+    fn before_request_input() -> Vec<u8> {
+        use prost::Message;
+        pbv2::HookInput {
+            abi_minor: 0,
+            request_id: 7,
+            payload: Some(pbv2::hook_input::Payload::ChatRequest(pbv2::ChatRequest {
+                model: "rust-v2".to_owned(),
+                ..Default::default()
+            })),
+        }
+        .encode_to_vec()
+    }
+
+    #[test]
+    fn v2_pass_through_is_exactly_empty_output() {
+        assert_eq!(
+            __dispatch_v2(&before_request_input(), HOOK_BEFORE_REQUEST, pass).unwrap(),
+            Vec::<u8>::new()
+        );
+    }
+
+    #[test]
+    fn v2_replacement_round_trips_through_the_single_action_envelope() {
+        use prost::Message;
+        let output = __dispatch_v2(&before_request_input(), HOOK_BEFORE_REQUEST, replace).unwrap();
+        let result = pbv2::HookResult::decode(output.as_slice()).unwrap();
+        let Some(pbv2::hook_result::Action::ReplaceRequest(request)) = result.action else {
+            panic!("expected replace_request")
+        };
+        assert_eq!(request.model, "rust-v2");
+    }
+
+    #[test]
+    fn v2_dispatch_rejects_undeclared_and_mismatched_hooks() {
+        let err = __dispatch_v2(&before_request_input(), HOOK_ON_TICK, pass).unwrap_err();
+        assert!(err.contains("unregistered"), "{err}");
+        let err =
+            __dispatch_v2(&before_request_input(), HOOK_BEFORE_REQUEST, wrong_action).unwrap_err();
+        assert!(err.contains("does not match"), "{err}");
+    }
+
+    #[test]
+    fn v2_host_call_result_keeps_empty_success_distinct_from_refusal() {
+        use prost::Message;
+        let success = pbv2::HostCallResult {
+            result: Some(pbv2::host_call_result::Result::Value(Vec::new())),
+        };
+        assert_eq!(
+            decode_host_call_result(&success.encode_to_vec()).unwrap(),
+            Vec::<u8>::new()
+        );
+
+        let refusal = pbv2::HostCallResult {
+            result: Some(pbv2::host_call_result::Result::Error(pbv2::HostError {
+                code: pbv2::ErrorCode::PermissionDenied as i32,
+                message: "diagnostic only".to_owned(),
+            })),
+        };
+        assert_eq!(
+            decode_host_call_result(&refusal.encode_to_vec()),
+            Err(HostCallError::Refused(pbv2::HostError {
+                code: pbv2::ErrorCode::PermissionDenied as i32,
+                message: "diagnostic only".to_owned(),
+            }))
+        );
+    }
+
+    #[test]
+    fn v2_host_call_result_rejects_empty_and_unclassified_frames() {
+        use prost::Message;
+        let err = decode_host_call_result(&[]).unwrap_err();
+        assert!(matches!(err, HostCallError::Protocol(_)));
+
+        for code in [pbv2::ErrorCode::Unspecified as i32, 99] {
+            let frame = pbv2::HostCallResult {
+                result: Some(pbv2::host_call_result::Result::Error(pbv2::HostError {
+                    code,
+                    message: String::new(),
+                })),
+            }
+            .encode_to_vec();
+            assert!(matches!(
+                decode_host_call_result(&frame),
+                Err(HostCallError::Protocol(_))
+            ));
+        }
+
+        // Unknown top-level field 3, length-delimited empty payload. Prost
+        // normally discards it, but the v2 contract treats it as a future
+        // result arm this build cannot classify.
+        assert!(matches!(
+            decode_host_call_result(&[0x1a, 0x00]),
+            Err(HostCallError::Protocol(_))
+        ));
     }
 }
