@@ -35,7 +35,7 @@ Before changing a plugin, read in order:
 - Changes spanning SDK, Edge, and official plugins land in that dependency
   order with exact revision pins and a final cross-repository gate.
 
-ABI v1 remains only because the unported Rust crate consumes it. Do not add v1
-features or compatibility layers. Before a public release that promises Rust,
-port it completely to v2; otherwise remove/archive the v1 surface and describe
-Rust as unsupported.
+Go and Rust both implement ABI v2 and run through the executable host
+conformance harness. ABI v1 remains only as historical protocol/reference
+material; the built Rust crate does not expose it. Do not add v1 features or
+compatibility layers.

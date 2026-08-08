@@ -8,5 +8,5 @@ cargo test --manifest-path rust/torana-plugin-sdk/Cargo.toml
 cargo build --target wasm32-wasip1 --manifest-path examples/rust-logger/Cargo.toml
 ```
 
-The generated bindings must encode the same v1 fixtures exercised by
-`conformance/go`.
+The compiled Rust all-hooks guest and Go all-hooks guest must pass the same ABI
+v2 host conformance suite in `conformance/host`.
