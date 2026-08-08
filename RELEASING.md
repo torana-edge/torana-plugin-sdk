@@ -33,10 +33,10 @@ advertised `0.1.0`.
 
 ## Cutting a release
 
-Before a public SDK release, resolve the current language-support split: the Go
-SDK and Edge host are ABI v2, while the Rust crate is ABI v1 and incompatible.
-Either ship a fully tested Rust v2 port or remove/archive Rust from the release;
-do not publish both as if they implement the same active contract.
+Go, Rust, and the Edge host now implement ABI v2. Before release, keep both
+compiled conformance guests in the host test: the language-support claim is an
+executable contract, not merely two crates that happen to compile. Historical
+v1 protocol copies are not an active authoring surface.
 
 1. **Bump `rust/torana-plugin-sdk/Cargo.toml`** to the version you are about to
    tag, without the `v`. Commit it to `main`.
