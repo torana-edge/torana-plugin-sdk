@@ -144,8 +144,8 @@ Every plugin directory must contain a `plugin.json` file describing its metadata
 - **`version`**: Semantic version string (e.g. `"0.1.0"`).
 - **`description`**: Human-readable description.
 - **`abi_version`**: Torana plugin ABI version. The current host accepts `"v2"`
-  (`run_hook` / `supported_hooks`). The repository's Rust v1 guest is
-  historical and incompatible; do not use a v1 manifest for a current plugin.
+  (`run_hook` / `supported_hooks`) for both Go and Rust guests. Historical v1
+  manifests and exports are incompatible with the current host.
 - **`minimum_torana_version`**: Optional oldest compatible Torana Edge version.
 - **`maximum_torana_version`**: Optional newest compatible Torana Edge version.
 - **`failure_mode`**: Recommended operator policy, `"pass"` or `"block"`.

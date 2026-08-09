@@ -180,20 +180,28 @@ Return `0` (a null pointer) when there genuinely was nothing to do. (v2 uses
 Ticks are gated on the `env.background_tick` permission, and an operator must
 approve it against your exact bundle digest before the hook is ever called.
 
-```rust
-// Rust: the SDK macro handles the boundary (v1 TickResult).
-torana_plugin_sdk::export_tick!(my_tick_handler);
+Current Rust guests use the v2 dispatcher. `Ok(None)` is exact pass-through;
+work performed during a tick is returned as the hook's `TickOutcome` action:
 
-fn my_tick_handler(tick: &pb::TickRequest) -> Result<Option<pb::TickResult>, Box<dyn Error>> {
+```rust
+use torana_plugin_sdk::{export_plugin_v2, pbv2, HOOK_ON_TICK};
+
+fn dispatch(input: pbv2::HookInput) -> Result<Option<pbv2::HookResult>, String> {
+    let Some(pbv2::hook_input::Payload::TickRequest(_tick)) = input.payload else {
+        return Err("received an undeclared hook".into());
+    };
     if nothing_to_do() {
-        return Ok(None);            // encodes to a 0 return: "did nothing"
+        return Ok(None);
     }
-    Ok(Some(pb::TickResult {
-        handled: true,              // REQUIRED on v1, or the host cannot tell
-        actions: 2,
-        note: "refreshed 2 conversations".into(),
+    Ok(Some(pbv2::HookResult {
+        action: Some(pbv2::hook_result::Action::TickOutcome(pbv2::TickOutcome {
+            actions: 2,
+            note: "refreshed 2 conversations".into(),
+        })),
     }))
 }
+
+export_plugin_v2!(HOOK_ON_TICK, dispatch);
 ```
 
 ## 6. IR write grants (v2)
