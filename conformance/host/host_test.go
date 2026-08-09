@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,6 +32,24 @@ func TestCompiledRustGuestImplementsRunHook(t *testing.T) {
 		return
 	}
 	exerciseRunHook(t, path)
+}
+
+// TestCompiledRustLoggerCallsHost proves the shipped Rust example does more
+// than compile and export the right bitmap: its ABI-v2 dispatcher decodes the
+// request and reaches the real env.log import with the expected bytes.
+func TestCompiledRustLoggerCallsHost(t *testing.T) {
+	path := os.Getenv("TORANA_RUST_LOGGER")
+	if path == "" {
+		t.Log("TORANA_RUST_LOGGER unset; exercised in CI")
+		return
+	}
+	logs := exerciseRunHook(t, path)
+	if len(logs) != 1 {
+		t.Fatalf("Rust logger emitted %d log calls, want 1", len(logs))
+	}
+	if logs[0].level != plugin_sdk.LogLevelInfo || logs[0].message != "received request for conformance" {
+		t.Fatalf("Rust logger call = level %d message %q", logs[0].level, logs[0].message)
+	}
 }
 
 // manifestHooks reads the hook set a guest's manifest declares.
@@ -132,7 +151,7 @@ func assertGuestBitmapMatchesManifest(t *testing.T, guest, manifest string) {
 	runtime := wazero.NewRuntime(ctx)
 	t.Cleanup(func() { _ = runtime.Close(ctx) })
 	wasi_snapshot_preview1.MustInstantiate(ctx, runtime)
-	if err := instantiateEnvImports(ctx, runtime); err != nil {
+	if err := instantiateEnvImports(ctx, runtime, nil); err != nil {
 		t.Fatal(err)
 	}
 	wasmBytes, err := os.ReadFile(guest)
@@ -174,13 +193,24 @@ func assertGuestBitmapMatchesManifest(t *testing.T, guest, manifest string) {
 	}
 }
 
-func exerciseRunHook(t *testing.T, path string) {
+type loggedMessage struct {
+	level   int32
+	message string
+}
+
+type envRecorder struct {
+	logs []loggedMessage
+	err  error
+}
+
+func exerciseRunHook(t *testing.T, path string) []loggedMessage {
 	t.Helper()
 	ctx := context.Background()
 	runtime := wazero.NewRuntime(ctx)
 	t.Cleanup(func() { _ = runtime.Close(ctx) })
 	wasi_snapshot_preview1.MustInstantiate(ctx, runtime)
-	if err := instantiateEnvImports(ctx, runtime); err != nil {
+	recorder := &envRecorder{}
+	if err := instantiateEnvImports(ctx, runtime, recorder); err != nil {
 		t.Fatal(err)
 	}
 	wasmBytes, err := os.ReadFile(path)
@@ -241,12 +271,26 @@ func exerciseRunHook(t *testing.T, path string) {
 	if _, err := dealloc.Call(ctx, uint64(ptr), uint64(len(payload))); err != nil {
 		t.Fatalf("dealloc: %v", err)
 	}
+	if recorder.err != nil {
+		t.Fatal(recorder.err)
+	}
+	return recorder.logs
 }
 
-func instantiateEnvImports(ctx context.Context, runtime wazero.Runtime) error {
+func instantiateEnvImports(ctx context.Context, runtime wazero.Runtime, recorder *envRecorder) error {
 	_, err := runtime.NewHostModuleBuilder("env").
 		NewFunctionBuilder().
-		WithFunc(func(context.Context, api.Module, int32, uint32, uint32) {}).
+		WithFunc(func(_ context.Context, module api.Module, level int32, ptr, size uint32) {
+			if recorder == nil || recorder.err != nil {
+				return
+			}
+			payload, ok := module.Memory().Read(ptr, size)
+			if !ok {
+				recorder.err = fmt.Errorf("env.log read outside guest memory: ptr=%d size=%d", ptr, size)
+				return
+			}
+			recorder.logs = append(recorder.logs, loggedMessage{level: level, message: string(payload)})
+		}).
 		Export("log").
 		NewFunctionBuilder().
 		WithFunc(func(context.Context, api.Module, int32, uint32, uint32, float64, uint32, uint32) {}).

@@ -50,7 +50,7 @@ func callRunHook(t *testing.T, path string, payload []byte) uint64 {
 	runtime := wazero.NewRuntime(ctx)
 	t.Cleanup(func() { _ = runtime.Close(ctx) })
 	wasi_snapshot_preview1.MustInstantiate(ctx, runtime)
-	if err := instantiateEnvImports(ctx, runtime); err != nil {
+	if err := instantiateEnvImports(ctx, runtime, nil); err != nil {
 		t.Fatal(err)
 	}
 	wasmBytes, err := os.ReadFile(path)
