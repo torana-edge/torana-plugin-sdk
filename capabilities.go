@@ -18,7 +18,7 @@ package plugin_sdk
 // it, because a plugin requesting one has no way to know whether it will ever
 // be granted.
 
-// Hooks a v1 plugin may declare. See docs/PLUGIN_SEMANTICS.md for what each
+// Hooks a plugin may declare. See docs/PLUGIN_SEMANTICS.md for what each
 // one may and may not do.
 var Hooks = []string{
 	"run_after_response",

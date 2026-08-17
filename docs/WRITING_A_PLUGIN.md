@@ -144,8 +144,7 @@ Every plugin directory must contain a `plugin.json` file describing its metadata
 - **`version`**: Semantic version string (e.g. `"0.1.0"`).
 - **`description`**: Human-readable description.
 - **`abi_version`**: Torana plugin ABI version. The current host accepts `"v2"`
-  (`run_hook` / `supported_hooks`) for both Go and Rust guests. Historical v1
-  manifests and exports are incompatible with the current host.
+  (`run_hook` / `supported_hooks`) for both Go and Rust guests.
 - **`minimum_torana_version`**: Optional oldest compatible Torana Edge version.
 - **`maximum_torana_version`**: Optional newest compatible Torana Edge version.
 - **`failure_mode`**: Recommended operator policy, `"pass"` or `"block"`.
@@ -357,7 +356,7 @@ Allowed multi-values are preserved under their canonical names. The filter
 runs at the plugin dispatch boundary against the target plugin's approved
 grants: a caller-supplied `headers_json` is never authoritative, and plugin B
 does not inherit sensitive-header access merely because plugin A holds the
-grant. There is no v1 behavior to rely on here.
+grant.
 
 **State — pick the right one; the wrong choice fails silently**
 
@@ -403,8 +402,7 @@ the default.
 **Absence is not emptiness.** A key that was never written returns a
 `NOT_FOUND` `HostError`; a key holding `""` returns success with an empty
 value. `MetaSet(k, "")` stores an empty string — it does not delete `k`.
-Collapsing the two is the v1 ambiguity v2 exists to remove, so do not test
-`v == ""` to decide whether something was stored.
+Do not test `v == ""` to decide whether something was stored.
 
 Do **not** reach these through `sdk.HostCall` directly. The typed helpers
 validate the key before crossing the boundary, so a mistake fails at the call
@@ -428,9 +426,8 @@ through `HostCall`, and routing them here would bypass the typed contract.
 
 The result envelope is *not* opaque — a refusal is a framed `HostError`
 (`PERMISSION_DENIED`, `NOT_CONFIGURED`, `UNAVAILABLE`, `INVALID_ARGUMENT`) and a
-Go `error` means the call could not be made. v1's `{"status":"error"}` reply
-convention is gone; a `status` field now only appears where status is real data,
-such as a pricing decision.
+Go `error` means the call could not be made. A `status` field only appears where
+status is real data, such as a pricing decision.
 
 Where the SDK already has a typed helper — `sdk.SendRequest`,
 `sdk.GetCachePricing` — use it. They call this primitive internally and handle
