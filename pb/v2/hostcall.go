@@ -1,8 +1,8 @@
 package v2
 
-// Normative host-call command / permission strings and reply semantics that
-// Migration B and StreamHandler must implement identically. Argument message
-// schemas live in torana.proto; Validate lives in hostcall_validate.go.
+// Normative host-call command / permission strings and reply semantics shared
+// by the host and StreamHandler. Argument message schemas live in torana.proto;
+// Validate lives in hostcall_validate.go.
 
 // MetaAppendCommand is the host-call command for atomic request-metadata append.
 //
@@ -27,8 +27,7 @@ const StateDeleteCommand = "env.state_delete"
 //
 // Deletion is a mutation of the same plugin-private namespace a plugin can
 // already overwrite, so a fourth durable-state capability would add manifest
-// and approval ceremony without drawing a new security line. v1's StateDelete
-// was env.state_set for the same reason: it was a set with an empty value.
+// and approval ceremony without drawing a new security line.
 const StateDeletePermission = "env.state_set"
 
 // MetaAppendSuccessValue returns the HostCallResult.value bytes for a

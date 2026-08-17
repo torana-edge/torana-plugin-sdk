@@ -123,7 +123,7 @@ func TestObservedResponseFactsAreHostOwned(t *testing.T) {
 }
 
 func TestNestedContainerEvaluationPins(t *testing.T) {
-	// These registry pins are the data Migration B needs so
+	// These registry pins are the data the host verifier needs so
 	// change-only-tool-call-delta-index does not auto-charge assistant.
 	delta, _ := OutboundFieldPolicy("torana.v2.StreamEvent", "tool_call_delta")
 	if !delta.IsContainer() {

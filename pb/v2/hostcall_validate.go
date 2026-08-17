@@ -146,9 +146,8 @@ func (x *MetaAppendArgs) Validate() error {
 // learns at the call rather than reading back a value that silently was not
 // stored.
 //
-// Values are deliberately NOT required. Empty is a legitimate value, and
-// treating it as a delete is what made v1 unable to distinguish "store an
-// empty string" from "remove this key".
+// Values are deliberately not required. Empty is a legitimate value; deletion
+// uses its explicit command.
 
 func (x *MetaGetArgs) Validate() error {
 	if x == nil {

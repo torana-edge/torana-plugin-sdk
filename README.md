@@ -45,34 +45,12 @@ Official plugins built on this SDK live in
 [torana-plugins](https://github.com/torana-edge/torana-plugins). The proxy itself is
 [torana-edge](https://github.com/torana-edge/torana-edge).
 
-## Breaking changes
+## Cache namespaces
 
-Pre-1.0: the ABI moves without a deprecation window. Changes that alter the
-meaning of an existing capability — rather than adding a new one — are listed
-here, because those are the ones that break a plugin *silently*.
+`env.cache_get` and `env.cache_set` are private to the executing plugin. Two
+plugins using the same key cannot observe or overwrite each other's values.
 
-### `env.cache_get` / `env.cache_set` are now plugin-private
-
-Previously one flat namespace shared by every loaded plugin. Now the host
-namespaces every key by the executing module, so two plugins using the same key
-no longer see each other's value.
-
-**This fails silently.** A consumer plugin reading a key its producer used to
-write now gets `NOT_FOUND`, which most callers already treat as a cold cache.
-Nothing errors; the feature just stops working, and on a cache the symptom is
-indistinguishable from a miss.
-
-If two separately approved plugins intentionally exchange data, that is now an
-explicit capability pair — `env.shared_cache_get` / `env.shared_cache_set`, via
-`sdk.SharedCacheGet` / `sdk.SharedCacheSet` — requested in `plugin.json` and
-approved like any other. Private cache grants never imply the shared ones.
-
-To migrate: if your plugin only reads keys it wrote, do nothing. If it reads
-another plugin's keys, switch those call sites to the `SharedCache*` helpers,
-add the matching permissions to your manifest, and re-approve the bundle — the
-digest changes either way.
-
-The official producer/consumer pair (`intent` writes, `compactor` and
-`keyword_compactor` read) is migrated in
-[torana-plugins#20](https://github.com/torana-edge/torana-plugins/pull/20) and
-is the worked example.
+Intentional cross-plugin exchange uses the separately approved
+`env.shared_cache_get` / `env.shared_cache_set` capabilities through
+`sdk.SharedCacheGet` / `sdk.SharedCacheSet`. Private cache grants never imply
+shared-cache access.

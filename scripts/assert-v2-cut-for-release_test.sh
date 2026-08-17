@@ -79,7 +79,7 @@ jobs:
 EOF
 }
 
-# --- migration still in progress ---
+# --- forbidden pre-cut layout ---
 mig=$tmpdir/migrating
 mkdir -p "$mig/proto/torana/v1" \
          "$mig/rust/torana-plugin-sdk/proto/torana/v1" \
@@ -97,7 +97,7 @@ run_check "pre-cut tag allows v1" pass "" 0.2.0 "$mig"
 run_check "v0.3 refuses while v1 present" fail "proto/torana/v1 to be deleted" 0.3.0 "$mig"
 run_check "v1.0 refuses while v1 present" fail "proto/torana/v1 to be deleted" 1.0.0 "$mig"
 
-# --- fully completed cut ---
+# --- accepted v2-only layout ---
 cut=$tmpdir/cut
 mkdir -p "$cut/proto/torana/v2" \
          "$cut/rust/torana-plugin-sdk/proto/torana/v2" \

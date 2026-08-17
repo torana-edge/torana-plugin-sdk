@@ -6,8 +6,7 @@ import (
 
 // Executable before/after fixtures for the bound-signature rule.
 //
-// These exist because the rule was previously stated only in prose, in a
-// Migration B checklist, where nothing could hold the implementation to it.
+// These keep the SDK contract and host verifier on one executable matrix.
 //
 // They deliberately do NOT expose whether bound content changed. That boolean
 // is the answer a verifier must COMPUTE — transactionally, over the binding's
@@ -21,8 +20,8 @@ import (
 // its own scope diff plus ClassifySignatureMutation yields Want for the block
 // at Index.
 //
-// Exported because Migration B lives in torana-edge and must run the SDK's own
-// cases rather than reimplement its reading of them.
+// Exported so torana-edge runs the SDK's own cases rather than reimplementing
+// its reading of them.
 
 // StreamFixture is one accepted→returned stream and the verdict a verifier must
 // reach for the signed block at Index.

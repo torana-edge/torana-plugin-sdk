@@ -244,7 +244,7 @@ func exerciseRunHook(t *testing.T, path string) []loggedMessage {
 		t.Fatal("v2 guest is missing supported_hooks")
 	}
 	if module.ExportedFunction("run_before_request") != nil {
-		t.Fatal("v1 run_before_request must not remain after Migration A")
+		t.Fatal("per-hook run_before_request export must not remain in the single-dispatch ABI")
 	}
 	bits, err := supported.Call(ctx)
 	if err != nil || len(bits) != 1 {

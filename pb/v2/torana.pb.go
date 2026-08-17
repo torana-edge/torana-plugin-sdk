@@ -116,13 +116,6 @@ func (Hook) EnumDescriptor() ([]byte, []int) {
 }
 
 // ErrorCode classifies a failed host call.
-//
-// v1 returned a bare string, and the same channel carried both the plugin's own
-// stored data and the host's errors. Telling them apart took 55 lines of
-// heuristics in the SDK whose own comment conceded the ambiguity was
-// unresolvable. Notably, "the key is absent" and "durable state is not
-// configured at all" were indistinguishable, so a plugin could not tell a fresh
-// store from a disabled one.
 type ErrorCode int32
 
 const (
@@ -1679,11 +1672,6 @@ func (x *ResponseMessage) GetToolCalls() []*ToolCall {
 }
 
 // Canonical representation of a completed, non-streamed response.
-//
-// v1 had no such message. The response hook received a ChatRequest carrying,
-// depending on which of three code paths produced it, a synthesized assistant
-// message, the outbound request history, or nothing at all — a difference the
-// plugin could not observe. Four independent auditors reported that as a bug.
 type ChatResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Model that actually answered, which may differ from the one requested.
@@ -1974,12 +1962,6 @@ func (x *StreamError) GetMessage() string {
 }
 
 // Structural boundaries in a streamed response.
-//
-// v1 emitted deltas and tool-call boundaries and nothing else, so a plugin that
-// needed to know where a message or a content block began had to infer it from
-// the delta sequence. Both stream plugins in the official set reimplemented that
-// inference, ~60 lines each, and it is the single most copy-pasted thing a
-// stream plugin does.
 type MessageStart struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// "assistant" for every provider Torana currently speaks, but carried rather
@@ -2042,11 +2024,8 @@ func (x *MessageStart) GetModel() string {
 	return ""
 }
 
-// MessageStop closes the message and carries why it ended.
-//
-// finish_reason lives here rather than in an event of its own. v1 had a
-// standalone finish_reason event, which would have left two ways to say the
-// same thing — and one unambiguous representation per fact is the point of v2.
+// MessageStop closes the message and carries why it ended. finish_reason lives
+// here rather than in a second event so each fact has one representation.
 type MessageStop struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	FinishReason  string                 `protobuf:"bytes,1,opt,name=finish_reason,json=finishReason,proto3" json:"finish_reason,omitempty"`
@@ -2215,10 +2194,8 @@ func (x *ProviderBlock) GetKind() string {
 // ContentBlockStart opens a block. Deltas that follow belong to it until the
 // matching stop.
 //
-// This is the ONLY block boundary. v1 had ToolCallStart/ToolCallEnd alongside
-// nothing for text or thinking, so a plugin needed one mechanism for tool calls
-// and inference for everything else. Folding every block in here means an
-// assembler handles them all the same way.
+// This is the only block-opening boundary. Every block kind uses the same
+// start/delta/stop topology so assemblers do not infer structure from deltas.
 //
 // The kind is a oneof rather than a string with optional metadata beside it.
 // A string would allow "tool_call" with no tool metadata, and "text" carrying
@@ -2461,9 +2438,8 @@ func (x *ContentBlockStop) GetIndex() int32 {
 //     unless the open blocks were terminally aborted by StreamError (in which
 //     case the stream already ended at the error — ordinary EOF after a
 //     non-error open block is still invalid).
-//   - Host Migration B must fix adapters that violate index uniqueness (e.g.
-//     Gemini emitting Index:0 for every parallel functionCall) before enabling
-//     ToolCallBlockByIndex signature enforcement.
+//   - Adapters must assign distinct indexes to parallel provider tool calls;
+//     ToolCallBlockByIndex signature enforcement relies on this invariant.
 type StreamEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Outbound mutations compose topology + semantics (see package
@@ -2471,8 +2447,8 @@ type StreamEvent struct {
 	// ∪ every semantic section changed/removed/added; any changed/removed/added
 	// host-owned fact rejects. Host-owned means immutable, not unreturnable —
 	// identical re-emit is a no-op. A one-for-one TextDelta rewrite needs only
-	// ir.messages.write.assistant. The recursive field-diff verifier is
-	// Migration B (needs a stream-path benchmark first).
+	// ir.messages.write.assistant. The host's recursive field-diff verifier
+	// enforces these rules transactionally across each plugin call.
 	//
 	// Types that are valid to be assigned to Event:
 	//
@@ -2738,8 +2714,7 @@ type HttpRequest struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Method string                 `protobuf:"bytes,1,opt,name=method,proto3" json:"method,omitempty"`
 	Path   string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
-	// Raw query string, without the leading "?". v1 dropped this entirely, so a
-	// plugin serving a page could not read its own query parameters.
+	// Raw query string, without the leading "?".
 	Query string `protobuf:"bytes,3,opt,name=query,proto3" json:"query,omitempty"`
 	// "http" or "https".
 	Scheme string `protobuf:"bytes,4,opt,name=scheme,proto3" json:"scheme,omitempty"`
@@ -3049,11 +3024,8 @@ func (x *TickOutcome) GetNote() string {
 // observational. False when the response was streamed or was an upstream
 // error: the bytes have already gone to the caller, or there is no body to
 // rewrite, so a returned replacement is discarded. Every other hook is always
-// mutable — putting a flag on the global envelope let a before-request or
-// stream dispatch claim otherwise, which is nonsense.
-//
-// v1 offered no such signal, so a plugin learned its mutations were being
-// discarded only by their having no effect.
+// mutable; placing it on the global envelope would let always-mutable hooks
+// claim otherwise.
 type AfterResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Response      *ChatResponse          `protobuf:"bytes,1,opt,name=response,proto3" json:"response,omitempty"`
@@ -3535,10 +3507,8 @@ func (x *HostError) GetMessage() string {
 
 // HostCallResult is what every host call returns.
 //
-// A successful call with no value sets `value` to empty bytes, which is
-// distinguishable from an error — unlike v1, where an empty string meant
-// "granted but no value", "cache miss", "key absent", "feature unconfigured",
-// and "the host refused to write an empty payload", all at once.
+// A successful call with no value sets `value` to empty bytes, which remains
+// distinguishable from the typed error arm.
 //
 // The oneof must be set. An empty HostCallResult (no arm) is refused — there is
 // no pass-through meaning for a host-call reply the way there is for a hook
@@ -4006,9 +3976,8 @@ func (x *StateDeleteArgs) GetKey() string {
 //   - key present, value "" -> HostCallResult.value arm, empty bytes
 //   - key present, value v  -> HostCallResult.value arm, v
 //
-// Collapsing them recreates the v1 ambiguity this ABI removes: a plugin could
-// not tell "nothing stored" from "I stored nothing", so a cached or buffered
-// empty string was unusable.
+// Collapsing them would make "nothing stored" indistinguishable from "I stored
+// nothing", so absence and an empty stored string must remain separate.
 type MetaGetArgs struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Key within this plugin's request-scoped namespace. Must be non-empty.
@@ -4059,10 +4028,8 @@ type MetaSetArgs struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Key within this plugin's request-scoped namespace. Must be non-empty.
 	Key string `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	// Value to store. Empty is a legitimate value, not a delete — v1 conflated
-	// the two because it could not tell an absent JSON field from an empty one.
-	// After setting "", a get must succeed with an empty value rather than
-	// reporting NOT_FOUND.
+	// Value to store. Empty is a legitimate value, not a delete. After setting
+	// "", a get must succeed with an empty value rather than reporting NOT_FOUND.
 	Value         string `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4248,8 +4215,8 @@ func (x *CacheSetArgs) GetValue() string {
 //
 // Empty fragment is the ContentBlockStop / fail-open read path so the guest
 // can retrieve the assembled original without a racy meta_get / meta_set pair
-// and without paying for a full buffer copy on every delta. Host execution
-// lands in Migration B; see MetaAppendSuccessValue.
+// and without paying for a full buffer copy on every delta. See
+// MetaAppendSuccessValue for the executable success-value contract.
 type MetaAppendArgs struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Content-block index within the streamed message (ABI: unique, never

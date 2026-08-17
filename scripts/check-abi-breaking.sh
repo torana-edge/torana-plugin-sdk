@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# ABI-v2 compatibility against main. ABI v1 was removed before the v0.3.0
-# release; scoping the comparison to v2 lets the deletion commit compare
-# cleanly against a main that still contains the historical v1 tree.
+# ABI-v2 compatibility against main. The public release line is v2-only, so the
+# compatibility check is scoped to the canonical v2 schema.
 #
 # --print-path is consumed by the release preflight before buf is installed.
 set -euo pipefail
