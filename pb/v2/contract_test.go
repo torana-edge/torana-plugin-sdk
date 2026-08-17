@@ -65,35 +65,24 @@ var allHooks = []v2.Hook{
 	v2.Hook_HOOK_ON_TICK,
 }
 
-// v2 exists to fix things v1 could only document its way around. Each test here
-// pins one of those fixes to observable behaviour, so the contract is checked
-// rather than merely described.
-
-// v1's central defect: a payload delivered to the wrong hook decoded as an
-// EMPTY message of the expected type, because protobuf treats unknown fields as
-// unknown rather than as an error. Every plugin then read that as a legitimate
-// empty request.
-//
-// v2 makes the payload the sole discriminator, so a frame cannot claim one hook
-// while carrying another's. An earlier draft of this file carried a hook enum
-// ALONGSIDE the payload, which made HOOK_BEFORE_REQUEST + tick_request perfectly
-// valid protobuf — the guarantee then rested on someone remembering to compare
-// two fields, and this test only observed them.
+// Hook identity comes only from the payload discriminator. A frame therefore
+// cannot claim one hook while carrying another hook's payload.
 func TestPayloadIsTheSoleDiscriminator(t *testing.T) {
-	// The v1 failure, still reproducible with a bare message.
+	// A bare protobuf message can decode as an unrelated empty message because
+	// unknown fields are legal. The HookInput envelope prevents that ambiguity.
 	bare, err := proto.Marshal(&v2.TickRequest{TickId: 7, UnixMillis: 1234})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var asRequest v2.ChatRequest
 	if err := proto.Unmarshal(bare, &asRequest); err != nil {
-		t.Fatalf("v1's failure mode is that this does NOT error: %v", err)
+		t.Fatalf("protobuf cross-type decoding unexpectedly failed: %v", err)
 	}
 	if len(asRequest.Messages) != 0 || asRequest.Model != "" {
 		t.Fatal("precondition: the mis-decode should look like an empty request")
 	}
 
-	// v2: the hook comes from the payload, so there is nothing to contradict.
+	// The hook comes from the payload, so there is nothing to contradict.
 	for _, want := range allHooks {
 		t.Run(want.String(), func(t *testing.T) {
 			raw, err := proto.Marshal(inputFor(want))
@@ -177,10 +166,8 @@ func TestResultPayloadMustMatchTheDispatchedHook(t *testing.T) {
 
 // Suppression must be expressible without being confusable with pass-through.
 //
-// v1 needed a `handled` bool on three of five result types because an
-// all-defaults message marshals to zero bytes. v2 makes suppression an action,
-// and an empty message inside a oneof still marshals to a tag and a zero
-// length — so it is distinguishable, and no flag is needed.
+// Suppression is an explicit action. An empty message inside a oneof still
+// marshals to a tag and a zero length, so it remains distinct from pass-through.
 func TestSuppressIsDistinguishableFromPassThrough(t *testing.T) {
 	suppress, err := proto.Marshal(&v2.HookResult{
 		Action: &v2.HookResult_Suppress{Suppress: &v2.Suppress{}},
@@ -319,11 +306,7 @@ func TestWellFormedResultsAreAccepted(t *testing.T) {
 	}
 }
 
-// v1 returned host-call results as a bare string, so an empty string meant
-// "granted but no value", "cache miss", "key absent", "feature unconfigured"
-// and "the host refused to write an empty payload" — all at once. Telling them
-// apart took 55 lines of SDK heuristics whose own comment conceded the
-// ambiguity was unresolvable.
+// A successful empty value is distinct from a classified host error.
 func TestEmptyValueIsNotAnError(t *testing.T) {
 	ok := &v2.HostCallResult{Result: &v2.HostCallResult_Value{Value: []byte{}}}
 	if ok.GetError() != nil {
@@ -357,10 +340,7 @@ func TestNotFoundIsDistinctFromNotConfigured(t *testing.T) {
 	}
 }
 
-// Responses get a real message. In v1 the response hook received a ChatRequest
-// carrying, depending on which of three code paths produced it, a synthesized
-// assistant message, the outbound request history, or nothing — a difference
-// the plugin could not observe.
+// Responses expose response facts through a dedicated message.
 func TestChatResponseCarriesResponseFacts(t *testing.T) {
 	resp := &v2.ChatResponse{
 		Model:          "claude-sonnet-4",
@@ -436,11 +416,9 @@ func TestObservationalDispatchIsMarked(t *testing.T) {
 // shape is asserted via descriptor reflection — not by grepping proto comments,
 // which can pass while the compiled ABI is wrong and fail on harmless prose edits.
 //
-// When Migration A lands the trampoline, a fixture guest's WASM exports must
-// additionally prove: run_hook(i32,i32)->i64 exists, no request_id argument,
-// the five v1 hook exports are gone after the v1 cut, and supported_hooks
-// agrees with registrations. Until then this is the protobuf half of that
-// contract.
+// The shared host conformance suite additionally proves that fixture guests
+// export run_hook(i32,i32)->i64 with no request_id argument, expose no per-hook
+// entry points, and report a supported_hooks bitmap matching registration.
 func TestHookInputEnvelopeShape(t *testing.T) {
 	in := &v2.HookInput{
 		RequestId: 42,

@@ -50,13 +50,12 @@ import (
 // buffering assembler, which is precisely what StreamHandler does on the pass
 // path: suppress fragments, then re-emit them byte-identically.
 //
-// Enforcement (recursive field diff + fingerprinting) is
-// Migration B and must not land on the per-event stream path without a
-// stream-specific benchmark covering one-for-one TextDelta/ToolCallDelta and
-// fan-out/suppress cases. This file is vocabulary and inventory only — no
-// approximate public verifier helpers.
+// Host enforcement uses recursive field diff + fingerprinting. Changes to the
+// per-event stream path require a stream-specific benchmark covering
+// one-for-one TextDelta/ToolCallDelta and fan-out/suppress cases. This file is
+// vocabulary and inventory only — no approximate public verifier helpers.
 //
-// Nested message evaluation (Migration B must implement exactly this):
+// Nested message evaluation:
 //
 //   - PolicyContainer: never charge the parent; always recurse. Presence or
 //     oneof-selection change of the container is expressed by treating nested
@@ -122,7 +121,7 @@ const (
 	// (cardinality, order, boundaries, indexes, event kind).
 	PolicyTopology
 	// PolicyContainer marks a message-valued field that never contributes a
-	// grant itself. Migration B always recurses into nested field policies
+	// grant itself. The verifier always recurses into nested field policies
 	// (see package comment nesting rules). Repeated containers under this
 	// kind may change cardinality; use PolicyFixedContainer when they must not.
 	PolicyContainer
@@ -171,8 +170,7 @@ const (
 	// block. Binds the preceding closed text/thinking content the assembler
 	// attributed to this turn (reject-or-clear if that content mutates while
 	// the token remains). Does not bind tool-call blocks. Non-streaming
-	// adapters must not drop signature-only empty-text parts (today's
-	// appendModel disagreement is a host Migration B fix).
+	// adapters must preserve signature-only empty-text parts.
 	SignatureScopeTrailingStandalone
 	// SignatureScopeToolCallBlockByIndex: ToolCallRef.signature binds id/name
 	// on the start event and ToolCallDelta.arguments_delta events that share
@@ -401,18 +399,18 @@ func (p FieldPolicy) validate() error {
 	return nil
 }
 
-// SignatureContentRef names a field covered by an opaque signature and how
-// Migration B correlates it to stream/assembler state.
+// SignatureContentRef names a field covered by an opaque signature and how the
+// host correlates it to stream/assembler state.
 type SignatureContentRef struct {
 	Scope   SignatureScope
 	Message protoreflect.FullName // required except SameMessage may omit (= binding message)
 	Field   string
 }
 
-// SignatureBinding pins content that an opaque provider signature covers.
-// Migration B must either reject mutation of signed content while the
-// signature is present, or have the host clear the signature when that
-// content changes. A plugin cannot manufacture a valid provider signature.
+// SignatureBinding pins content that an opaque provider signature covers. The
+// host either rejects mutation of signed content while the signature remains,
+// or clears the signature when that content changes. A plugin cannot
+// manufacture a valid provider signature.
 //
 // Domain separates binding reachability from response-field reachability:
 // request-side Message.thinking_signature remains normative after
@@ -1015,8 +1013,8 @@ var outboundMessageFieldPolicies = map[protoreflect.FullName]map[string]FieldPol
 	"torana.v2.HookResult":        hookResultActionPolicies,
 }
 
-// Migration B human checklist (not a public API — build executable fixtures
-// with concrete before/after events when the verifier lands):
+// Host-verifier checklist. The executable before/after fixtures cover these
+// cases across the SDK and torana-edge:
 //
 // Nesting / grants:
 //   - change only ToolCallDelta.index → topology only
@@ -1254,7 +1252,7 @@ func validateRequestBindingCompleteness(bindings []SignatureBinding) error {
 // appear in different domains only if those are deliberately separate
 // contracts (today Message.thinking_signature is request-only). Duplicate
 // bindings within one key, or duplicate content refs within one binding, leave
-// Migration B without a unique enforcement contract.
+// the host without a unique enforcement contract.
 func validateSignatureBindingUniqueness() error {
 	type bindingKey struct {
 		domain SignatureDomain
@@ -1548,8 +1546,7 @@ func validateRequestSignatureBindingAgainstProto(b SignatureBinding, descs map[p
 
 // StreamTopologySection is the additive grant name for cardinality/order/
 // boundary/action changes. It does not alone authorise content or host-owned
-// changes. The recursive field-diff verifier that applies it lives in
-// Migration B.
+// changes. The host's recursive field-diff verifier applies it.
 func StreamTopologySection() plugin_sdk.WriteSection { return plugin_sdk.SectionStreamWrite }
 
 // OutboundMessageRegistered reports whether msg has a field-policy inventory.

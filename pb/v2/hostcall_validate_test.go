@@ -276,8 +276,8 @@ func TestStateArgsValidation(t *testing.T) {
 		{"StateSetArgs nil", (*v2.StateSetArgs)(nil), true},
 		{"StateSetArgs empty key", &v2.StateSetArgs{Value: "v"}, true},
 		{"StateSetArgs valid", &v2.StateSetArgs{Key: "k", Value: "v"}, false},
-		// An empty VALUE is legitimate: it stores an empty string. Treating it
-		// as invalid would reintroduce the v1 rule where empty meant delete.
+		// An empty VALUE is legitimate: it stores an empty string. Deletion is
+		// represented by the dedicated state-delete command.
 		{"StateSetArgs empty value", &v2.StateSetArgs{Key: "k"}, false},
 
 		{"StateDeleteArgs nil", (*v2.StateDeleteArgs)(nil), true},

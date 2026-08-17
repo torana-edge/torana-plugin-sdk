@@ -191,8 +191,8 @@ func decodeToolFrame(buf []byte) (*pbv2.ToolCallRef, string, error) {
 // When args differs from call.Arguments, Signature is cleared: the provider
 // binding covers id/name/arguments, and a stale signature must not ship.
 // Pass and fail-open re-emission keep call.Arguments (and thus Signature)
-// byte-identical so Migration B can verify the buffered tool block
-// transactionally — temporary suppress-then-reemit is not deletion/forgery.
+// byte-identical so the host can verify the buffered tool block transactionally
+// — temporary suppress-then-reemit is not deletion/forgery.
 func EmitAssembledToolCall(call ToolCall, args string) []*pbv2.StreamEvent {
 	sig := call.Signature
 	if args != call.Arguments {

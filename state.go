@@ -47,9 +47,6 @@ var ErrStateUnavailable = errors.New("torana: durable plugin state is not availa
 // empty string returns "" with no HostError. Branch with IsNotFound rather than
 // testing the value — the same rule as MetaGet and CacheGet.
 //
-// v1 could not express this. The reply shared a namespace with the stored value,
-// so a JSON object with a "status" field was ambiguous between a host error and
-// the plugin's own data, and the heuristic that guessed between them is gone.
 func StateGet(key string) (string, *pbv2.HostError, error) {
 	raw, herr, err := HostCall("env.state_get", &pbv2.StateGetArgs{Key: key})
 	if err != nil || herr != nil {
@@ -60,10 +57,8 @@ func StateGet(key string) (string, *pbv2.HostError, error) {
 
 // StateSet writes one of this plugin's durable keys.
 //
-// An empty value STORES an empty value. It does not delete — that was the v1
-// behaviour, and it made storing an empty string unexpressible while
-// contradicting the meta and cache stores where empty is ordinary data. An
-// author who learned the rule for those two would have been wrong here.
+// An empty value stores an empty value. It does not delete; use StateDelete to
+// release a key.
 func StateSet(key, value string) (*pbv2.HostError, error) {
 	_, herr, err := HostCall("env.state_set", &pbv2.StateSetArgs{Key: key, Value: value})
 	return herr, err
@@ -79,10 +74,9 @@ func StateSet(key, value string) (*pbv2.HostError, error) {
 // magic value. It is authorised by the EXISTING env.state_set grant — deletion
 // mutates a namespace the plugin can already overwrite, so a fourth durable-
 // state capability would add approval ceremony without drawing a new line.
-//
-// MIGRATION B: the host must implement the command and map it to
-// pbv2.StateDeletePermission; deriving the permission from the command string
-// would look for a capability that does not exist.
+// The host maps the command to pbv2.StateDeletePermission; deriving the
+// permission from the command string would look for a capability that does not
+// exist.
 func StateDelete(key string) (*pbv2.HostError, error) {
 	_, herr, err := HostCall(pbv2.StateDeleteCommand, &pbv2.StateDeleteArgs{Key: key})
 	return herr, err

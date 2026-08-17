@@ -229,7 +229,7 @@ func (x *ResponseMessage) HasContent() bool {
 
 // Validate reports whether a response message is structurally applicable.
 // Content presence comparisons against an accepted response belong to the
-// host verifier (Migration B); this checks only absolute well-formedness.
+// host verifier; this checks only absolute well-formedness.
 func (x *ResponseMessage) Validate() error {
 	if x == nil {
 		return fmt.Errorf("response message is nil")

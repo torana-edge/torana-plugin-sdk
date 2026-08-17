@@ -5,15 +5,8 @@ option go_package = "github.com/torana-edge/torana-plugin-sdk/pb/v2";
 
 // The Torana plugin ABI, version 2.
 //
-// v2 is a clean replacement for v1, not an extension of it. Every difference
-// below fixes something v1 could only document its way around:
-//
 //   - Guests export a single run_hook(ptr, size) -> u64. Hook identity lives
 //     only in the HookInput payload oneof; request_id lives only on HookInput.
-//     v1's five named exports, each taking a separate request_id argument, made
-//     "host called the wrong export" detectable rather than impossible — a tick
-//     payload delivered to run_before_request was a well-formed input to the
-//     wrong hook until someone remembered to check.
 //   - Guests ALSO export supported_hooks() -> u32, a bitmap of hooks the module
 //     actually implements. That is startup introspection, not a second dispatch
 //     discriminator: run_hook still routes only from the payload. The bitmap
@@ -21,18 +14,12 @@ option go_package = "github.com/torana-edge/torana-plugin-sdk/pb/v2";
 //     bit 0, unassigned bits, and an empty/zero set are load-time errors).
 //     Without it, collapsing five exports to one would erase the only
 //     artifact-level proof that a declared hook has a handler.
-//   - Hook payloads are enveloped and self-describing. In v1 a mis-dispatched
-//     payload decoded as an EMPTY message of whatever type the hook expected,
-//     and every plugin treated that as a legitimate empty request.
-//   - Results carry an explicit disposition. v1 needed a `handled` bool on
-//     three of five result types purely because an all-defaults protobuf
-//     message marshals to zero bytes — a wire artifact promoted into the API,
-//     and the most-documented footgun in the system.
-//   - Host calls return a typed result. v1 returned a bare string in eight
-//     different shapes, with errors indistinguishable from a plugin's own
-//     stored data.
-//   - The response hook gets a real ChatResponse. v1 carried responses in a
-//     ChatRequest, which four independent auditors reported as a bug.
+//   - Hook payloads are enveloped and self-describing.
+//   - Results carry an explicit disposition; a zero-byte protobuf is never an
+//     implicit action.
+//   - Host calls return a typed result whose error arm cannot be confused with
+//     plugin-owned data.
+//   - The response hook receives a dedicated ChatResponse.
 //   - Whether a response dispatch is mutable lives on the after-response
 //     wrapper, not the global envelope — only that path can be observational.
 //
@@ -313,11 +300,6 @@ message ResponseMessage {
 }
 
 // Canonical representation of a completed, non-streamed response.
-//
-// v1 had no such message. The response hook received a ChatRequest carrying,
-// depending on which of three code paths produced it, a synthesized assistant
-// message, the outbound request history, or nothing at all — a difference the
-// plugin could not observe. Four independent auditors reported that as a bug.
 message ChatResponse {
   // Model that actually answered, which may differ from the one requested.
   // Host-owned: observed fact — request ir.model.write does not authorise
@@ -375,12 +357,6 @@ message StreamError {
 }
 
 // Structural boundaries in a streamed response.
-//
-// v1 emitted deltas and tool-call boundaries and nothing else, so a plugin that
-// needed to know where a message or a content block began had to infer it from
-// the delta sequence. Both stream plugins in the official set reimplemented that
-// inference, ~60 lines each, and it is the single most copy-pasted thing a
-// stream plugin does.
 message MessageStart {
   // "assistant" for every provider Torana currently speaks, but carried rather
   // than assumed.
@@ -389,11 +365,8 @@ message MessageStart {
   string model = 3;
 }
 
-// MessageStop closes the message and carries why it ended.
-//
-// finish_reason lives here rather than in an event of its own. v1 had a
-// standalone finish_reason event, which would have left two ways to say the
-// same thing — and one unambiguous representation per fact is the point of v2.
+// MessageStop closes the message and carries why it ended. finish_reason lives
+// here rather than in a second event so each fact has one representation.
 message MessageStop {
   string finish_reason = 1;
 }
@@ -414,10 +387,8 @@ message ProviderBlock {
 // ContentBlockStart opens a block. Deltas that follow belong to it until the
 // matching stop.
 //
-// This is the ONLY block boundary. v1 had ToolCallStart/ToolCallEnd alongside
-// nothing for text or thinking, so a plugin needed one mechanism for tool calls
-// and inference for everything else. Folding every block in here means an
-// assembler handles them all the same way.
+// This is the only block-opening boundary. Every block kind uses the same
+// start/delta/stop topology so assemblers do not infer structure from deltas.
 //
 // The kind is a oneof rather than a string with optional metadata beside it.
 // A string would allow "tool_call" with no tool metadata, and "text" carrying
@@ -508,17 +479,16 @@ message ContentBlockStop {
 //     unless the open blocks were terminally aborted by StreamError (in which
 //     case the stream already ended at the error — ordinary EOF after a
 //     non-error open block is still invalid).
-//   - Host Migration B must fix adapters that violate index uniqueness (e.g.
-//     Gemini emitting Index:0 for every parallel functionCall) before enabling
-//     ToolCallBlockByIndex signature enforcement.
+//   - Adapters must assign distinct indexes to parallel provider tool calls;
+//     ToolCallBlockByIndex signature enforcement relies on this invariant.
 message StreamEvent {
   // Outbound mutations compose topology + semantics (see package
   // outboundpolicy): required = topology (cardinality/order/boundaries/kind)
   // ∪ every semantic section changed/removed/added; any changed/removed/added
   // host-owned fact rejects. Host-owned means immutable, not unreturnable —
   // identical re-emit is a no-op. A one-for-one TextDelta rewrite needs only
-  // ir.messages.write.assistant. The recursive field-diff verifier is
-  // Migration B (needs a stream-path benchmark first).
+  // ir.messages.write.assistant. The host's recursive field-diff verifier
+  // enforces these rules transactionally across each plugin call.
   oneof event {
     string text_delta = 1;
     string thinking_delta = 2;
@@ -552,8 +522,7 @@ message StreamEvents {
 message HttpRequest {
   string method = 1;
   string path = 2;
-  // Raw query string, without the leading "?". v1 dropped this entirely, so a
-  // plugin serving a page could not read its own query parameters.
+  // Raw query string, without the leading "?".
   string query = 3;
   // "http" or "https".
   string scheme = 4;
@@ -680,11 +649,8 @@ enum Hook {
 // observational. False when the response was streamed or was an upstream
 // error: the bytes have already gone to the caller, or there is no body to
 // rewrite, so a returned replacement is discarded. Every other hook is always
-// mutable — putting a flag on the global envelope let a before-request or
-// stream dispatch claim otherwise, which is nonsense.
-//
-// v1 offered no such signal, so a plugin learned its mutations were being
-// discarded only by their having no effect.
+// mutable; placing it on the global envelope would let always-mutable hooks
+// claim otherwise.
 message AfterResponse {
   ChatResponse response = 1;
   bool mutable = 2;
@@ -767,13 +733,6 @@ message HookResult {
 // ---------------------------------------------------------------------------
 
 // ErrorCode classifies a failed host call.
-//
-// v1 returned a bare string, and the same channel carried both the plugin's own
-// stored data and the host's errors. Telling them apart took 55 lines of
-// heuristics in the SDK whose own comment conceded the ambiguity was
-// unresolvable. Notably, "the key is absent" and "durable state is not
-// configured at all" were indistinguishable, so a plugin could not tell a fresh
-// store from a disabled one.
 enum ErrorCode {
   ERROR_CODE_UNSPECIFIED = 0;
   // The capability was not granted. The plugin asked for something its manifest
@@ -800,10 +759,8 @@ message HostError {
 
 // HostCallResult is what every host call returns.
 //
-// A successful call with no value sets `value` to empty bytes, which is
-// distinguishable from an error — unlike v1, where an empty string meant
-// "granted but no value", "cache miss", "key absent", "feature unconfigured",
-// and "the host refused to write an empty payload", all at once.
+// A successful call with no value sets `value` to empty bytes, which remains
+// distinguishable from the typed error arm.
 //
 // The oneof must be set. An empty HostCallResult (no arm) is refused — there is
 // no pass-through meaning for a host-call reply the way there is for a hook
@@ -868,16 +825,8 @@ message SetIdentityArgs {
 
 // Typed argument bodies for request-scoped metadata and cache commands.
 //
-// v2 requires every host call to carry a proto message. Before these existed
-// there was no public way to reach these four commands at all: HostCall takes a
-// proto.Message, typed Args existed only for the verdict commands, and the
-// string-argument path is unexported. Migrating torana-edge's fixtures found
-// it, and 42 call sites across the official plugins hit the same wall.
-//
-// They also close a silent failure. The host previously parsed these as loose
-// JSON and ignored a decode error, so a malformed argument meant the plugin's
-// write simply did not happen — no error, no log, nothing to debug. A typed
-// body makes the shape checkable, so the host can refuse it as a HostError.
+// Every host call carries a typed proto message. The host validates these
+// argument bodies and returns a classified HostError for malformed input.
 //
 //   env.meta_get / env.meta_set   permission: env.meta_get / env.meta_set
 //   env.cache_get / env.cache_set permission: env.cache_get / env.cache_set
@@ -897,11 +846,8 @@ message SetIdentityArgs {
 //   key absent            -> HostCallResult.error{code: NOT_FOUND}
 //   key present, value "" -> HostCallResult.value arm, empty bytes
 //
-// DELETION IS AN EXPLICIT COMMAND. v1 deleted a key by setting it to the empty
-// string, which made "store an empty value" unexpressible and contradicted the
-// meta and cache stores where empty is an ordinary value. A plugin author who
-// learned the rule for two stores would have been wrong about the third.
-// env.state_delete exists so the three agree and deletion is not a magic value.
+// Deletion is an explicit command. Empty is an ordinary stored value, so
+// env.state_delete—not a magic value passed to env.state_set—releases a key.
 //
 //   env.state_get     permission: env.state_get
 //   env.state_set     permission: env.state_set
@@ -915,9 +861,8 @@ message SetIdentityArgs {
 // already overwrite; a fourth durable-state capability would add manifest and
 // approval ceremony without drawing a new security line.
 //
-// MIGRATION B: the host must implement env.state_delete and special-map its
-// permission, and `torana plugin lint` must do the same. Until then StateDelete
-// is refused like any unimplemented command.
+// The host dispatcher and plugin linter both map env.state_delete to
+// env.state_set; command spelling is not permission spelling for this call.
 
 // StateGetArgs is the argument body for host command env.state_get.
 message StateGetArgs {
@@ -952,9 +897,8 @@ message StateDeleteArgs {
 //   - key present, value "" -> HostCallResult.value arm, empty bytes
 //   - key present, value v  -> HostCallResult.value arm, v
 //
-// Collapsing them recreates the v1 ambiguity this ABI removes: a plugin could
-// not tell "nothing stored" from "I stored nothing", so a cached or buffered
-// empty string was unusable.
+// Collapsing them would make "nothing stored" indistinguishable from "I stored
+// nothing", so absence and an empty stored string must remain separate.
 //
 message MetaGetArgs {
   // Key within this plugin's request-scoped namespace. Must be non-empty.
@@ -965,10 +909,8 @@ message MetaGetArgs {
 message MetaSetArgs {
   // Key within this plugin's request-scoped namespace. Must be non-empty.
   string key = 1;
-  // Value to store. Empty is a legitimate value, not a delete — v1 conflated
-  // the two because it could not tell an absent JSON field from an empty one.
-  // After setting "", a get must succeed with an empty value rather than
-  // reporting NOT_FOUND.
+  // Value to store. Empty is a legitimate value, not a delete. After setting
+  // "", a get must succeed with an empty value rather than reporting NOT_FOUND.
   string value = 2;
 }
 
@@ -1021,8 +963,8 @@ message CacheSetArgs {
 //
 // Empty fragment is the ContentBlockStop / fail-open read path so the guest
 // can retrieve the assembled original without a racy meta_get / meta_set pair
-// and without paying for a full buffer copy on every delta. Host execution
-// lands in Migration B; see MetaAppendSuccessValue.
+// and without paying for a full buffer copy on every delta. See
+// MetaAppendSuccessValue for the executable success-value contract.
 message MetaAppendArgs {
   // Content-block index within the streamed message (ABI: unique, never
   // reused). Must be non-negative.

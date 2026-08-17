@@ -39,7 +39,7 @@ jobs:
       # The release preflight for v0.3+ lives in release.yml (and
       # scripts/assert-v2-cut-for-release.sh). A tag-only guard here would run
       # too late: release.yml is triggered by the tag itself.
-      - name: Release cut preflight covers both migration states
+      - name: Release cut preflight covers allowed and forbidden layouts
         run: ./scripts/assert-v2-cut-for-release_test.sh
       - name: Current v0.3 release cut is complete
         run: ./scripts/assert-v2-cut-for-release.sh 0.3.0
