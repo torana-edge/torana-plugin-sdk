@@ -1,16 +1,14 @@
 # Notes for AI coding agents
 
 The current Torana Edge host accepts ABI v2 plugins. Use the Go SDK and
-`pb/v2`; declare `"abi_version": "v2"`. The Rust crate in this repository is
-still ABI v1 and is not compatible with the current host.
+`pb/v2`; declare `"abi_version": "v2"`. The Go and Rust SDKs both implement
+ABI v2 and run through the host conformance harness.
 
 Before changing a plugin, read in order:
 
 1. `docs/WASM_PLUGIN_GUIDE.md`
 2. `docs/WRITING_A_PLUGIN.md`
 3. `docs/PLUGIN_SEMANTICS.md`
-
-`ABI.md` is a historical v1 reference, not the active contract.
 
 ## Boundaries that must stay explicit
 
@@ -35,7 +33,4 @@ Before changing a plugin, read in order:
 - Changes spanning SDK, Edge, and official plugins land in that dependency
   order with exact revision pins and a final cross-repository gate.
 
-Go and Rust both implement ABI v2 and run through the executable host
-conformance harness. ABI v1 remains only as historical protocol/reference
-material; the built Rust crate does not expose it. Do not add v1 features or
-compatibility layers.
+Only ABI v2 exists in current source. Do not add legacy compatibility layers.

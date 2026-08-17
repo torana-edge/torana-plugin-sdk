@@ -160,7 +160,7 @@ Two more things:
 
 - **Return `TickIdle()`** (or a zero `TickResult`) when there is nothing to do.
   Intentional work uses `TickDid(...)`. A zero-byte `HookResult` means
-  pass-through — there is no v1 `handled` flag on the Go v2 path.
+  pass-through.
 - **`failure_mode` and ticks.** The host treats a tick as background work rather
   than an in-flight request: a trapping tick is logged and
   the other plugins' ticks continue. The reasoning was that `failure_mode`

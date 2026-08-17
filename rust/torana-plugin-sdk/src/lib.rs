@@ -186,11 +186,10 @@ pub fn log(message: &str, level: i32) {
 /// The buffer is uninitialised. Hosts call [`dealloc`] with the same size after
 /// consuming a non-zero hook result.
 ///
-/// Allocation failure TRAPS rather than returning a sentinel. ABI.md defines no
-/// failure value for `alloc`, and the host treats 0 as a valid pointer — it
+/// Allocation failure TRAPS rather than returning a sentinel. ABI v2 defines
+/// no failure value for `alloc`, and the host treats 0 as a valid pointer — it
 /// would write the payload at linear-memory offset 0, over the guest's own
-/// memory, and then call the hook with `ptr = 0`. Trapping is also what the
-/// previous `Vec::with_capacity` did, via `handle_alloc_error`.
+/// memory, and then call the hook with `ptr = 0`.
 #[no_mangle]
 pub extern "C" fn alloc(size: u32) -> u32 {
     alloc_bytes(size as usize) as u32
