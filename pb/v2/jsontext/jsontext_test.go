@@ -198,6 +198,64 @@ func TestValidateLargeInput(t *testing.T) {
 	}
 }
 
+func TestLargeValueDoesNotPopulateKeyScratch(t *testing.T) {
+	doc := []byte(`{"content":"` + strings.Repeat("x", 1<<20) + `","after":1}`)
+	v := &validator{data: doc}
+	v.skipWS()
+	if err := v.value(0); err != nil {
+		t.Fatal(err)
+	}
+	v.skipWS()
+	if v.pos != len(v.data) {
+		t.Fatalf("validated %d of %d bytes", v.pos, len(v.data))
+	}
+	// The scratch buffer may retain the longest object key ("content"), but
+	// never the 1 MiB value. This directly pins the allocation-profile fix.
+	if cap(v.buf) > 64 {
+		t.Fatalf("key scratch capacity = %d after a 1 MiB value", cap(v.buf))
+	}
+}
+
+func TestLargeValueStillValidatesEveryEscape(t *testing.T) {
+	prefix := `{"content":"` + strings.Repeat("x", 1<<20)
+	for _, suffix := range []string{
+		`\n\t\r\b\f\"\\\/\u2603\ud83d\ude00"}`,
+		`"}`,
+	} {
+		if err := Validate([]byte(prefix + suffix)); err != nil {
+			t.Fatalf("valid large value rejected: %v", err)
+		}
+	}
+	for name, suffix := range map[string]string{
+		"invalid escape":      `\x"}`,
+		"invalid hex":         `\u12zz"}`,
+		"lone high surrogate": `\ud800"}`,
+		"lone low surrogate":  `\udc00"}`,
+		"high then non-low":   `\ud800\u0041"}`,
+		"unescaped control":   "\n\"}",
+		"unterminated escape": `\`,
+		"unterminated string": ``,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := Validate([]byte(prefix + suffix)); err == nil {
+				t.Fatal("invalid large value accepted")
+			}
+		})
+	}
+}
+
+func BenchmarkValidateLargeStringValue(b *testing.B) {
+	doc := []byte(`{"content":"` + strings.Repeat("x", 1<<20) + `"}`)
+	b.SetBytes(int64(len(doc)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if err := Validate(doc); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 // TestValidateRandomizedDifferential: randomized mutations of a valid
 // document must never be ACCEPTED by Validate while rejected by
 // encoding/json, EXCEPT when the mutation produces a lenient number token or

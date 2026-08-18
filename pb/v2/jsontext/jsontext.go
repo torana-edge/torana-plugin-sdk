@@ -90,7 +90,7 @@ func (v *validator) value(depth int) error {
 	case c == '[':
 		return v.array(depth + 1)
 	case c == '"':
-		_, err := v.decodeString()
+		_, err := v.decodeString(false)
 		return err
 	case c == 't':
 		return v.literal("true")
@@ -184,7 +184,7 @@ func (v *validator) object(depth int) error {
 		if v.pos >= len(v.data) || v.data[v.pos] != '"' {
 			return errors.New("jsontext: expected an object member name")
 		}
-		key, err := v.decodeString()
+		key, err := v.decodeString(true)
 		if err != nil {
 			return err
 		}
@@ -219,17 +219,26 @@ func (v *validator) object(depth int) error {
 	}
 }
 
-// decodeString consumes a JSON string starting at v.data[v.pos] == '"' and
-// returns its DECODED bytes. Escapes are validated: control characters must
-// be escaped, `\uXXXX` must hold hex digits, a high surrogate must be
-// immediately followed by an escaped low surrogate, and a lone low surrogate
-// is rejected. A literal `\\u...` (escaped backslash) is ordinary text.
-func (v *validator) decodeString() ([]byte, error) {
+// decodeString consumes a JSON string starting at v.data[v.pos] == '"'. It
+// returns decoded bytes only when retain is true (object keys need them for
+// duplicate detection). Value strings are validated without copying their
+// contents into the key scratch buffer.
+//
+// Escapes are always validated: control characters must be escaped, `\uXXXX`
+// must hold hex digits, a high surrogate must be immediately followed by an
+// escaped low surrogate, and a lone low surrogate is rejected. A literal
+// `\\u...` (escaped backslash) is ordinary text.
+func (v *validator) decodeString(retain bool) ([]byte, error) {
 	if v.data[v.pos] != '"' {
 		return nil, errors.New("jsontext: expected string")
 	}
 	v.pos++
 	v.buf = v.buf[:0]
+	appendByte := func(b byte) {
+		if retain {
+			v.buf = append(v.buf, b)
+		}
+	}
 	for {
 		if v.pos >= len(v.data) {
 			return nil, errors.New("jsontext: unterminated string")
@@ -249,17 +258,17 @@ func (v *validator) decodeString() ([]byte, error) {
 			switch e {
 			case '"', '\\', '/':
 				// Identity escapes: the decoded byte IS the escape letter.
-				v.buf = append(v.buf, e)
+				appendByte(e)
 			case 'b':
-				v.buf = append(v.buf, '\b') // 0x08
+				appendByte('\b') // 0x08
 			case 'f':
-				v.buf = append(v.buf, '\f') // 0x0c
+				appendByte('\f') // 0x0c
 			case 'n':
-				v.buf = append(v.buf, '\n') // 0x0a
+				appendByte('\n') // 0x0a
 			case 'r':
-				v.buf = append(v.buf, '\r') // 0x0d
+				appendByte('\r') // 0x0d
 			case 't':
-				v.buf = append(v.buf, '\t') // 0x09
+				appendByte('\t') // 0x09
 			case 'u':
 				r, err := v.hexRune()
 				if err != nil {
@@ -279,11 +288,15 @@ func (v *validator) decodeString() ([]byte, error) {
 						return nil, errors.New("jsontext: high surrogate not followed by a low surrogate")
 					}
 					combined := 0x10000 + (r-0xD800)<<10 + (lo - 0xDC00)
-					v.buf = utf8.AppendRune(v.buf, rune(combined))
+					if retain {
+						v.buf = utf8.AppendRune(v.buf, rune(combined))
+					}
 				} else if r >= 0xDC00 && r <= 0xDFFF {
 					return nil, errors.New("jsontext: lone low surrogate")
 				} else {
-					v.buf = utf8.AppendRune(v.buf, r)
+					if retain {
+						v.buf = utf8.AppendRune(v.buf, r)
+					}
 				}
 			default:
 				return nil, errors.New("jsontext: invalid escape")
@@ -291,7 +304,7 @@ func (v *validator) decodeString() ([]byte, error) {
 		case c < 0x20:
 			return nil, errors.New("jsontext: unescaped control character")
 		default:
-			v.buf = append(v.buf, c)
+			appendByte(c)
 			v.pos++
 		}
 	}
