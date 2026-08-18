@@ -153,6 +153,9 @@ Every plugin directory must contain a `plugin.json` file describing its metadata
   - **`name`**: Hook event type (`run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick`).
 - **`requires_upstream`**: Optional stable plugin IDs that must be approved and
   earlier in the operator's configured `plugins.order`.
+- **`conflicts_with`**: Optional stable plugin IDs that cannot be active in the
+  same pipeline generation. A declaration by either plugin is sufficient;
+  ordering cannot resolve a conflict.
 - **`permissions`**: Declared host capabilities required by the plugin:
   - **`name`**: Capability permission string.
   - **`description`**: Rationale for requesting the capability.
@@ -171,6 +174,11 @@ capabilities, and exported-hook validation. Once a host reports a semantic
 release version, it enforces any declared minimum and maximum. Hook execution
 order comes only from the operator's `plugins.order`; manifests do not have a
 hook `priority` field.
+
+Composition declarations are evaluated against exact approved bundles before
+guest code loads. `requires_upstream` constrains presence and order;
+`conflicts_with` rejects incompatible pairs. Installed but unapproved or
+otherwise skipped bundles do not conflict with the generation that runs.
 
 Wazero's linear-memory isolation, execution timeout, and memory limit sandbox
 untrusted guest code. Capability approvals limit which Torana host operations
