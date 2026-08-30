@@ -323,6 +323,9 @@ message ChatResponse {
   // Provider fields Torana did not model, verbatim.
   // Host-owned: opaque provider output — not request ir.params.write.
   bytes provider_extensions_json = 8;
+  // Host-owned configured provider name that produced (or attempted) this
+  // response. This is Torana routing identity, not a provider wire field.
+  string provider = 9;
 }
 
 // ---------------------------------------------------------------------------

@@ -899,6 +899,7 @@ var chatResponseFieldPolicies = map[string]FieldPolicy{
 	"upstream_status":          hostOwnedPolicy(),
 	"duration_ms":              hostOwnedPolicy(),
 	"provider_extensions_json": hostOwnedPolicy(),
+	"provider":                 hostOwnedPolicy(),
 }
 
 var responseMessageFieldPolicies = map[string]FieldPolicy{
