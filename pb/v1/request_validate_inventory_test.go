@@ -1,8 +1,8 @@
-package v2
+package v1
 
 // Reflection-backed inventory tests for the request-replacement rules.
 //
-// These live in package v2 (not v2_test) so they can inspect the private
+// These live in package v1 (not v1_test) so they can inspect the private
 // rule tables directly; the tables stay unexported — this PR establishes no
 // plugin-author use case for a public rule accessor.
 //
@@ -93,7 +93,7 @@ func TestReplacementFieldInventoryExact(t *testing.T) {
 // construction; TestReplacementStringUTF8Sweep proves it live by mutating
 // EVERY reachable string field of a valid request to invalid UTF-8.
 
-// splitFullName splits "torana.v2.ChatRequest.model" at the last dot.
+// splitFullName splits "torana.v1.ChatRequest.model" at the last dot.
 func splitFullName(full string) (msg, field string) {
 	for i := len(full) - 1; i >= 0; i-- {
 		if full[i] == '.' {

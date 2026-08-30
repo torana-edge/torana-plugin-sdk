@@ -69,14 +69,14 @@ import (
 	"strings"
 
 	sdk "github.com/torana-edge/torana-plugin-sdk"
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 func main() {}
 
 func init() {
 	// Register a hook to run before chat completion requests are forwarded upstream.
-	sdk.OnBeforeRequest(func(ctx context.Context, req *pbv2.ChatRequest) (sdk.RequestResult, error) {
+	sdk.OnBeforeRequest(func(ctx context.Context, req *pbv1.ChatRequest) (sdk.RequestResult, error) {
 		modified := false
 
 		for _, msg := range req.Messages {
@@ -96,11 +96,11 @@ func init() {
 
 ### SDK Hook Signatures
 
-- `sdk.OnBeforeRequest(fn func(ctx context.Context, req *pbv2.ChatRequest) (sdk.RequestResult, error))`
-- `sdk.OnAfterResponse(fn func(ctx context.Context, resp *pbv2.ChatResponse, mutable bool) (sdk.ResponseResult, error))`
-- `sdk.OnStreamChunk(fn func(ctx context.Context, chunk *pbv2.StreamEvent) (sdk.StreamResult, error))`
-- `sdk.OnHTTPRequest(fn func(ctx context.Context, req *pbv2.HttpRequest) (sdk.HTTPResult, error))`
-- `sdk.OnTick(fn func(ctx context.Context, tick *pbv2.TickRequest) (sdk.TickResult, error))`
+- `sdk.OnBeforeRequest(fn func(ctx context.Context, req *pbv1.ChatRequest) (sdk.RequestResult, error))`
+- `sdk.OnAfterResponse(fn func(ctx context.Context, resp *pbv1.ChatResponse, mutable bool) (sdk.ResponseResult, error))`
+- `sdk.OnStreamChunk(fn func(ctx context.Context, chunk *pbv1.StreamEvent) (sdk.StreamResult, error))`
+- `sdk.OnHTTPRequest(fn func(ctx context.Context, req *pbv1.HttpRequest) (sdk.HTTPResult, error))`
+- `sdk.OnTick(fn func(ctx context.Context, tick *pbv1.TickRequest) (sdk.TickResult, error))`
 
 Returning `Pass*` (or a zero result) means pass-through. Prefer the typed
 constructors (`PassRequest`, `ReplaceRequest`, `PassEvent`, `SuppressEvent`,
@@ -123,7 +123,7 @@ Every plugin directory must contain a `plugin.json` file describing its metadata
   "name": "my-custom-plugin",
   "version": "0.1.0",
   "description": "Redacts sensitive terms from user prompts",
-  "abi_version": "v2",
+  "abi_version": "v1",
   "minimum_torana_version": "0.1.0",
   "failure_mode": "block",
   "repository": "https://github.com/your-org/my-custom-plugin",
@@ -143,7 +143,7 @@ Every plugin directory must contain a `plugin.json` file describing its metadata
 - **`id`**: Stable machine-readable plugin identifier.
 - **`version`**: Semantic version string (e.g. `"0.1.0"`).
 - **`description`**: Human-readable description.
-- **`abi_version`**: Torana plugin ABI version. The current host accepts `"v2"`
+- **`abi_version`**: Torana plugin ABI version. The current host accepts `"v1"`
   (`run_hook` / `supported_hooks`) for both Go and Rust guests.
 - **`minimum_torana_version`**: Optional oldest compatible Torana Edge version.
 - **`maximum_torana_version`**: Optional newest compatible Torana Edge version.
@@ -159,8 +159,17 @@ Every plugin directory must contain a `plugin.json` file describing its metadata
 - **`permissions`**: Declared host capabilities required by the plugin:
   - **`name`**: Capability permission string.
   - **`description`**: Rationale for requesting the capability.
+- **`credentials`**: Named secret slots the operator must bind before the
+  plugin can resolve them. Each entry has a stable `name`, a value-free
+  `description`, and `required`.
+- **`files`**: Plugin-private logical paths, their allowed operations
+  (`append`, `read`, `write`, `list`, `delete`), and optional rotation limits.
+  These are not operating-system paths.
+- **`http_endpoints`**: Named outbound endpoint slots. Each entry declares a
+  description, optional HTTPS default origin, allowed methods, and whether a
+  binding is required. The operator may narrow it during approval.
 
-Manifest permissions are an all-or-nothing set under v2: every declared
+Manifest permissions are an all-or-nothing set under v1: every declared
 permission must be approved against the exact bundle digest, or the plugin
 cannot be enabled. Approvals are bound to the digest of `plugin.json`,
 `plugin.wasm`, `schema.json`, and optional `agent.json`. A changed bundle must
@@ -184,7 +193,7 @@ Wazero's linear-memory isolation, execution timeout, and memory limit sandbox
 untrusted guest code. Capability approvals limit which Torana host operations
 the guest may invoke; they do not make an approved plugin trustworthy or review
 its transformation logic. Only install artifacts you intend to run, approve the
-full declared permission set (there is no per-capability subset under v2), and
+full declared permission set (there is no per-capability subset under v1), and
 prefer `failure_mode: "block"` when silent pass-through would be unsafe.
 
 ### Available Capability Strings
@@ -197,10 +206,28 @@ surface permission denied — so a plugin should degrade rather than assume.
 
 | Capability | SDK | Description |
 | --- | --- | --- |
-| `env.set_identity` | (v2 host call; `SetIdentityArgs`) | Override the rate-limit / identity key for this request. |
-| `env.block_request` | `sdk.BlockRequest` → v2 `BlockRequestArgs` | Reject the request with a provider-shaped error. |
-| `env.respond_request` | `sdk.RespondRequest` → v2 `RespondRequestArgs` | Answer directly without going upstream. |
-| `env.route_request` | `sdk.RouteRequest` → v2 `RouteRequestArgs` | Send the request to a different provider. |
+| `env.set_identity` | (v1 host call; `SetIdentityArgs`) | Override the rate-limit / identity key for this request. |
+| `env.block_request` | `sdk.BlockRequest` → v1 `BlockRequestArgs` | Reject the request with a provider-shaped error. |
+| `env.respond_request` | `sdk.RespondRequest` → v1 `RespondRequestArgs` | Answer directly without going upstream. |
+| `env.route_request` | `sdk.RouteRequest` → v1 `RouteRequestArgs` | Send the request to a different provider. |
+
+**Credentials, private files, and scoped HTTP**
+
+| Capability | SDK | Description |
+| --- | --- | --- |
+| `env.credential_get` | `sdk.GetCredential` | Resolve one declared, operator-bound credential slot. The plugin receives the raw bytes and must treat them as secret. |
+| `env.file_append` | `sdk.AppendFile` | Atomically append to one declared plugin-private file. |
+| `env.file_read` | `sdk.ReadFile` | Read one declared private file within the approved response limit. |
+| `env.file_write` | `sdk.WriteFile` | Atomically replace one declared private file. |
+| `env.file_list` | `sdk.ListFiles` | List declared files under a logical prefix. |
+| `env.file_delete` | `sdk.DeleteFile` | Delete one declared private file. |
+| `env.http_request` | `sdk.HTTPRequest` | Call an operator-bound endpoint slot using a relative path and the approved method and resource budgets. |
+
+Credential and HTTP approval are deliberately separate. A plugin granted both
+can transmit that credential, which is sometimes the point and always part of
+the operator's security decision. HTTP calls never accept an absolute URL:
+the manifest names an endpoint slot, approval binds its exact origin, and the
+plugin supplies only the method, relative path, headers, and body.
 
 **IR write grants — what a plugin may CHANGE**
 
@@ -371,7 +398,7 @@ grant.
 | Capability | SDK | Scope |
 | --- | --- | --- |
 | `env.meta_get` / `env.meta_set` | `sdk.MetaGet`, `sdk.MetaSet` | One request, private to your plugin (the host namespaces your keys). Gone when the request ends. |
-| `env.meta_append` (permission `env.meta_set`) | v2 `MetaAppendArgs` | Atomic append by block index. Non-empty fragment → empty success value (ack). Empty fragment → complete buffer read (absent → empty bytes). Dispatcher maps the command onto `env.meta_set` — there is no separate grant. |
+| `env.meta_append` (permission `env.meta_set`) | v1 `MetaAppendArgs` | Atomic append by block index. Non-empty fragment → empty success value (ack). Empty fragment → complete buffer read (absent → empty bytes). Dispatcher maps the command onto `env.meta_set` — there is no separate grant. |
 | `env.cache_get` / `env.cache_set` | `sdk.CacheGet`, `sdk.CacheSet` | Across requests, TTL'd, and private to the exact executing plugin. Another plugin cannot read or overwrite the key. |
 | `env.shared_cache_get` / `env.shared_cache_set` | `sdk.SharedCacheGet`, `sdk.SharedCacheSet` | Explicit cross-plugin exchange. Request only for a documented producer/consumer key contract; private cache grants never imply these capabilities. |
 | `env.state_get` / `env.state_set` / `env.state_delete` / `env.state_keys` | `sdk.StateGet`, `sdk.StateSet`, `sdk.StateDelete`, `sdk.StateKeys` | Across requests **and restarts**, private, never expires. You must delete your own keys — with `StateDelete`, not by setting an empty value. `env.state_delete` is authorised by the **`env.state_set`** grant; there is no fourth capability. |
@@ -509,7 +536,7 @@ contracts hold for the same error:
 var refusal *sdk.HostCallRefusalError
 if errors.As(err, &refusal) {
     switch refusal.Code {
-    case pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED, pbv2.ErrorCode_ERROR_CODE_UNAVAILABLE:
+    case pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED, pbv1.ErrorCode_ERROR_CODE_UNAVAILABLE:
         // Advisory: decline and continue — retrying now cannot help.
     default:
         // Contract/protocol defect (PERMISSION_DENIED, INVALID_ARGUMENT,
@@ -632,13 +659,13 @@ torana plugin build . -o plugin.wasm
 
 Use `torana-plugin-sdk` and compile a `cdylib` for `wasm32-wasip1`. A plugin
 provides one typed dispatcher and declares its exact hook bitmap with
-`export_plugin_v2!`; the macro exports `supported_hooks` and `run_hook`.
+`export_plugin_v1!`; the macro exports `supported_hooks` and `run_hook`.
 
 ```rust
-use torana_plugin_sdk::{export_plugin_v2, pbv2, HOOK_BEFORE_REQUEST};
+use torana_plugin_sdk::{export_plugin_v1, pbv1, HOOK_BEFORE_REQUEST};
 
-fn dispatch(input: pbv2::HookInput) -> Result<Option<pbv2::HookResult>, String> {
-    let Some(pbv2::hook_input::Payload::ChatRequest(request)) = input.payload else {
+fn dispatch(input: pbv1::HookInput) -> Result<Option<pbv1::HookResult>, String> {
+    let Some(pbv1::hook_input::Payload::ChatRequest(request)) = input.payload else {
         return Err("received an undeclared hook".into());
     };
     torana_plugin_sdk::log(&format!("model: {}", request.model),
@@ -646,13 +673,13 @@ fn dispatch(input: pbv2::HookInput) -> Result<Option<pbv2::HookResult>, String> 
     Ok(None)
 }
 
-export_plugin_v2!(HOOK_BEFORE_REQUEST, dispatch);
+export_plugin_v1!(HOOK_BEFORE_REQUEST, dispatch);
 ```
 
 Combine multiple hooks by OR-ing the exported hook constants and matching the
 corresponding `HookInput.payload` arms. Return `Ok(None)` to pass through. A
 mutation returns the single `HookResult.action` valid for that hook. Host calls
-use protobuf arguments and `host_call_v2`; typed refusals preserve the stable
+use protobuf arguments and `host_call`; typed refusals preserve the stable
 `ErrorCode` classification.
 
 ---
@@ -669,7 +696,7 @@ package main
 import (
 	"testing"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 	"github.com/torana-edge/torana-plugin-sdk/sdktest"
 )
 
@@ -680,7 +707,7 @@ func TestBlocksOnDetectedPII(t *testing.T) {
 		return sdktest.HostResultValue([]byte(`{"completion":"EMAIL"}`)), nil
 	})
 
-	res := h.BeforeRequest(&pbv2.ChatRequest{Messages: []*pbv2.Message{
+	res := h.BeforeRequest(&pbv1.ChatRequest{Messages: []*pbv1.Message{
 		{Role: "tool", Content: "contact: someone@example.com"},
 	}})
 

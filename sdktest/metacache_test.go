@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	sdk "github.com/torana-edge/torana-plugin-sdk"
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 	"github.com/torana-edge/torana-plugin-sdk/sdktest"
 	"google.golang.org/protobuf/proto"
 )
@@ -68,12 +68,12 @@ func TestSharedCacheSetThenGetUsesExplicitCommands(t *testing.T) {
 
 // The distinction this change exists to preserve. A missing key and a stored
 // empty string must not produce the same answer, or a plugin cannot tell
-// "nothing stored" from "I stored nothing" — the v1 ambiguity v2 removes.
+// "nothing stored" from "I stored nothing" — the v1 ambiguity the typed ABI removes.
 func TestAbsenceIsNotEmptiness(t *testing.T) {
 	for _, store := range []struct {
 		name string
-		set  func(k, v string) (*pbv2.HostError, error)
-		get  func(k string) (string, *pbv2.HostError, error)
+		set  func(k, v string) (*pbv1.HostError, error)
+		get  func(k string) (string, *pbv1.HostError, error)
 	}{
 		{"meta", sdk.MetaSet, sdk.MetaGet},
 		{"cache", sdk.CacheSet, sdk.CacheGet},
@@ -143,7 +143,7 @@ func TestPermissionDenialIsDistinctFromNotFound(t *testing.T) {
 			t.Fatal("a permission denial was reported as NOT_FOUND; " +
 				"a plugin would treat a refused capability as an ordinary miss")
 		}
-		if herr.Code != pbv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
+		if herr.Code != pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
 			t.Fatalf("got %v, want PERMISSION_DENIED", herr.Code)
 		}
 	})
@@ -176,7 +176,7 @@ func TestCommandNamesAndArgumentsAreExact(t *testing.T) {
 		seen[c.Command] = true
 		switch c.Command {
 		case "env.meta_set":
-			var a pbv2.MetaSetArgs
+			var a pbv1.MetaSetArgs
 			if err := proto.Unmarshal([]byte(c.Args), &a); err != nil {
 				t.Fatalf("env.meta_set args do not decode as MetaSetArgs: %v", err)
 			}
@@ -184,7 +184,7 @@ func TestCommandNamesAndArgumentsAreExact(t *testing.T) {
 				t.Fatalf("env.meta_set args = %+v, want key=mk value=mv", &a)
 			}
 		case "env.cache_set":
-			var a pbv2.CacheSetArgs
+			var a pbv1.CacheSetArgs
 			if err := proto.Unmarshal([]byte(c.Args), &a); err != nil {
 				t.Fatalf("env.cache_set args do not decode as CacheSetArgs: %v", err)
 			}
@@ -192,7 +192,7 @@ func TestCommandNamesAndArgumentsAreExact(t *testing.T) {
 				t.Fatalf("env.cache_set args = %+v, want key=ck value=cv", &a)
 			}
 		case "env.meta_get":
-			var a pbv2.MetaGetArgs
+			var a pbv1.MetaGetArgs
 			if err := proto.Unmarshal([]byte(c.Args), &a); err != nil {
 				t.Fatalf("env.meta_get args do not decode as MetaGetArgs: %v", err)
 			}
@@ -200,7 +200,7 @@ func TestCommandNamesAndArgumentsAreExact(t *testing.T) {
 				t.Fatalf("env.meta_get args = %+v, want key=mget", &a)
 			}
 		case "env.cache_get":
-			var a pbv2.CacheGetArgs
+			var a pbv1.CacheGetArgs
 			if err := proto.Unmarshal([]byte(c.Args), &a); err != nil {
 				t.Fatalf("env.cache_get args do not decode as CacheGetArgs: %v", err)
 			}

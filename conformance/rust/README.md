@@ -9,4 +9,4 @@ cargo build --target wasm32-wasip1 --manifest-path examples/rust-logger/Cargo.to
 ```
 
 The compiled Rust all-hooks guest and Go all-hooks guest must pass the same ABI
-v2 host conformance suite in `conformance/host`.
+v1 host conformance suite in `conformance/host`.

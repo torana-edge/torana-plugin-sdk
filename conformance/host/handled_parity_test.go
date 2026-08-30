@@ -7,7 +7,7 @@ import (
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -19,16 +19,16 @@ func TestPassThroughVersusServeHTTP(t *testing.T) {
 		return
 	}
 
-	tickPayload, err := proto.Marshal(&pbv2.HookInput{
+	tickPayload, err := proto.Marshal(&pbv1.HookInput{
 		RequestId: 1,
-		Payload:   &pbv2.HookInput_TickRequest{TickRequest: &pbv2.TickRequest{TickId: 1}},
+		Payload:   &pbv1.HookInput_TickRequest{TickRequest: &pbv1.TickRequest{TickId: 1}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	httpPayload, err := proto.Marshal(&pbv2.HookInput{
+	httpPayload, err := proto.Marshal(&pbv1.HookInput{
 		RequestId: 1,
-		Payload: &pbv2.HookInput_HttpRequest{HttpRequest: &pbv2.HttpRequest{
+		Payload: &pbv1.HookInput_HttpRequest{HttpRequest: &pbv1.HttpRequest{
 			Method: "GET", Path: "/",
 		}},
 	})

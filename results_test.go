@@ -5,12 +5,12 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 // errOf and frameOf adapt the two-value hookResult where only one half matters.
-func errOf(_ *pbv2.HookResult, err error) error            { return err }
-func frameOf(r *pbv2.HookResult, _ error) *pbv2.HookResult { return r }
+func errOf(_ *pbv1.HookResult, err error) error            { return err }
+func frameOf(r *pbv1.HookResult, _ error) *pbv1.HookResult { return r }
 
 // Every result an author can construct must be one the host accepts.
 //
@@ -19,23 +19,23 @@ func frameOf(r *pbv2.HookResult, _ error) *pbv2.HookResult { return r }
 // Checking each against the same validation the host runs is the only way to
 // know the two agree.
 func TestEveryConstructorProducesAValidResult(t *testing.T) {
-	ev := &pbv2.StreamEvent{Event: &pbv2.StreamEvent_TextDelta{TextDelta: "x"}}
+	ev := &pbv1.StreamEvent{Event: &pbv1.StreamEvent_TextDelta{TextDelta: "x"}}
 
 	for _, tc := range []struct {
 		name  string
-		hook  pbv2.Hook
-		build func() (*pbv2.HookResult, error)
+		hook  pbv1.Hook
+		build func() (*pbv1.HookResult, error)
 	}{
-		{"ReplaceRequest", pbv2.Hook_HOOK_BEFORE_REQUEST,
-			ReplaceRequest(&pbv2.ChatRequest{Model: "m"}).hookResult},
-		{"ReplaceResponse", pbv2.Hook_HOOK_AFTER_RESPONSE,
-			ReplaceResponse(&pbv2.ChatResponse{Model: "m"}).hookResult},
-		{"SuppressEvent", pbv2.Hook_HOOK_ON_STREAM_CHUNK, SuppressEvent().hookResult},
-		{"EmitEvents one", pbv2.Hook_HOOK_ON_STREAM_CHUNK, EmitEvents(ev).hookResult},
-		{"EmitEvents fan-out", pbv2.Hook_HOOK_ON_STREAM_CHUNK, EmitEvents(ev, ev).hookResult},
-		{"ServeHTTP", pbv2.Hook_HOOK_ON_HTTP_REQUEST,
-			ServeHTTP(&pbv2.HttpResponse{Status: 200}).hookResult},
-		{"TickDid", pbv2.Hook_HOOK_ON_TICK, TickDid(3, "warmed").hookResult},
+		{"ReplaceRequest", pbv1.Hook_HOOK_BEFORE_REQUEST,
+			ReplaceRequest(&pbv1.ChatRequest{Model: "m"}).hookResult},
+		{"ReplaceResponse", pbv1.Hook_HOOK_AFTER_RESPONSE,
+			ReplaceResponse(&pbv1.ChatResponse{Model: "m"}).hookResult},
+		{"SuppressEvent", pbv1.Hook_HOOK_ON_STREAM_CHUNK, SuppressEvent().hookResult},
+		{"EmitEvents one", pbv1.Hook_HOOK_ON_STREAM_CHUNK, EmitEvents(ev).hookResult},
+		{"EmitEvents fan-out", pbv1.Hook_HOOK_ON_STREAM_CHUNK, EmitEvents(ev, ev).hookResult},
+		{"ServeHTTP", pbv1.Hook_HOOK_ON_HTTP_REQUEST,
+			ServeHTTP(&pbv1.HttpResponse{Status: 200}).hookResult},
+		{"TickDid", pbv1.Hook_HOOK_ON_TICK, TickDid(3, "warmed").hookResult},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := tc.build()
@@ -56,7 +56,7 @@ func TestEveryConstructorProducesAValidResult(t *testing.T) {
 func TestPassProducesNoFrame(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		build func() (*pbv2.HookResult, error)
+		build func() (*pbv1.HookResult, error)
 	}{
 		{"PassRequest", PassRequest().hookResult},
 		{"PassResponse", PassResponse().hookResult},
@@ -99,7 +99,7 @@ func TestSuppressProducesADistinguishableFrame(t *testing.T) {
 	if len(raw) == 0 {
 		t.Fatal("suppress marshalled to zero bytes, which the ABI reads as pass-through")
 	}
-	if err := got.ValidateFor(pbv2.Hook_HOOK_ON_STREAM_CHUNK); err != nil {
+	if err := got.ValidateFor(pbv1.Hook_HOOK_ON_STREAM_CHUNK); err != nil {
 		t.Fatalf("the host would reject this: %v", err)
 	}
 }
@@ -110,7 +110,7 @@ func TestSuppressProducesADistinguishableFrame(t *testing.T) {
 // request upstream, so a sanitizer that failed would have its output discarded
 // and the UNSANITISED original sent instead.
 func TestInvalidArgumentsAreErrors(t *testing.T) {
-	ev := &pbv2.StreamEvent{Event: &pbv2.StreamEvent_TextDelta{TextDelta: "x"}}
+	ev := &pbv1.StreamEvent{Event: &pbv1.StreamEvent_TextDelta{TextDelta: "x"}}
 
 	for _, tc := range []struct {
 		name string
@@ -155,16 +155,16 @@ func TestErrorResultsCarryNoFrame(t *testing.T) {
 // A result carries its own hook's payload, so a handler cannot answer the wrong
 // hook by construction.
 func TestResultsCarryTheirOwnHookPayload(t *testing.T) {
-	ev := &pbv2.StreamEvent{Event: &pbv2.StreamEvent_TextDelta{TextDelta: "x"}}
+	ev := &pbv1.StreamEvent{Event: &pbv1.StreamEvent_TextDelta{TextDelta: "x"}}
 	pairs := []struct {
-		hook   pbv2.Hook
-		result *pbv2.HookResult
+		hook   pbv1.Hook
+		result *pbv1.HookResult
 	}{
-		{pbv2.Hook_HOOK_BEFORE_REQUEST, frameOf(ReplaceRequest(&pbv2.ChatRequest{Model: "m"}).hookResult())},
-		{pbv2.Hook_HOOK_AFTER_RESPONSE, frameOf(ReplaceResponse(&pbv2.ChatResponse{Model: "m"}).hookResult())},
-		{pbv2.Hook_HOOK_ON_STREAM_CHUNK, frameOf(EmitEvents(ev).hookResult())},
-		{pbv2.Hook_HOOK_ON_HTTP_REQUEST, frameOf(ServeHTTP(&pbv2.HttpResponse{Status: 200}).hookResult())},
-		{pbv2.Hook_HOOK_ON_TICK, frameOf(TickDid(1, "").hookResult())},
+		{pbv1.Hook_HOOK_BEFORE_REQUEST, frameOf(ReplaceRequest(&pbv1.ChatRequest{Model: "m"}).hookResult())},
+		{pbv1.Hook_HOOK_AFTER_RESPONSE, frameOf(ReplaceResponse(&pbv1.ChatResponse{Model: "m"}).hookResult())},
+		{pbv1.Hook_HOOK_ON_STREAM_CHUNK, frameOf(EmitEvents(ev).hookResult())},
+		{pbv1.Hook_HOOK_ON_HTTP_REQUEST, frameOf(ServeHTTP(&pbv1.HttpResponse{Status: 200}).hookResult())},
+		{pbv1.Hook_HOOK_ON_TICK, frameOf(TickDid(1, "").hookResult())},
 	}
 	for _, a := range pairs {
 		for _, b := range pairs {

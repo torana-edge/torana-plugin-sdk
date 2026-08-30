@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 // What a hook returns.
@@ -33,7 +33,7 @@ import (
 
 // RequestResult is what a run_before_request handler returns.
 type RequestResult struct {
-	inner *pbv2.HookResult
+	inner *pbv1.HookResult
 	err   error
 }
 
@@ -50,23 +50,23 @@ func PassRequest() RequestResult { return RequestResult{} }
 // A nil request is an error, not a pass. Passing would mean the host's own
 // request goes upstream — so a sanitizer that failed would have its output
 // discarded and the unsanitized original sent instead.
-func ReplaceRequest(req *pbv2.ChatRequest) RequestResult {
+func ReplaceRequest(req *pbv1.ChatRequest) RequestResult {
 	if req == nil {
 		return RequestResult{err: errors.New(
 			"ReplaceRequest(nil): there is nothing to replace with. Return " +
 				"PassRequest() if that is what you mean — passing nil would send the " +
 				"host's own request upstream")}
 	}
-	return RequestResult{inner: &pbv2.HookResult{
-		Action: &pbv2.HookResult_ReplaceRequest{ReplaceRequest: req},
+	return RequestResult{inner: &pbv1.HookResult{
+		Action: &pbv1.HookResult_ReplaceRequest{ReplaceRequest: req},
 	}}
 }
 
-func (r RequestResult) hookResult() (*pbv2.HookResult, error) { return orPass(r.inner, r.err) }
+func (r RequestResult) hookResult() (*pbv1.HookResult, error) { return orPass(r.inner, r.err) }
 
 // ResponseResult is what a run_after_response handler returns.
 type ResponseResult struct {
-	inner *pbv2.HookResult
+	inner *pbv1.HookResult
 	err   error
 }
 
@@ -79,22 +79,22 @@ func PassResponse() ResponseResult { return ResponseResult{} }
 // errored response, where the bytes have already gone or there is no body to
 // rewrite. AfterResponse.Mutable says which, so a handler can check rather than
 // discover it by having no effect.
-func ReplaceResponse(resp *pbv2.ChatResponse) ResponseResult {
+func ReplaceResponse(resp *pbv1.ChatResponse) ResponseResult {
 	if resp == nil {
 		return ResponseResult{err: errors.New(
 			"ReplaceResponse(nil): there is nothing to replace with. Return " +
 				"PassResponse() if that is what you mean")}
 	}
-	return ResponseResult{inner: &pbv2.HookResult{
-		Action: &pbv2.HookResult_ReplaceResponse{ReplaceResponse: resp},
+	return ResponseResult{inner: &pbv1.HookResult{
+		Action: &pbv1.HookResult_ReplaceResponse{ReplaceResponse: resp},
 	}}
 }
 
-func (r ResponseResult) hookResult() (*pbv2.HookResult, error) { return orPass(r.inner, r.err) }
+func (r ResponseResult) hookResult() (*pbv1.HookResult, error) { return orPass(r.inner, r.err) }
 
 // StreamResult is what a run_on_stream_chunk handler returns.
 type StreamResult struct {
-	inner *pbv2.HookResult
+	inner *pbv1.HookResult
 	err   error
 }
 
@@ -104,11 +104,11 @@ func PassEvent() StreamResult { return StreamResult{} }
 // SuppressEvent drops the event, emitting nothing.
 //
 // Use this rather than emitting an empty list: a REPLACE with no events emits
-// nothing too, and one action with two encodings is what the v2 contract exists
+// nothing too, and one action with two encodings is what the v1 contract exists
 // to remove. The host rejects the empty form.
 func SuppressEvent() StreamResult {
-	return StreamResult{inner: &pbv2.HookResult{
-		Action: &pbv2.HookResult_Suppress{Suppress: &pbv2.Suppress{}},
+	return StreamResult{inner: &pbv1.HookResult{
+		Action: &pbv1.HookResult_Suppress{Suppress: &pbv1.Suppress{}},
 	}}
 }
 
@@ -120,7 +120,7 @@ func SuppressEvent() StreamResult {
 // the author wrote: silently dropping a nil produces partial output, which on a
 // stream means a truncated tool call the agent then tries to execute. Say
 // SuppressEvent when you mean to emit nothing.
-func EmitEvents(events ...*pbv2.StreamEvent) StreamResult {
+func EmitEvents(events ...*pbv1.StreamEvent) StreamResult {
 	if len(events) == 0 {
 		return StreamResult{err: errors.New(
 			"EmitEvents() with no events emits nothing. Return SuppressEvent() " +
@@ -133,18 +133,18 @@ func EmitEvents(events ...*pbv2.StreamEvent) StreamResult {
 					"wrote, which on a stream means a truncated tool call", i)}
 		}
 	}
-	return StreamResult{inner: &pbv2.HookResult{
-		Action: &pbv2.HookResult_EmitEvents{
-			EmitEvents: &pbv2.StreamEvents{Events: events},
+	return StreamResult{inner: &pbv1.HookResult{
+		Action: &pbv1.HookResult_EmitEvents{
+			EmitEvents: &pbv1.StreamEvents{Events: events},
 		},
 	}}
 }
 
-func (r StreamResult) hookResult() (*pbv2.HookResult, error) { return orPass(r.inner, r.err) }
+func (r StreamResult) hookResult() (*pbv1.HookResult, error) { return orPass(r.inner, r.err) }
 
 // HTTPResult is what a run_on_http_request handler returns.
 type HTTPResult struct {
-	inner *pbv2.HookResult
+	inner *pbv1.HookResult
 	err   error
 }
 
@@ -153,22 +153,22 @@ type HTTPResult struct {
 func PassHTTP() HTTPResult { return HTTPResult{} }
 
 // ServeHTTP answers the request with resp.
-func ServeHTTP(resp *pbv2.HttpResponse) HTTPResult {
+func ServeHTTP(resp *pbv1.HttpResponse) HTTPResult {
 	if resp == nil {
 		return HTTPResult{err: errors.New(
 			"ServeHTTP(nil): there is no response to serve. Return PassHTTP() to " +
 				"decline the request")}
 	}
-	return HTTPResult{inner: &pbv2.HookResult{
-		Action: &pbv2.HookResult_ServeHttp{ServeHttp: resp},
+	return HTTPResult{inner: &pbv1.HookResult{
+		Action: &pbv1.HookResult_ServeHttp{ServeHttp: resp},
 	}}
 }
 
-func (r HTTPResult) hookResult() (*pbv2.HookResult, error) { return orPass(r.inner, r.err) }
+func (r HTTPResult) hookResult() (*pbv1.HookResult, error) { return orPass(r.inner, r.err) }
 
 // TickResult is what a run_on_tick handler returns.
 type TickResult struct {
-	inner *pbv2.HookResult
+	inner *pbv1.HookResult
 	err   error
 }
 
@@ -179,14 +179,14 @@ func TickIdle() TickResult { return TickResult{} }
 // field; they exist so an operator can see that a background plugin is alive
 // and doing something.
 func TickDid(actions int32, note string) TickResult {
-	return TickResult{inner: &pbv2.HookResult{
-		Action: &pbv2.HookResult_TickOutcome{
-			TickOutcome: &pbv2.TickOutcome{Actions: actions, Note: note},
+	return TickResult{inner: &pbv1.HookResult{
+		Action: &pbv1.HookResult_TickOutcome{
+			TickOutcome: &pbv1.TickOutcome{Actions: actions, Note: note},
 		},
 	}}
 }
 
-func (r TickResult) hookResult() (*pbv2.HookResult, error) { return orPass(r.inner, r.err) }
+func (r TickResult) hookResult() (*pbv1.HookResult, error) { return orPass(r.inner, r.err) }
 
 // orPass surfaces any error the constructor recorded, and otherwise returns the
 // frame — which is nil for a pass.
@@ -198,7 +198,7 @@ func (r TickResult) hookResult() (*pbv2.HookResult, error) { return orPass(r.inn
 //
 // A recorded error is different. The author asked for something impossible, so
 // the trampoline must trap rather than substitute a guess.
-func orPass(r *pbv2.HookResult, err error) (*pbv2.HookResult, error) {
+func orPass(r *pbv1.HookResult, err error) (*pbv1.HookResult, error) {
 	if err != nil {
 		return nil, err
 	}

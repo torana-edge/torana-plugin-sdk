@@ -5,7 +5,7 @@ package plugin_sdk
 import (
 	"testing"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 // The four argument bodies must reject an empty key.
@@ -20,10 +20,10 @@ func TestKeyIsRequired(t *testing.T) {
 		name string
 		args interface{ Validate() error }
 	}{
-		{"MetaGetArgs", &pbv2.MetaGetArgs{}},
-		{"MetaSetArgs", &pbv2.MetaSetArgs{Value: "v"}},
-		{"CacheGetArgs", &pbv2.CacheGetArgs{}},
-		{"CacheSetArgs", &pbv2.CacheSetArgs{Value: "v"}},
+		{"MetaGetArgs", &pbv1.MetaGetArgs{}},
+		{"MetaSetArgs", &pbv1.MetaSetArgs{Value: "v"}},
+		{"CacheGetArgs", &pbv1.CacheGetArgs{}},
+		{"CacheSetArgs", &pbv1.CacheSetArgs{Value: "v"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := tc.args.Validate(); err == nil {
@@ -41,8 +41,8 @@ func TestEmptyValueIsAllowed(t *testing.T) {
 		name string
 		args interface{ Validate() error }
 	}{
-		{"MetaSetArgs", &pbv2.MetaSetArgs{Key: "k"}},
-		{"CacheSetArgs", &pbv2.CacheSetArgs{Key: "k"}},
+		{"MetaSetArgs", &pbv1.MetaSetArgs{Key: "k"}},
+		{"CacheSetArgs", &pbv1.CacheSetArgs{Key: "k"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := tc.args.Validate(); err != nil {
@@ -59,10 +59,10 @@ func TestNilArgsAreRejected(t *testing.T) {
 		name string
 		args interface{ Validate() error }
 	}{
-		{"MetaGetArgs", (*pbv2.MetaGetArgs)(nil)},
-		{"MetaSetArgs", (*pbv2.MetaSetArgs)(nil)},
-		{"CacheGetArgs", (*pbv2.CacheGetArgs)(nil)},
-		{"CacheSetArgs", (*pbv2.CacheSetArgs)(nil)},
+		{"MetaGetArgs", (*pbv1.MetaGetArgs)(nil)},
+		{"MetaSetArgs", (*pbv1.MetaSetArgs)(nil)},
+		{"CacheGetArgs", (*pbv1.CacheGetArgs)(nil)},
+		{"CacheSetArgs", (*pbv1.CacheSetArgs)(nil)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := tc.args.Validate(); err == nil {

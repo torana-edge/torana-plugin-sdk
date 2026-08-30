@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 // Cache pricing
@@ -130,8 +130,8 @@ func GetCachePricing(provider, model string) (CachePricing, error) {
 		// Expected advisory refusals degrade; permission/caller/host defects
 		// surface.
 		switch herr.Code {
-		case pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
-			pbv2.ErrorCode_ERROR_CODE_UNAVAILABLE:
+		case pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
+			pbv1.ErrorCode_ERROR_CODE_UNAVAILABLE:
 			return CachePricing{Status: "unavailable", Reason: hostErrorReason(herr)}, nil
 		default:
 			return CachePricing{}, classifiedRefusal(herr)

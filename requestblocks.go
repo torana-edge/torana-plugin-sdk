@@ -38,60 +38,60 @@ import (
 	"fmt"
 	"strconv"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
-	"github.com/torana-edge/torana-plugin-sdk/pb/v2/jsontext"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
+	"github.com/torana-edge/torana-plugin-sdk/pb/v1/jsontext"
 )
 
 // fingerprintFieldCoverage names every hashed field (full protobuf name).
 // RequestFingerprintCoverageExact walks the descriptors and requires the
 // two sets to be identical.
 var fingerprintFieldCoverage = []string{
-	"torana.v2.Message.role",
-	"torana.v2.Message.blocks",
+	"torana.v1.Message.role",
+	"torana.v1.Message.blocks",
 	// RequestBlock oneof arms (kind tag + presence).
-	"torana.v2.RequestBlock.text",
-	"torana.v2.RequestBlock.thinking",
-	"torana.v2.RequestBlock.redacted_thinking",
-	"torana.v2.RequestBlock.tool_use",
-	"torana.v2.RequestBlock.tool_result",
-	"torana.v2.RequestBlock.cache_breakpoint",
-	"torana.v2.RequestBlock.unknown",
-	"torana.v2.RequestBlock.trailing_signature",
+	"torana.v1.RequestBlock.text",
+	"torana.v1.RequestBlock.thinking",
+	"torana.v1.RequestBlock.redacted_thinking",
+	"torana.v1.RequestBlock.tool_use",
+	"torana.v1.RequestBlock.tool_result",
+	"torana.v1.RequestBlock.cache_breakpoint",
+	"torana.v1.RequestBlock.unknown",
+	"torana.v1.RequestBlock.trailing_signature",
 	// Leaf fields.
-	"torana.v2.RequestTextBlock.text",
-	"torana.v2.RequestTextBlock.signature",
-	"torana.v2.RequestTextBlock.part_metadata_json",
-	"torana.v2.RequestThinkingBlock.text",
-	"torana.v2.RequestThinkingBlock.signature",
-	"torana.v2.RequestThinkingBlock.part_metadata_json",
-	"torana.v2.RequestRedactedThinkingBlock.data",
-	"torana.v2.RequestToolUseBlock.id",
-	"torana.v2.RequestToolUseBlock.name",
-	"torana.v2.RequestToolUseBlock.arguments_json",
-	"torana.v2.RequestToolUseBlock.signature",
-	"torana.v2.RequestToolUseBlock.part_metadata_json",
-	"torana.v2.RequestToolResultBlock.tool_call_id",
-	"torana.v2.RequestToolResultBlock.tool_name",
-	"torana.v2.RequestToolResultBlock.content",
-	"torana.v2.RequestToolResultBlock.part_metadata_json",
-	"torana.v2.RequestToolResultBlock.will_continue",
-	"torana.v2.RequestToolResultBlock.scheduling",
-	"torana.v2.RequestToolResultBlock.signature",
-	"torana.v2.RequestCacheBreakpoint.marker_json",
-	"torana.v2.RequestUnknownBlock.kind",
-	"torana.v2.RequestUnknownBlock.payload_json",
-	"torana.v2.RequestUnknownBlock.part_metadata_json",
-	"torana.v2.RequestUnknownBlock.signature",
-	"torana.v2.RequestTrailingSignatureBlock.signature",
-	"torana.v2.RequestTrailingSignatureBlock.part_metadata_json",
+	"torana.v1.RequestTextBlock.text",
+	"torana.v1.RequestTextBlock.signature",
+	"torana.v1.RequestTextBlock.part_metadata_json",
+	"torana.v1.RequestThinkingBlock.text",
+	"torana.v1.RequestThinkingBlock.signature",
+	"torana.v1.RequestThinkingBlock.part_metadata_json",
+	"torana.v1.RequestRedactedThinkingBlock.data",
+	"torana.v1.RequestToolUseBlock.id",
+	"torana.v1.RequestToolUseBlock.name",
+	"torana.v1.RequestToolUseBlock.arguments_json",
+	"torana.v1.RequestToolUseBlock.signature",
+	"torana.v1.RequestToolUseBlock.part_metadata_json",
+	"torana.v1.RequestToolResultBlock.tool_call_id",
+	"torana.v1.RequestToolResultBlock.tool_name",
+	"torana.v1.RequestToolResultBlock.content",
+	"torana.v1.RequestToolResultBlock.part_metadata_json",
+	"torana.v1.RequestToolResultBlock.will_continue",
+	"torana.v1.RequestToolResultBlock.scheduling",
+	"torana.v1.RequestToolResultBlock.signature",
+	"torana.v1.RequestCacheBreakpoint.marker_json",
+	"torana.v1.RequestUnknownBlock.kind",
+	"torana.v1.RequestUnknownBlock.payload_json",
+	"torana.v1.RequestUnknownBlock.part_metadata_json",
+	"torana.v1.RequestUnknownBlock.signature",
+	"torana.v1.RequestTrailingSignatureBlock.signature",
+	"torana.v1.RequestTrailingSignatureBlock.part_metadata_json",
 	// Nested tool-result content.
-	"torana.v2.ToolResultContentBlock.text",
-	"torana.v2.ToolResultContentBlock.unknown",
-	"torana.v2.ToolResultContentBlock.cache_breakpoint",
-	"torana.v2.ToolResultTextBlock.text",
-	"torana.v2.ToolResultUnknownBlock.kind",
-	"torana.v2.ToolResultUnknownBlock.payload_json",
-	"torana.v2.ToolResultCacheBreakpoint.marker_json",
+	"torana.v1.ToolResultContentBlock.text",
+	"torana.v1.ToolResultContentBlock.unknown",
+	"torana.v1.ToolResultContentBlock.cache_breakpoint",
+	"torana.v1.ToolResultTextBlock.text",
+	"torana.v1.ToolResultUnknownBlock.kind",
+	"torana.v1.ToolResultUnknownBlock.payload_json",
+	"torana.v1.ToolResultCacheBreakpoint.marker_json",
 }
 
 // toolResultContentDomainFrame is the explicit domain/version frame hashed
@@ -126,7 +126,7 @@ const toolResultContentDomainFrame = "torana/tool-result-content/v1"
 //
 // RequestBlocksFingerprint and the host write-grant verifier call THIS
 // implementation — no equivalent framing is ever re-implemented.
-func ToolResultContentFingerprint(content []*pbv2.ToolResultContentBlock) ([32]byte, error) {
+func ToolResultContentFingerprint(content []*pbv1.ToolResultContentBlock) ([32]byte, error) {
 	h := sha256.New()
 	u64 := func(v uint64) {
 		var b [8]byte
@@ -149,14 +149,14 @@ func ToolResultContentFingerprint(content []*pbv2.ToolResultContentBlock) ([32]b
 			return [32]byte{}, fmt.Errorf("tool-result content[%d]: nil element", j)
 		}
 		switch nk := c.Kind.(type) {
-		case *pbv2.ToolResultContentBlock_Text:
+		case *pbv1.ToolResultContentBlock_Text:
 			byte1(1) // arm tag: text
 			if nk.Text == nil {
 				return [32]byte{}, fmt.Errorf("tool-result content[%d]: typed-nil text arm", j)
 			}
 			byte1(1) // presence
 			str(nk.Text.Text)
-		case *pbv2.ToolResultContentBlock_Unknown:
+		case *pbv1.ToolResultContentBlock_Unknown:
 			byte1(2) // arm tag: unknown
 			if nk.Unknown == nil {
 				return [32]byte{}, fmt.Errorf("tool-result content[%d]: typed-nil unknown arm", j)
@@ -167,7 +167,7 @@ func ToolResultContentFingerprint(content []*pbv2.ToolResultContentBlock) ([32]b
 				return [32]byte{}, fmt.Errorf("tool-result content[%d]: unknown payload: %w", j, err)
 			}
 			bytes(nk.Unknown.PayloadJson)
-		case *pbv2.ToolResultContentBlock_CacheBreakpoint:
+		case *pbv1.ToolResultContentBlock_CacheBreakpoint:
 			byte1(3) // arm tag: cache
 			if nk.CacheBreakpoint == nil {
 				return [32]byte{}, fmt.Errorf("tool-result content[%d]: typed-nil cache arm", j)
@@ -208,7 +208,7 @@ func validateStrictObject(raw []byte) error {
 // inputs; any content difference (kind, presence, order, identity, raw
 // bytes, signature tokens, provider part metadata, willContinue/scheduling
 // presence+value, nested content, cache position) changes the digest.
-func RequestBlocksFingerprint(msg *pbv2.Message) (string, error) {
+func RequestBlocksFingerprint(msg *pbv1.Message) (string, error) {
 	if msg == nil {
 		return "", fmt.Errorf("request blocks fingerprint: nil message")
 	}
@@ -229,7 +229,7 @@ func RequestBlocksFingerprint(msg *pbv2.Message) (string, error) {
 			return "", fmt.Errorf("request blocks fingerprint: blocks[%d] is nil", i)
 		}
 		switch k := b.Kind.(type) {
-		case *pbv2.RequestBlock_Text:
+		case *pbv1.RequestBlock_Text:
 			frame("kind", "text")
 			if k.Text == nil {
 				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] typed-nil text arm", i)
@@ -237,7 +237,7 @@ func RequestBlocksFingerprint(msg *pbv2.Message) (string, error) {
 			frame("text", k.Text.Text)
 			frame("sig", k.Text.Signature)
 			frameBytes("pmeta", k.Text.PartMetadataJson)
-		case *pbv2.RequestBlock_Thinking:
+		case *pbv1.RequestBlock_Thinking:
 			frame("kind", "thinking")
 			if k.Thinking == nil {
 				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] typed-nil thinking arm", i)
@@ -245,13 +245,13 @@ func RequestBlocksFingerprint(msg *pbv2.Message) (string, error) {
 			frame("text", k.Thinking.Text)
 			frame("sig", k.Thinking.Signature)
 			frameBytes("pmeta", k.Thinking.PartMetadataJson)
-		case *pbv2.RequestBlock_RedactedThinking:
+		case *pbv1.RequestBlock_RedactedThinking:
 			frame("kind", "redacted")
 			if k.RedactedThinking == nil {
 				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] typed-nil redacted arm", i)
 			}
 			frame("data", k.RedactedThinking.Data)
-		case *pbv2.RequestBlock_ToolUse:
+		case *pbv1.RequestBlock_ToolUse:
 			frame("kind", "tool_use")
 			if k.ToolUse == nil {
 				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] typed-nil tool_use arm", i)
@@ -261,7 +261,7 @@ func RequestBlocksFingerprint(msg *pbv2.Message) (string, error) {
 			frameBytes("args", k.ToolUse.ArgumentsJson)
 			frame("sig", k.ToolUse.Signature)
 			frameBytes("pmeta", k.ToolUse.PartMetadataJson)
-		case *pbv2.RequestBlock_ToolResult:
+		case *pbv1.RequestBlock_ToolResult:
 			frame("kind", "tool_result")
 			if k.ToolResult == nil {
 				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] typed-nil tool_result arm", i)
@@ -289,13 +289,13 @@ func RequestBlocksFingerprint(msg *pbv2.Message) (string, error) {
 				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] nested content: %w", i, err)
 			}
 			frameBytes("nested", nestedSum[:])
-		case *pbv2.RequestBlock_CacheBreakpoint:
+		case *pbv1.RequestBlock_CacheBreakpoint:
 			frame("kind", "cache")
 			if k.CacheBreakpoint == nil {
 				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] typed-nil cache arm", i)
 			}
 			frameBytes("marker", k.CacheBreakpoint.MarkerJson)
-		case *pbv2.RequestBlock_Unknown:
+		case *pbv1.RequestBlock_Unknown:
 			frame("kind", "unknown")
 			if k.Unknown == nil {
 				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] typed-nil unknown arm", i)
@@ -304,7 +304,7 @@ func RequestBlocksFingerprint(msg *pbv2.Message) (string, error) {
 			frameBytes("payload", k.Unknown.PayloadJson)
 			frameBytes("pmeta", k.Unknown.PartMetadataJson)
 			frame("usig", k.Unknown.Signature)
-		case *pbv2.RequestBlock_TrailingSignature:
+		case *pbv1.RequestBlock_TrailingSignature:
 			frame("kind", "trailing")
 			if k.TrailingSignature == nil {
 				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] typed-nil trailing arm", i)

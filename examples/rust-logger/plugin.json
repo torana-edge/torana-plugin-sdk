@@ -3,7 +3,7 @@
   "id": "example/rust-logger",
   "name": "rust-logger",
   "version": "0.1.0",
-  "abi_version": "v2",
+  "abi_version": "v1",
   "failure_mode": "pass",
   "repository": "https://github.com/torana-edge/torana-plugin-sdk",
   "description": "Minimal Rust Torana plugin template",

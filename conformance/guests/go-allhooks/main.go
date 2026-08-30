@@ -5,25 +5,25 @@ import (
 	"context"
 
 	sdk "github.com/torana-edge/torana-plugin-sdk"
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 func main() {}
 
 func init() {
-	sdk.OnBeforeRequest(func(context.Context, *pbv2.ChatRequest) (sdk.RequestResult, error) {
+	sdk.OnBeforeRequest(func(context.Context, *pbv1.ChatRequest) (sdk.RequestResult, error) {
 		return sdk.PassRequest(), nil
 	})
-	sdk.OnAfterResponse(func(context.Context, *pbv2.ChatResponse, bool) (sdk.ResponseResult, error) {
+	sdk.OnAfterResponse(func(context.Context, *pbv1.ChatResponse, bool) (sdk.ResponseResult, error) {
 		return sdk.PassResponse(), nil
 	})
-	sdk.OnStreamChunk(func(context.Context, *pbv2.StreamEvent) (sdk.StreamResult, error) {
+	sdk.OnStreamChunk(func(context.Context, *pbv1.StreamEvent) (sdk.StreamResult, error) {
 		return sdk.PassEvent(), nil
 	})
-	sdk.OnHTTPRequest(func(context.Context, *pbv2.HttpRequest) (sdk.HTTPResult, error) {
-		return sdk.ServeHTTP(&pbv2.HttpResponse{Status: 204}), nil
+	sdk.OnHTTPRequest(func(context.Context, *pbv1.HttpRequest) (sdk.HTTPResult, error) {
+		return sdk.ServeHTTP(&pbv1.HttpResponse{Status: 204}), nil
 	})
-	sdk.OnTick(func(context.Context, *pbv2.TickRequest) (sdk.TickResult, error) {
+	sdk.OnTick(func(context.Context, *pbv1.TickRequest) (sdk.TickResult, error) {
 		return sdk.TickIdle(), nil
 	})
 }

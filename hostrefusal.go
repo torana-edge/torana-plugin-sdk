@@ -3,7 +3,7 @@ package plugin_sdk
 import (
 	"fmt"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 // HostCallRefusalError is a CLASSIFIED host-call refusal, carried through the
@@ -36,7 +36,7 @@ import (
 //	    switch refusal.Code { ... }
 //	}
 type HostCallRefusalError struct {
-	Code    pbv2.ErrorCode // stable classification; never UNSPECIFIED
+	Code    pbv1.ErrorCode // stable classification; never UNSPECIFIED
 	Reason  string         // stable snake_case token (see hostErrorReason)
 	Message string         // human message for logs; never branch on it
 }
@@ -46,7 +46,7 @@ func (e *HostCallRefusalError) Error() string {
 }
 
 // classifiedRefusal builds a HostCallRefusalError from a framed host error.
-func classifiedRefusal(herr *pbv2.HostError) *HostCallRefusalError {
+func classifiedRefusal(herr *pbv1.HostError) *HostCallRefusalError {
 	if herr == nil {
 		return nil
 	}

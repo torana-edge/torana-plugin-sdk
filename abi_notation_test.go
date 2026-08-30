@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// The low-level guide writes out the ABI-v2 hook signature for authors who are
+// The low-level guide writes out the ABI-v1 hook signature for authors who are
 // implementing another SDK. Keep it aligned with the compiled Go and Rust
 // exports, which use unsigned WASM32 pointers and a packed unsigned result.
 //
@@ -19,7 +19,7 @@ import (
 //
 // Checked rather than trusted because signed/unsigned drift has previously
 // corrupted the high half of packed return values above 2 GiB.
-func TestV2HookSignatureNotationIsUnsigned(t *testing.T) {
+func TestV1HookSignatureNotationIsUnsigned(t *testing.T) {
 	const path = "docs/WASM_PLUGIN_GUIDE.md"
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -27,7 +27,7 @@ func TestV2HookSignatureNotationIsUnsigned(t *testing.T) {
 	}
 	text := strings.ReplaceAll(string(raw), "\n", " ")
 	if !strings.Contains(text, "run_hook(ptr: u32, size: u32) -> u64") {
-		t.Fatalf("%s does not contain the canonical unsigned ABI-v2 hook signature", path)
+		t.Fatalf("%s does not contain the canonical unsigned ABI-v1 hook signature", path)
 	}
 	for _, signed := range []string{
 		"run_hook(ptr: i32",
@@ -35,7 +35,7 @@ func TestV2HookSignatureNotationIsUnsigned(t *testing.T) {
 		"size: u32) -> i64",
 	} {
 		if strings.Contains(text, signed) {
-			t.Fatalf("%s contains signed ABI-v2 hook notation %q", path, signed)
+			t.Fatalf("%s contains signed ABI-v1 hook notation %q", path, signed)
 		}
 	}
 }

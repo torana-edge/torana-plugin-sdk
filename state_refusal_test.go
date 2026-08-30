@@ -9,20 +9,20 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 // frameError builds a framed classified refusal, exactly as the host sends it.
-func frameError(code pbv2.ErrorCode, msg string) []byte {
-	raw, _ := proto.Marshal(&pbv2.HostCallResult{
-		Result: &pbv2.HostCallResult_Error{Error: &pbv2.HostError{Code: code, Message: msg}},
+func frameError(code pbv1.ErrorCode, msg string) []byte {
+	raw, _ := proto.Marshal(&pbv1.HostCallResult{
+		Result: &pbv1.HostCallResult_Error{Error: &pbv1.HostError{Code: code, Message: msg}},
 	})
 	return raw
 }
 
 func frameValue(b []byte) []byte {
-	raw, _ := proto.Marshal(&pbv2.HostCallResult{
-		Result: &pbv2.HostCallResult_Value{Value: b},
+	raw, _ := proto.Marshal(&pbv1.HostCallResult{
+		Result: &pbv1.HostCallResult_Value{Value: b},
 	})
 	return raw
 }
@@ -31,14 +31,14 @@ func frameValue(b []byte) []byte {
 // UNSPECIFIED and unknown codes are rejected by the SDK's own HostCallResult
 // validator as protocol defects BEFORE any helper sees them (see
 // TestUnclassifiableFramesAreProtocolErrors), so they can never be refusals.
-func allCodes() []pbv2.ErrorCode {
-	codes := []pbv2.ErrorCode{
-		pbv2.ErrorCode_ERROR_CODE_NOT_FOUND,
-		pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
-		pbv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED,
-		pbv2.ErrorCode_ERROR_CODE_UNAVAILABLE,
-		pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
-		pbv2.ErrorCode_ERROR_CODE_INTERNAL,
+func allCodes() []pbv1.ErrorCode {
+	codes := []pbv1.ErrorCode{
+		pbv1.ErrorCode_ERROR_CODE_NOT_FOUND,
+		pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
+		pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED,
+		pbv1.ErrorCode_ERROR_CODE_UNAVAILABLE,
+		pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+		pbv1.ErrorCode_ERROR_CODE_INTERNAL,
 	}
 	return codes
 }
@@ -48,7 +48,7 @@ func allCodes() []pbv2.ErrorCode {
 // additionally requires (for the STATE helpers only) that NOT_CONFIGURED
 // satisfies errors.Is(ErrStateUnavailable) — and that NO other code matches
 // the sentinel. Now has no sentinel contract and passes wantSentinel=false.
-func assertRefusalPreserved(t *testing.T, err error, code pbv2.ErrorCode, wantSentinel bool) {
+func assertRefusalPreserved(t *testing.T, err error, code pbv1.ErrorCode, wantSentinel bool) {
 	t.Helper()
 	if err == nil {
 		t.Fatalf("code %v: expected an error", code)
@@ -66,7 +66,7 @@ func assertRefusalPreserved(t *testing.T, err error, code pbv2.ErrorCode, wantSe
 	if !wantSentinel {
 		return
 	}
-	if code == pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED {
+	if code == pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED {
 		if !errors.Is(err, ErrStateUnavailable) {
 			t.Fatalf("NOT_CONFIGURED must keep errors.Is(ErrStateUnavailable): %v", err)
 		}
@@ -82,7 +82,7 @@ func assertRefusalPreserved(t *testing.T, err error, code pbv2.ErrorCode, wantSe
 // advisory-vs-contract without string matching.
 func TestStateGetJSONPreservesClassifiedRefusals(t *testing.T) {
 	for _, code := range allCodes() {
-		if code == pbv2.ErrorCode_ERROR_CODE_NOT_FOUND {
+		if code == pbv1.ErrorCode_ERROR_CODE_NOT_FOUND {
 			continue // documented absence: found=false, nil error (tested separately)
 		}
 		t.Run(code.String(), func(t *testing.T) {
@@ -212,7 +212,7 @@ func TestStateGetJSONPresenceSemanticsUnchanged(t *testing.T) {
 			if cmd != "env.state_get" {
 				t.Fatalf("unexpected command %q", cmd)
 			}
-			return frameError(pbv2.ErrorCode_ERROR_CODE_NOT_FOUND, "missing"), nil
+			return frameError(pbv1.ErrorCode_ERROR_CODE_NOT_FOUND, "missing"), nil
 		},
 	}, func() {
 		var v struct{ X int }
@@ -264,9 +264,9 @@ func TestStateSetJSONLocalErrorsAreNotRefusals(t *testing.T) {
 // that frames a code this build does not recognise must not silently become
 // an advisory or contract decision.
 func TestUnclassifiableFramesAreProtocolErrors(t *testing.T) {
-	for _, code := range []pbv2.ErrorCode{
-		pbv2.ErrorCode_ERROR_CODE_UNSPECIFIED,
-		pbv2.ErrorCode(99),
+	for _, code := range []pbv1.ErrorCode{
+		pbv1.ErrorCode_ERROR_CODE_UNSPECIFIED,
+		pbv1.ErrorCode(99),
 	} {
 		t.Run(code.String(), func(t *testing.T) {
 			for _, cmd := range []string{"env.state_get", "env.state_set", "env.now"} {

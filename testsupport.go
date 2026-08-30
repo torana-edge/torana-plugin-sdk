@@ -7,7 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 // TestHost is the seam the sdktest package drives. Excluded from wasip1 builds.
@@ -37,23 +37,23 @@ func WithTestHost(h *TestHost, fn func()) {
 	fn()
 }
 
-func RegisteredBeforeRequest() func(context.Context, *pbv2.ChatRequest) (RequestResult, error) {
+func RegisteredBeforeRequest() func(context.Context, *pbv1.ChatRequest) (RequestResult, error) {
 	return beforeRequestHandler
 }
 
-func RegisteredAfterResponse() func(context.Context, *pbv2.ChatResponse, bool) (ResponseResult, error) {
+func RegisteredAfterResponse() func(context.Context, *pbv1.ChatResponse, bool) (ResponseResult, error) {
 	return afterResponseHandler
 }
 
-func RegisteredStreamChunk() func(context.Context, *pbv2.StreamEvent) (StreamResult, error) {
+func RegisteredStreamChunk() func(context.Context, *pbv1.StreamEvent) (StreamResult, error) {
 	return streamChunkHandler
 }
 
-func RegisteredHTTPRequest() func(context.Context, *pbv2.HttpRequest) (HTTPResult, error) {
+func RegisteredHTTPRequest() func(context.Context, *pbv1.HttpRequest) (HTTPResult, error) {
 	return httpRequestHandler
 }
 
-func RegisteredTick() func(context.Context, *pbv2.TickRequest) (TickResult, error) {
+func RegisteredTick() func(context.Context, *pbv1.TickRequest) (TickResult, error) {
 	return tickHandler
 }
 
@@ -78,4 +78,4 @@ func RegisteredHooks() []string {
 }
 
 // RegisteredHookBitmap is the supported_hooks value derived from registrations.
-func RegisteredHookBitmap() pbv2.HookBitmap { return registeredHookBitmap() }
+func RegisteredHookBitmap() pbv1.HookBitmap { return registeredHookBitmap() }

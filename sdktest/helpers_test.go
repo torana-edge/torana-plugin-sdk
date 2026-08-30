@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	sdk "github.com/torana-edge/torana-plugin-sdk"
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 	"github.com/torana-edge/torana-plugin-sdk/sdktest"
 )
 
@@ -39,11 +39,11 @@ func TestGetCachePricingDecodesAFramedValue(t *testing.T) {
 // need different fixes and read identically otherwise.
 func TestGetCachePricingDegradesWithTheReason(t *testing.T) {
 	for _, tc := range []struct {
-		code       pbv2.ErrorCode
+		code       pbv1.ErrorCode
 		wantReason string
 	}{
-		{pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED, "not_configured"},
-		{pbv2.ErrorCode_ERROR_CODE_UNAVAILABLE, "unavailable"},
+		{pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED, "not_configured"},
+		{pbv1.ErrorCode_ERROR_CODE_UNAVAILABLE, "unavailable"},
 	} {
 		t.Run(tc.wantReason, func(t *testing.T) {
 			h := sdktest.New(t)
@@ -100,13 +100,13 @@ func TestGetCachePricingHandlesEmptyAndMalformedValues(t *testing.T) {
 // defect) without matching prose. Every known code is pinned through
 // errors.As.
 func TestSendRequestRefusalsCarryTheClassifiedCode(t *testing.T) {
-	for _, code := range []pbv2.ErrorCode{
-		pbv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED,
-		pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
-		pbv2.ErrorCode_ERROR_CODE_UNAVAILABLE,
-		pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
-		pbv2.ErrorCode_ERROR_CODE_NOT_FOUND,
-		pbv2.ErrorCode_ERROR_CODE_INTERNAL,
+	for _, code := range []pbv1.ErrorCode{
+		pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED,
+		pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
+		pbv1.ErrorCode_ERROR_CODE_UNAVAILABLE,
+		pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+		pbv1.ErrorCode_ERROR_CODE_NOT_FOUND,
+		pbv1.ErrorCode_ERROR_CODE_INTERNAL,
 	} {
 		t.Run(code.String(), func(t *testing.T) {
 			h := sdktest.New(t)
@@ -114,7 +114,7 @@ func TestSendRequestRefusalsCarryTheClassifiedCode(t *testing.T) {
 				return sdktest.HostResultError(code, "refused"), nil
 			})
 			h.Run(func() {
-				_, err := sdk.SendRequest(&pbv2.ChatRequest{Model: "m"}, sdk.SendRequestOptions{Provider: "anthropic", Path: "/v1/messages"})
+				_, err := sdk.SendRequest(&pbv1.ChatRequest{Model: "m"}, sdk.SendRequestOptions{Provider: "anthropic", Path: "/v1/messages"})
 				if err == nil {
 					t.Fatal("a refusal succeeded")
 				}
@@ -143,7 +143,7 @@ func TestSendRequestDecodesAFramedValue(t *testing.T) {
 		return sdktest.HostResultValue(body), nil
 	})
 	h.Run(func() {
-		got, err := sdk.SendRequest(&pbv2.ChatRequest{Model: "m"}, sdk.SendRequestOptions{Provider: "anthropic", Path: "/v1/messages"})
+		got, err := sdk.SendRequest(&pbv1.ChatRequest{Model: "m"}, sdk.SendRequestOptions{Provider: "anthropic", Path: "/v1/messages"})
 		if err != nil {
 			t.Fatalf("err=%v", err)
 		}
@@ -159,11 +159,11 @@ func TestSendRequestDecodesAFramedValue(t *testing.T) {
 // are pinned by TestGetCachePricingClassifiesRefusals.
 func TestHostErrorReasonCoversEveryDegradeCode(t *testing.T) {
 	for _, tc := range []struct {
-		code pbv2.ErrorCode
+		code pbv1.ErrorCode
 		want string
 	}{
-		{pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED, "not_configured"},
-		{pbv2.ErrorCode_ERROR_CODE_UNAVAILABLE, "unavailable"},
+		{pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED, "not_configured"},
+		{pbv1.ErrorCode_ERROR_CODE_UNAVAILABLE, "unavailable"},
 	} {
 		t.Run(tc.code.String(), func(t *testing.T) {
 			h2 := sdktest.New(t)
@@ -185,9 +185,9 @@ func TestHostErrorReasonCoversEveryDegradeCode(t *testing.T) {
 // a protocol error, and the author would debug their plugin instead of their
 // fixture.
 func TestHostResultErrorRejectsAnUnclassifiedCode(t *testing.T) {
-	for _, code := range []pbv2.ErrorCode{
-		pbv2.ErrorCode_ERROR_CODE_UNSPECIFIED,
-		pbv2.ErrorCode(9999),
+	for _, code := range []pbv1.ErrorCode{
+		pbv1.ErrorCode_ERROR_CODE_UNSPECIFIED,
+		pbv1.ErrorCode(9999),
 	} {
 		t.Run(code.String(), func(t *testing.T) {
 			defer func() {
@@ -211,7 +211,7 @@ func TestSendRequestEmptyValueIsAProtocolError(t *testing.T) {
 		return sdktest.HostResultValue(nil), nil
 	})
 	h.Run(func() {
-		_, err := sdk.SendRequest(&pbv2.ChatRequest{Model: "m"},
+		_, err := sdk.SendRequest(&pbv1.ChatRequest{Model: "m"},
 			sdk.SendRequestOptions{Provider: "anthropic", Path: "/v1/messages"})
 		if err == nil {
 			t.Fatal("an empty framed value succeeded")
@@ -232,7 +232,7 @@ func TestSendRequestMalformedBase64BodyIsADecodeError(t *testing.T) {
 		return sdktest.HostResultValue(body), nil
 	})
 	h.Run(func() {
-		got, err := sdk.SendRequest(&pbv2.ChatRequest{Model: "m"},
+		got, err := sdk.SendRequest(&pbv1.ChatRequest{Model: "m"},
 			sdk.SendRequestOptions{Provider: "anthropic", Path: "/v1/messages"})
 		if err == nil {
 			t.Fatalf("a malformed base64 body succeeded with %d bytes", len(got.Body))
@@ -257,7 +257,7 @@ func TestSendRequestMirrorsInputValidation(t *testing.T) {
 				return sdktest.HostResultValue([]byte(`{"http_status":200}`)), nil
 			})
 			h.Run(func() {
-				_, err := sdk.SendRequest(&pbv2.ChatRequest{Model: "m"},
+				_, err := sdk.SendRequest(&pbv1.ChatRequest{Model: "m"},
 					sdk.SendRequestOptions{Provider: "anthropic", Path: tc.Path})
 				if tc.Valid && err != nil {
 					t.Fatalf("a valid path was rejected: %v", err)
@@ -282,7 +282,7 @@ func TestSendRequestMirrorsInputValidation(t *testing.T) {
 			return sdktest.HostResultValue(nil), nil
 		})
 		h.Run(func() {
-			_, err := sdk.SendRequest(&pbv2.ChatRequest{Model: "m"},
+			_, err := sdk.SendRequest(&pbv1.ChatRequest{Model: "m"},
 				sdk.SendRequestOptions{Provider: "anthropic", Path: "/v1/messages", TimeoutMS: -1})
 			if err == nil {
 				t.Fatal("a negative timeout was accepted")
@@ -315,9 +315,9 @@ func TestGetCachePricingClassifiesRefusals(t *testing.T) {
 	// Only operator/transient states degrade: NOT_CONFIGURED (operator gap) and
 	// UNAVAILABLE (retry later). PERMISSION_DENIED is NOT advisory — approvals
 	// are all-or-nothing, so a permission refusal is an author or host defect.
-	degrade := []pbv2.ErrorCode{
-		pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
-		pbv2.ErrorCode_ERROR_CODE_UNAVAILABLE,
+	degrade := []pbv1.ErrorCode{
+		pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
+		pbv1.ErrorCode_ERROR_CODE_UNAVAILABLE,
 	}
 	for _, code := range degrade {
 		t.Run("degrades/"+code.String(), func(t *testing.T) {
@@ -336,11 +336,11 @@ func TestGetCachePricingClassifiesRefusals(t *testing.T) {
 			})
 		})
 	}
-	for _, code := range []pbv2.ErrorCode{
-		pbv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED,
-		pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
-		pbv2.ErrorCode_ERROR_CODE_NOT_FOUND,
-		pbv2.ErrorCode_ERROR_CODE_INTERNAL,
+	for _, code := range []pbv1.ErrorCode{
+		pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED,
+		pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+		pbv1.ErrorCode_ERROR_CODE_NOT_FOUND,
+		pbv1.ErrorCode_ERROR_CODE_INTERNAL,
 	} {
 		t.Run("errors/"+code.String(), func(t *testing.T) {
 			h := sdktest.New(t)
@@ -367,7 +367,7 @@ func TestSendRequestMalformedValueIsADecodeError(t *testing.T) {
 		return sdktest.HostResultValue([]byte("not json")), nil
 	})
 	h.Run(func() {
-		_, err := sdk.SendRequest(&pbv2.ChatRequest{Model: "m"},
+		_, err := sdk.SendRequest(&pbv1.ChatRequest{Model: "m"},
 			sdk.SendRequestOptions{Provider: "anthropic", Path: "/v1/messages"})
 		if err == nil {
 			t.Fatal("a malformed egress body was accepted")

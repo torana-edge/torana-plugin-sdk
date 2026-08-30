@@ -6,14 +6,14 @@ import (
 	"testing"
 
 	sdk "github.com/torana-edge/torana-plugin-sdk"
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 	"github.com/torana-edge/torana-plugin-sdk/sdktest"
 )
 
 // The two public host-call paths must stay disjoint.
 //
 // If HostCallExtension accepted env.* commands it would be an untyped back door
-// to verdicts, metadata, cache and state — every typed contract in v2 could be
+// to verdicts, metadata, cache and state — every typed contract in v1 could be
 // routed around by a plugin that found this function first. The guest-side
 // check is not the security boundary (the host gates on the grant), but it is
 // what stops an author reaching for it by accident.
@@ -68,7 +68,7 @@ func TestUnstubbedExtensionCommandIsFramedNotConfigured(t *testing.T) {
 		if herr == nil {
 			t.Fatal("an unstubbed extension command reported success")
 		}
-		if herr.Code != pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED {
+		if herr.Code != pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED {
 			t.Fatalf("got %v, want NOT_CONFIGURED", herr.Code)
 		}
 		if len(v) != 0 {
@@ -139,7 +139,7 @@ func TestCorePathRejectsExtensionCommands(t *testing.T) {
 		for _, cmd := range []string{
 			"torana_plugin_counter", "torana_offload_completion", "verify_virtual_key",
 		} {
-			_, _, err := sdk.HostCall(cmd, &pbv2.MetaGetArgs{Key: "k"})
+			_, _, err := sdk.HostCall(cmd, &pbv1.MetaGetArgs{Key: "k"})
 			if err == nil {
 				t.Errorf("HostCall(%q) was accepted; it is a host-feature command", cmd)
 				continue

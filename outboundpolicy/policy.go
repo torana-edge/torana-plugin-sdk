@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	plugin_sdk "github.com/torana-edge/torana-plugin-sdk"
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
@@ -15,7 +15,7 @@ import (
 // CHANGE on the response and stream paths.
 //
 // Request-path write grants (capabilities_write.go) already cover ChatRequest.
-// v2 also lets a plugin replace a ChatResponse and emit/suppress StreamEvents.
+// the ABI also lets a plugin replace a ChatResponse and emit/suppress StreamEvents.
 //
 // Content grants reuse ir.* across hooks where the authority is the same
 // (assistant text/thinking/tool arguments). Observed provider/host facts and
@@ -471,26 +471,26 @@ var requestSignatureContracts = []struct {
 	field   string
 	content []requestContractRef
 }{
-	{message: "torana.v2.RequestThinkingBlock", field: "signature", content: []requestContractRef{
+	{message: "torana.v1.RequestThinkingBlock", field: "signature", content: []requestContractRef{
 		{scope: SignatureScopeSameMessage, ref: "text"},
 		{scope: SignatureScopeSameMessage, ref: "part_metadata_json"},
 	}},
-	{message: "torana.v2.RequestTextBlock", field: "signature", content: []requestContractRef{
+	{message: "torana.v1.RequestTextBlock", field: "signature", content: []requestContractRef{
 		{scope: SignatureScopeSameMessage, ref: "text"},
 		{scope: SignatureScopeSameMessage, ref: "part_metadata_json"},
 	}},
-	{message: "torana.v2.RequestToolUseBlock", field: "signature", content: []requestContractRef{
+	{message: "torana.v1.RequestToolUseBlock", field: "signature", content: []requestContractRef{
 		{scope: SignatureScopeSameMessage, ref: "id"},
 		{scope: SignatureScopeSameMessage, ref: "name"},
 		{scope: SignatureScopeSameMessage, ref: "arguments_json"},
 		{scope: SignatureScopeSameMessage, ref: "part_metadata_json"},
 	}},
-	{message: "torana.v2.RequestUnknownBlock", field: "signature", content: []requestContractRef{
+	{message: "torana.v1.RequestUnknownBlock", field: "signature", content: []requestContractRef{
 		{scope: SignatureScopeSameMessage, ref: "kind"},
 		{scope: SignatureScopeSameMessage, ref: "payload_json"},
 		{scope: SignatureScopeSameMessage, ref: "part_metadata_json"},
 	}},
-	{message: "torana.v2.RequestToolResultBlock", field: "signature", content: []requestContractRef{
+	{message: "torana.v1.RequestToolResultBlock", field: "signature", content: []requestContractRef{
 		{scope: SignatureScopeSameMessage, ref: "tool_call_id"},
 		{scope: SignatureScopeSameMessage, ref: "tool_name"},
 		{scope: SignatureScopeSameMessage, ref: "part_metadata_json"},
@@ -498,10 +498,10 @@ var requestSignatureContracts = []struct {
 		{scope: SignatureScopeSameMessage, ref: "scheduling"},
 		{scope: SignatureScopeSameMessage, ref: "content"},
 	}},
-	{message: "torana.v2.RequestTrailingSignatureBlock", field: "signature", content: []requestContractRef{
+	{message: "torana.v1.RequestTrailingSignatureBlock", field: "signature", content: []requestContractRef{
 		{scope: SignatureScopeSameMessage, ref: "part_metadata_json"},
-		{scope: SignatureScopeTrailingStandalone, ref: "torana.v2.RequestTextBlock.text"},
-		{scope: SignatureScopeTrailingStandalone, ref: "torana.v2.RequestThinkingBlock.text"},
+		{scope: SignatureScopeTrailingStandalone, ref: "torana.v1.RequestTextBlock.text"},
+		{scope: SignatureScopeTrailingStandalone, ref: "torana.v1.RequestThinkingBlock.text"},
 	}},
 }
 
@@ -541,8 +541,8 @@ type SignatureContractRef struct {
 // optional refs and the single repeated-message target are explicit pins;
 // anything else fails startup.
 var requestCoveredFieldKinds = map[string]requestCoveredFieldKind{
-	"torana.v2.RequestToolResultBlock.will_continue": {kind: protoreflect.BoolKind, optional: true},
-	"torana.v2.RequestToolResultBlock.scheduling":    {kind: protoreflect.StringKind, optional: true},
+	"torana.v1.RequestToolResultBlock.will_continue": {kind: protoreflect.BoolKind, optional: true},
+	"torana.v1.RequestToolResultBlock.scheduling":    {kind: protoreflect.StringKind, optional: true},
 }
 
 // requestCoveredFieldKind is one pinned covered-field class.
@@ -552,7 +552,7 @@ type requestCoveredFieldKind struct {
 }
 
 // pinnedRepeatedContentTarget is the ONLY repeated-message covered ref.
-const pinnedRepeatedContentTarget = "torana.v2.RequestToolResultBlock.content"
+const pinnedRepeatedContentTarget = "torana.v1.RequestToolResultBlock.content"
 
 // validateRequestBindingShape enforces the complete request-domain contract:
 // the token must be the pinned message+field with its pinned scope, and the
@@ -630,7 +630,7 @@ func validateRequestCoveredFieldKinds(b SignatureBinding, contract *struct {
 }) error {
 	descs := outboundDescriptors()
 	for i, ref := range contract.content {
-		// Full-name refs are "torana.v2.Message.field" — split at the LAST
+		// Full-name refs are "torana.v1.Message.field" — split at the LAST
 		// dot so the package prefix survives; a bare ref is a SameMessage
 		// field on the token's own message.
 		msgName := b.Message
@@ -711,7 +711,7 @@ func (b SignatureBinding) validateShape() error {
 			// Message bindings are pinned holistically after the loop by
 			// validateRequestBindingShape.
 		case SignatureScopeToolCallBlockByIndex:
-			if b.Message != "torana.v2.ToolCallRef" {
+			if b.Message != "torana.v1.ToolCallRef" {
 				return fmt.Errorf("%s.%s: ToolCallBlockByIndex only valid on ToolCallRef.signature",
 					b.Message, b.SignatureField)
 			}
@@ -763,7 +763,7 @@ var signatureBindings = []SignatureBinding{
 		// An assistant-writing plugin may rewrite historical thinking; the
 		// token must clear or the mutation must reject.
 		Domain:         SignatureDomainRequest,
-		Message:        "torana.v2.RequestThinkingBlock",
+		Message:        "torana.v1.RequestThinkingBlock",
 		SignatureField: "signature",
 		Content: []SignatureContentRef{
 			{Scope: SignatureScopeSameMessage, Field: "text"},
@@ -776,7 +776,7 @@ var signatureBindings = []SignatureBinding{
 		// rewriting any of them must clear the token or the mutation must
 		// reject; an unchanged call keeps the token.
 		Domain:         SignatureDomainRequest,
-		Message:        "torana.v2.RequestToolUseBlock",
+		Message:        "torana.v1.RequestToolUseBlock",
 		SignatureField: "signature",
 		Content: []SignatureContentRef{
 			{Scope: SignatureScopeSameMessage, Field: "id"},
@@ -791,7 +791,7 @@ var signatureBindings = []SignatureBinding{
 		// part metadata — retaining the token while changing any of them
 		// is stale.
 		Domain:         SignatureDomainRequest,
-		Message:        "torana.v2.RequestUnknownBlock",
+		Message:        "torana.v1.RequestUnknownBlock",
 		SignatureField: "signature",
 		Content: []SignatureContentRef{
 			{Scope: SignatureScopeSameMessage, Field: "kind"},
@@ -805,7 +805,7 @@ var signatureBindings = []SignatureBinding{
 		// scheduling presence+value, and the SDK-owned ordered nested
 		// content digest.
 		Domain:         SignatureDomainRequest,
-		Message:        "torana.v2.RequestToolResultBlock",
+		Message:        "torana.v1.RequestToolResultBlock",
 		SignatureField: "signature",
 		Content: []SignatureContentRef{
 			{Scope: SignatureScopeSameMessage, Field: "tool_call_id"},
@@ -822,12 +822,12 @@ var signatureBindings = []SignatureBinding{
 		// does not bind tool-call blocks. The host must clear the token when
 		// the covered content changes, or reject the mutation.
 		Domain:         SignatureDomainRequest,
-		Message:        "torana.v2.RequestTrailingSignatureBlock",
+		Message:        "torana.v1.RequestTrailingSignatureBlock",
 		SignatureField: "signature",
 		Content: []SignatureContentRef{
 			{Scope: SignatureScopeSameMessage, Field: "part_metadata_json"},
-			{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.RequestTextBlock", Field: "text"},
-			{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.RequestThinkingBlock", Field: "text"},
+			{Scope: SignatureScopeTrailingStandalone, Message: "torana.v1.RequestTextBlock", Field: "text"},
+			{Scope: SignatureScopeTrailingStandalone, Message: "torana.v1.RequestThinkingBlock", Field: "text"},
 		},
 	},
 	{
@@ -836,7 +836,7 @@ var signatureBindings = []SignatureBinding{
 		// The verifier must classify a content mutation with the token
 		// retained as stale.
 		Domain:         SignatureDomainRequest,
-		Message:        "torana.v2.RequestTextBlock",
+		Message:        "torana.v1.RequestTextBlock",
 		SignatureField: "signature",
 		Content: []SignatureContentRef{
 			{Scope: SignatureScopeSameMessage, Field: "text"},
@@ -845,7 +845,7 @@ var signatureBindings = []SignatureBinding{
 	},
 	{
 		Domain:         SignatureDomainOutbound,
-		Message:        "torana.v2.ToolCall",
+		Message:        "torana.v1.ToolCall",
 		SignatureField: "signature",
 		Content: []SignatureContentRef{
 			{Scope: SignatureScopeSameMessage, Field: "id"},
@@ -857,12 +857,12 @@ var signatureBindings = []SignatureBinding{
 		// ContentBlockStart{ToolCallRef{id,name,signature}} then
 		// ToolCallDelta{index, arguments_delta...} sharing that block index.
 		Domain:         SignatureDomainOutbound,
-		Message:        "torana.v2.ToolCallRef",
+		Message:        "torana.v1.ToolCallRef",
 		SignatureField: "signature",
 		Content: []SignatureContentRef{
 			{Scope: SignatureScopeSameMessage, Field: "id"},
 			{Scope: SignatureScopeSameMessage, Field: "name"},
-			{Scope: SignatureScopeToolCallBlockByIndex, Message: "torana.v2.ToolCallDelta", Field: "arguments_delta"},
+			{Scope: SignatureScopeToolCallBlockByIndex, Message: "torana.v1.ToolCallDelta", Field: "arguments_delta"},
 		},
 	},
 	{
@@ -871,21 +871,21 @@ var signatureBindings = []SignatureBinding{
 		// TrailingStandalone: Code Assist final thoughtSignature-only part
 		// (see torana-edge gemini stream standalone branch + codeassist-stream-text.sse).
 		Domain:         SignatureDomainOutbound,
-		Message:        "torana.v2.StreamEvent",
+		Message:        "torana.v1.StreamEvent",
 		SignatureField: "signature_delta",
 		Content: []SignatureContentRef{
-			{Scope: SignatureScopeCurrentContentBlock, Message: "torana.v2.StreamEvent", Field: "text_delta"},
-			{Scope: SignatureScopeCurrentContentBlock, Message: "torana.v2.StreamEvent", Field: "thinking_delta"},
-			{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.StreamEvent", Field: "text_delta"},
-			{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.StreamEvent", Field: "thinking_delta"},
+			{Scope: SignatureScopeCurrentContentBlock, Message: "torana.v1.StreamEvent", Field: "text_delta"},
+			{Scope: SignatureScopeCurrentContentBlock, Message: "torana.v1.StreamEvent", Field: "thinking_delta"},
+			{Scope: SignatureScopeTrailingStandalone, Message: "torana.v1.StreamEvent", Field: "text_delta"},
+			{Scope: SignatureScopeTrailingStandalone, Message: "torana.v1.StreamEvent", Field: "thinking_delta"},
 		},
 	},
 }
 
 var outboundDelegateTargets = map[DelegateKind][]protoreflect.FullName{
 	DelegateRequest:  {}, // capabilities_write.go
-	DelegateResponse: {"torana.v2.ChatResponse"},
-	DelegateStream:   {"torana.v2.StreamEvents", "torana.v2.StreamEvent", "torana.v2.Suppress"},
+	DelegateResponse: {"torana.v1.ChatResponse"},
+	DelegateStream:   {"torana.v1.StreamEvents", "torana.v1.StreamEvent", "torana.v1.Suppress"},
 	DelegateHTTP:     {}, // deferred
 	DelegateTick:     {}, // observational; deferred field inventory
 }
@@ -993,24 +993,24 @@ var hookResultActionPolicies = map[string]FieldPolicy{
 }
 
 var outboundMessageFieldPolicies = map[protoreflect.FullName]map[string]FieldPolicy{
-	"torana.v2.ChatResponse":      chatResponseFieldPolicies,
-	"torana.v2.ResponseMessage":   responseMessageFieldPolicies,
-	"torana.v2.ToolCall":          responseToolCallFieldPolicies,
-	"torana.v2.Usage":             usageFieldPolicies,
-	"torana.v2.StreamEvent":       streamEventVariantPolicies,
-	"torana.v2.ToolCallDelta":     toolCallDeltaFieldPolicies,
-	"torana.v2.StreamError":       streamErrorFieldPolicies,
-	"torana.v2.MessageStart":      messageStartFieldPolicies,
-	"torana.v2.MessageStop":       messageStopFieldPolicies,
-	"torana.v2.ContentBlockStart": contentBlockStartFieldPolicies,
-	"torana.v2.ToolCallRef":       toolCallRefFieldPolicies,
-	"torana.v2.ProviderBlock":     providerBlockFieldPolicies,
-	"torana.v2.ContentBlockStop":  contentBlockStopFieldPolicies,
-	"torana.v2.StreamEvents":      streamEventsFieldPolicies,
-	"torana.v2.TextBlock":         {},
-	"torana.v2.ThinkingBlock":     {},
-	"torana.v2.Suppress":          {},
-	"torana.v2.HookResult":        hookResultActionPolicies,
+	"torana.v1.ChatResponse":      chatResponseFieldPolicies,
+	"torana.v1.ResponseMessage":   responseMessageFieldPolicies,
+	"torana.v1.ToolCall":          responseToolCallFieldPolicies,
+	"torana.v1.Usage":             usageFieldPolicies,
+	"torana.v1.StreamEvent":       streamEventVariantPolicies,
+	"torana.v1.ToolCallDelta":     toolCallDeltaFieldPolicies,
+	"torana.v1.StreamError":       streamErrorFieldPolicies,
+	"torana.v1.MessageStart":      messageStartFieldPolicies,
+	"torana.v1.MessageStop":       messageStopFieldPolicies,
+	"torana.v1.ContentBlockStart": contentBlockStartFieldPolicies,
+	"torana.v1.ToolCallRef":       toolCallRefFieldPolicies,
+	"torana.v1.ProviderBlock":     providerBlockFieldPolicies,
+	"torana.v1.ContentBlockStop":  contentBlockStopFieldPolicies,
+	"torana.v1.StreamEvents":      streamEventsFieldPolicies,
+	"torana.v1.TextBlock":         {},
+	"torana.v1.ThinkingBlock":     {},
+	"torana.v1.Suppress":          {},
+	"torana.v1.HookResult":        hookResultActionPolicies,
 }
 
 // Host-verifier checklist. The executable before/after fixtures cover these
@@ -1109,11 +1109,11 @@ func Validate() error {
 	}
 
 	roots := []proto.Message{
-		&pbv2.ChatResponse{},
-		&pbv2.StreamEvent{},
-		&pbv2.StreamEvents{},
-		&pbv2.HookResult{},
-		&pbv2.Suppress{},
+		&pbv1.ChatResponse{},
+		&pbv1.StreamEvent{},
+		&pbv1.StreamEvents{},
+		&pbv1.HookResult{},
+		&pbv1.Suppress{},
 	}
 	seen := map[protoreflect.FullName]bool{}
 	for _, root := range roots {
@@ -1174,7 +1174,7 @@ func requestSignatureTokenFields(descs map[protoreflect.FullName]protoreflect.Me
 			}
 		}
 	}
-	walk(descs["torana.v2.Message"])
+	walk(descs["torana.v1.Message"])
 	return out
 }
 
@@ -1435,26 +1435,26 @@ func validateMessageCompleteness(
 
 func outboundDescriptors() map[protoreflect.FullName]protoreflect.MessageDescriptor {
 	roots := []proto.Message{
-		&pbv2.ChatResponse{},
-		&pbv2.StreamEvent{},
-		&pbv2.StreamEvents{},
-		&pbv2.HookResult{},
-		&pbv2.Suppress{},
-		&pbv2.ChatRequest{},
-		&pbv2.Message{},
-		&pbv2.ResponseMessage{},
-		&pbv2.ToolCall{},
-		&pbv2.ToolCallDelta{},
-		&pbv2.ToolCallRef{},
-		&pbv2.ContentBlockStart{},
-		&pbv2.ContentBlockStop{},
-		&pbv2.MessageStart{},
-		&pbv2.MessageStop{},
-		&pbv2.Usage{},
-		&pbv2.StreamError{},
-		&pbv2.ProviderBlock{},
-		&pbv2.TextBlock{},
-		&pbv2.ThinkingBlock{},
+		&pbv1.ChatResponse{},
+		&pbv1.StreamEvent{},
+		&pbv1.StreamEvents{},
+		&pbv1.HookResult{},
+		&pbv1.Suppress{},
+		&pbv1.ChatRequest{},
+		&pbv1.Message{},
+		&pbv1.ResponseMessage{},
+		&pbv1.ToolCall{},
+		&pbv1.ToolCallDelta{},
+		&pbv1.ToolCallRef{},
+		&pbv1.ContentBlockStart{},
+		&pbv1.ContentBlockStop{},
+		&pbv1.MessageStart{},
+		&pbv1.MessageStop{},
+		&pbv1.Usage{},
+		&pbv1.StreamError{},
+		&pbv1.ProviderBlock{},
+		&pbv1.TextBlock{},
+		&pbv1.ThinkingBlock{},
 	}
 	out := map[protoreflect.FullName]protoreflect.MessageDescriptor{}
 	var walk func(protoreflect.MessageDescriptor)

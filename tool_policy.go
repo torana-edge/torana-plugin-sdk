@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 const ToolOutputMarker = "[torana-tool-output v1]"
@@ -20,7 +20,7 @@ var nonzeroExitCodePattern = regexp.MustCompile(`(?i)(?:"exit_code"\s*:\s*|proce
 // ToolNamesByCallID recovers provider-neutral tool names for result messages.
 // Several wire adapters identify results only by tool_call_id. Operates on
 // the ordered body via the block helpers (tool-use blocks).
-func ToolNamesByCallID(messages []*pbv2.Message) map[string]string {
+func ToolNamesByCallID(messages []*pbv1.Message) map[string]string {
 	names := make(map[string]string)
 	for _, message := range messages {
 		for _, call := range ToolCalls(message) {
@@ -34,7 +34,7 @@ func ToolNamesByCallID(messages []*pbv2.Message) map[string]string {
 
 // ToolCallsByID returns original call metadata for cache identity and
 // recovery (copied views).
-func ToolCallsByID(messages []*pbv2.Message) map[string]ToolCallView {
+func ToolCallsByID(messages []*pbv1.Message) map[string]ToolCallView {
 	calls := make(map[string]ToolCallView)
 	for _, message := range messages {
 		for _, call := range ToolCalls(message) {

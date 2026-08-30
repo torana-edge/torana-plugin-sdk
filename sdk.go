@@ -10,7 +10,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 var (
@@ -58,7 +58,7 @@ func supported_hooks() uint32 {
 //go:wasmexport run_hook
 func run_hook(ptr, size uint32) uint64 {
 	inputBytes := ReadBytes(ptr, size)
-	var in pbv2.HookInput
+	var in pbv1.HookInput
 	if err := proto.Unmarshal(inputBytes, &in); err != nil {
 		panic("torana sdk: decode run_hook: " + err.Error())
 	}
@@ -70,11 +70,11 @@ func run_hook(ptr, size uint32) uint64 {
 	ctx := withRequestID(context.Background(), in.RequestId)
 
 	var (
-		hr  *pbv2.HookResult
+		hr  *pbv1.HookResult
 		err error
 	)
 	switch hook {
-	case pbv2.Hook_HOOK_BEFORE_REQUEST:
+	case pbv1.Hook_HOOK_BEFORE_REQUEST:
 		if beforeRequestHandler == nil {
 			return 0
 		}
@@ -83,7 +83,7 @@ func run_hook(ptr, size uint32) uint64 {
 			panic("torana plugin: " + hook.String() + ": " + herr.Error())
 		}
 		hr, err = res.hookResult()
-	case pbv2.Hook_HOOK_AFTER_RESPONSE:
+	case pbv1.Hook_HOOK_AFTER_RESPONSE:
 		if afterResponseHandler == nil {
 			return 0
 		}
@@ -93,7 +93,7 @@ func run_hook(ptr, size uint32) uint64 {
 			panic("torana plugin: " + hook.String() + ": " + herr.Error())
 		}
 		hr, err = res.hookResult()
-	case pbv2.Hook_HOOK_ON_STREAM_CHUNK:
+	case pbv1.Hook_HOOK_ON_STREAM_CHUNK:
 		if streamChunkHandler == nil {
 			return 0
 		}
@@ -102,7 +102,7 @@ func run_hook(ptr, size uint32) uint64 {
 			panic("torana plugin: " + hook.String() + ": " + herr.Error())
 		}
 		hr, err = res.hookResult()
-	case pbv2.Hook_HOOK_ON_HTTP_REQUEST:
+	case pbv1.Hook_HOOK_ON_HTTP_REQUEST:
 		if httpRequestHandler == nil {
 			return 0
 		}
@@ -111,7 +111,7 @@ func run_hook(ptr, size uint32) uint64 {
 			panic("torana plugin: " + hook.String() + ": " + herr.Error())
 		}
 		hr, err = res.hookResult()
-	case pbv2.Hook_HOOK_ON_TICK:
+	case pbv1.Hook_HOOK_ON_TICK:
 		if tickHandler == nil {
 			return 0
 		}

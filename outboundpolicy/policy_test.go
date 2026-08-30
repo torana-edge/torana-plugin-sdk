@@ -59,7 +59,7 @@ func TestHookResultActionsAreHonestDelegates(t *testing.T) {
 		"suppress":         DelegateStream,
 	}
 	for field, delegate := range want {
-		p, ok := OutboundFieldPolicy("torana.v2.HookResult", field)
+		p, ok := OutboundFieldPolicy("torana.v1.HookResult", field)
 		if !ok {
 			t.Fatalf("missing HookResult.%s", field)
 		}
@@ -69,7 +69,7 @@ func TestHookResultActionsAreHonestDelegates(t *testing.T) {
 				field, delegate, p.Kind(), got)
 		}
 	}
-	events, ok := OutboundFieldPolicy("torana.v2.StreamEvents", "events")
+	events, ok := OutboundFieldPolicy("torana.v1.StreamEvents", "events")
 	if !ok {
 		t.Fatal("missing StreamEvents.events")
 	}
@@ -81,7 +81,7 @@ func TestHookResultActionsAreHonestDelegates(t *testing.T) {
 
 func TestObservedResponseFactsAreHostOwned(t *testing.T) {
 	for _, field := range []string{"model", "id", "usage", "upstream_status", "duration_ms", "provider_extensions_json"} {
-		p, _ := OutboundFieldPolicy("torana.v2.ChatResponse", field)
+		p, _ := OutboundFieldPolicy("torana.v1.ChatResponse", field)
 		if !p.IsHostOwned() {
 			t.Errorf("ChatResponse.%s must be host-owned", field)
 		}
@@ -91,9 +91,9 @@ func TestObservedResponseFactsAreHostOwned(t *testing.T) {
 	// prescribed response to changing the content they cover. They carry
 	// PolicyBoundSignature and are asserted separately below.
 	mustBoundSignature := []struct{ msg, field string }{
-		{"torana.v2.ToolCall", "signature"},
-		{"torana.v2.ToolCallRef", "signature"},
-		{"torana.v2.StreamEvent", "signature_delta"},
+		{"torana.v1.ToolCall", "signature"},
+		{"torana.v1.ToolCallRef", "signature"},
+		{"torana.v1.StreamEvent", "signature_delta"},
 	}
 	for _, tc := range mustBoundSignature {
 		p, ok := OutboundFieldPolicy(protoreflect.FullName(tc.msg), tc.field)
@@ -107,12 +107,12 @@ func TestObservedResponseFactsAreHostOwned(t *testing.T) {
 	}
 
 	mustHost := []struct{ msg, field string }{
-		{"torana.v2.ChatResponse", "finish_reason"},
-		{"torana.v2.MessageStart", "model"},
-		{"torana.v2.StreamEvent", "usage"},
-		{"torana.v2.StreamEvent", "error"},
-		{"torana.v2.StreamError", "code"},
-		{"torana.v2.StreamError", "message"},
+		{"torana.v1.ChatResponse", "finish_reason"},
+		{"torana.v1.MessageStart", "model"},
+		{"torana.v1.StreamEvent", "usage"},
+		{"torana.v1.StreamEvent", "error"},
+		{"torana.v1.StreamError", "code"},
+		{"torana.v1.StreamError", "message"},
 	}
 	for _, tc := range mustHost {
 		p, ok := OutboundFieldPolicy(protoreflect.FullName(tc.msg), tc.field)
@@ -125,44 +125,44 @@ func TestObservedResponseFactsAreHostOwned(t *testing.T) {
 func TestNestedContainerEvaluationPins(t *testing.T) {
 	// These registry pins are the data the host verifier needs so
 	// change-only-tool-call-delta-index does not auto-charge assistant.
-	delta, _ := OutboundFieldPolicy("torana.v2.StreamEvent", "tool_call_delta")
+	delta, _ := OutboundFieldPolicy("torana.v1.StreamEvent", "tool_call_delta")
 	if !delta.IsContainer() {
 		t.Fatal("tool_call_delta must be PolicyContainer (parent must not auto-charge assistant)")
 	}
-	idx, _ := OutboundFieldPolicy("torana.v2.ToolCallDelta", "index")
+	idx, _ := OutboundFieldPolicy("torana.v1.ToolCallDelta", "index")
 	if idx.Kind() != PolicyTopology {
 		t.Fatal("ToolCallDelta.index must be topology — index-only change → topology only")
 	}
-	args, _ := OutboundFieldPolicy("torana.v2.ToolCallDelta", "arguments_delta")
+	args, _ := OutboundFieldPolicy("torana.v1.ToolCallDelta", "arguments_delta")
 	sec, ok := args.Section()
 	if args.Kind() != PolicySection || !ok || sec != plugin_sdk.SectionMessagesAssistant {
 		t.Fatal("arguments_delta must be assistant — args-only change → assistant only")
 	}
 
-	msg, _ := OutboundFieldPolicy("torana.v2.ChatResponse", "message")
+	msg, _ := OutboundFieldPolicy("torana.v1.ChatResponse", "message")
 	if !msg.IsContainer() {
 		t.Fatal("ChatResponse.message must be PolicyContainer")
 	}
-	stop, _ := OutboundFieldPolicy("torana.v2.StreamEvent", "message_stop")
+	stop, _ := OutboundFieldPolicy("torana.v1.StreamEvent", "message_stop")
 	if !stop.IsContainer() {
 		t.Fatal("message_stop must be PolicyContainer")
 	}
-	tool, _ := OutboundFieldPolicy("torana.v2.ContentBlockStart", "tool_call")
+	tool, _ := OutboundFieldPolicy("torana.v1.ContentBlockStart", "tool_call")
 	if !tool.IsContainer() {
 		t.Fatal("ContentBlockStart.tool_call must be Container so id/name changes do not charge parent topology")
 	}
-	id, _ := OutboundFieldPolicy("torana.v2.ToolCallRef", "id")
+	id, _ := OutboundFieldPolicy("torana.v1.ToolCallRef", "id")
 	if id.Kind() != PolicySection {
 		t.Fatal("ToolCallRef.id must be assistant section")
 	}
 
 	// Presence/oneof change of content_block_start still carries topology on the
 	// variant; same presence recurses without charging that parent (package rule).
-	cbs, _ := OutboundFieldPolicy("torana.v2.StreamEvent", "content_block_start")
+	cbs, _ := OutboundFieldPolicy("torana.v1.StreamEvent", "content_block_start")
 	if cbs.Kind() != PolicyTopology {
 		t.Fatal("content_block_start variant remains Topology for presence/kind change")
 	}
-	textArm, _ := OutboundFieldPolicy("torana.v2.ContentBlockStart", "text")
+	textArm, _ := OutboundFieldPolicy("torana.v1.ContentBlockStart", "text")
 	if textArm.Kind() != PolicyTopology {
 		t.Fatal("ContentBlockStart.text oneof arm is Topology for variant switches")
 	}
@@ -210,23 +210,23 @@ func TestFieldPolicyRejectsInvalidStates(t *testing.T) {
 }
 
 func TestOutboundPolicyAccessorsAreCopies(t *testing.T) {
-	p, ok := OutboundFieldPolicy("torana.v2.ChatResponse", "usage")
+	p, ok := OutboundFieldPolicy("torana.v1.ChatResponse", "usage")
 	if !ok || !p.IsHostOwned() {
 		t.Fatal("usage should be host-owned")
 	}
 	p.kind = PolicySection
 	p.section = plugin_sdk.SectionMessagesAssistant
-	again, _ := OutboundFieldPolicy("torana.v2.ChatResponse", "usage")
+	again, _ := OutboundFieldPolicy("torana.v1.ChatResponse", "usage")
 	if !again.IsHostOwned() {
 		t.Fatal("mutating returned FieldPolicy must not affect registry")
 	}
 
-	names, ok := OutboundFieldNames("torana.v2.ChatResponse")
+	names, ok := OutboundFieldNames("torana.v1.ChatResponse")
 	if !ok || len(names) == 0 {
 		t.Fatal("expected field names")
 	}
 	names[0] = "mutated"
-	names2, _ := OutboundFieldNames("torana.v2.ChatResponse")
+	names2, _ := OutboundFieldNames("torana.v1.ChatResponse")
 	if names2[0] == "mutated" {
 		t.Fatal("OutboundFieldNames must return a copy")
 	}
@@ -263,8 +263,8 @@ func TestSignatureBindingsPinned(t *testing.T) {
 		t.Fatalf("Validate: %v", err)
 	}
 
-	think := byMsg["torana.v2.RequestThinkingBlock/signature"]
-	if think.Domain != SignatureDomainRequest || think.Message != "torana.v2.RequestThinkingBlock" {
+	think := byMsg["torana.v1.RequestThinkingBlock/signature"]
+	if think.Domain != SignatureDomainRequest || think.Message != "torana.v1.RequestThinkingBlock" {
 		t.Fatal("RequestThinkingBlock.signature must remain a request-domain binding")
 	}
 	var sawThinking bool
@@ -276,12 +276,12 @@ func TestSignatureBindingsPinned(t *testing.T) {
 	if !sawThinking {
 		t.Fatal("thinking signature must cover its own text")
 	}
-	if _, ok := OutboundFieldPolicy("torana.v2.RequestThinkingBlock", "signature"); ok {
+	if _, ok := OutboundFieldPolicy("torana.v1.RequestThinkingBlock", "signature"); ok {
 		t.Fatal("request block must not re-enter the outbound field registry")
 	}
 
-	trail := byMsg["torana.v2.RequestTrailingSignatureBlock/signature"]
-	if trail.Domain != SignatureDomainRequest || trail.Message != "torana.v2.RequestTrailingSignatureBlock" {
+	trail := byMsg["torana.v1.RequestTrailingSignatureBlock/signature"]
+	if trail.Domain != SignatureDomainRequest || trail.Message != "torana.v1.RequestTrailingSignatureBlock" {
 		t.Fatal("RequestTrailingSignatureBlock.signature must remain a request-domain binding")
 	}
 	var sawTrailText, sawTrailThinking, sawTrailMeta bool
@@ -291,9 +291,9 @@ func TestSignatureBindingsPinned(t *testing.T) {
 			sawTrailMeta = true
 		case c.Scope != SignatureScopeTrailingStandalone:
 			t.Fatalf("trailing_signature unexpected scope %v for %+v", c.Scope, c)
-		case c.Message == "torana.v2.RequestTextBlock" && c.Field == "text":
+		case c.Message == "torana.v1.RequestTextBlock" && c.Field == "text":
 			sawTrailText = true
-		case c.Message == "torana.v2.RequestThinkingBlock" && c.Field == "text":
+		case c.Message == "torana.v1.RequestThinkingBlock" && c.Field == "text":
 			sawTrailThinking = true
 		}
 	}
@@ -303,12 +303,12 @@ func TestSignatureBindingsPinned(t *testing.T) {
 	if !sawTrailText || !sawTrailThinking {
 		t.Fatal("trailing_signature must bind the preceding closed text and thinking blocks")
 	}
-	if _, ok := OutboundFieldPolicy("torana.v2.RequestTrailingSignatureBlock", "signature"); ok {
+	if _, ok := OutboundFieldPolicy("torana.v1.RequestTrailingSignatureBlock", "signature"); ok {
 		t.Fatal("request block must not re-enter the outbound field registry")
 	}
 
-	cs := byMsg["torana.v2.RequestTextBlock/signature"]
-	if cs.Domain != SignatureDomainRequest || cs.Message != "torana.v2.RequestTextBlock" {
+	cs := byMsg["torana.v1.RequestTextBlock/signature"]
+	if cs.Domain != SignatureDomainRequest || cs.Message != "torana.v1.RequestTextBlock" {
 		t.Fatal("RequestTextBlock.signature must remain a request-domain binding")
 	}
 	if len(cs.Content) != 2 {
@@ -329,12 +329,12 @@ func TestSignatureBindingsPinned(t *testing.T) {
 	if !sawText || !sawMeta {
 		t.Fatalf("content signature must bind text + part_metadata_json, got %+v", cs.Content)
 	}
-	if _, ok := OutboundFieldPolicy("torana.v2.RequestTextBlock", "signature"); ok {
+	if _, ok := OutboundFieldPolicy("torana.v1.RequestTextBlock", "signature"); ok {
 		t.Fatal("request block must not re-enter the outbound field registry")
 	}
 
-	tu := byMsg["torana.v2.RequestToolUseBlock/signature"]
-	if tu.Domain != SignatureDomainRequest || tu.Message != "torana.v2.RequestToolUseBlock" {
+	tu := byMsg["torana.v1.RequestToolUseBlock/signature"]
+	if tu.Domain != SignatureDomainRequest || tu.Message != "torana.v1.RequestToolUseBlock" {
 		t.Fatal("RequestToolUseBlock.signature must be a request-domain binding")
 	}
 	want := map[string]bool{"id": true, "name": true, "arguments_json": true, "part_metadata_json": true}
@@ -346,7 +346,7 @@ func TestSignatureBindingsPinned(t *testing.T) {
 			t.Fatalf("tool-use signature ref %+v outside the pinned set", r)
 		}
 	}
-	if _, ok := OutboundFieldPolicy("torana.v2.RequestToolUseBlock", "signature"); ok {
+	if _, ok := OutboundFieldPolicy("torana.v1.RequestToolUseBlock", "signature"); ok {
 		t.Fatal("request block must not re-enter the outbound field registry")
 	}
 
@@ -359,12 +359,12 @@ func TestSignatureBindingsPinned(t *testing.T) {
 		tokens[f] = true
 	}
 	for _, key := range []string{
-		"torana.v2.RequestThinkingBlock/signature",
-		"torana.v2.RequestTextBlock/signature",
-		"torana.v2.RequestToolUseBlock/signature",
-		"torana.v2.RequestUnknownBlock/signature",
-		"torana.v2.RequestToolResultBlock/signature",
-		"torana.v2.RequestTrailingSignatureBlock/signature",
+		"torana.v1.RequestThinkingBlock/signature",
+		"torana.v1.RequestTextBlock/signature",
+		"torana.v1.RequestToolUseBlock/signature",
+		"torana.v1.RequestUnknownBlock/signature",
+		"torana.v1.RequestToolResultBlock/signature",
+		"torana.v1.RequestTrailingSignatureBlock/signature",
 	} {
 		if !tokens[key] {
 			t.Fatalf("reflection inventory missing request token %s", key)
@@ -375,14 +375,14 @@ func TestSignatureBindingsPinned(t *testing.T) {
 		t.Fatalf("unexpected request-visible signature tokens: %v", keysOf(tokens))
 	}
 
-	ref := byMsg["torana.v2.ToolCallRef/signature"]
+	ref := byMsg["torana.v1.ToolCallRef/signature"]
 	var sawSameID, sawArgs bool
 	for _, c := range ref.Content {
 		if c.Scope == SignatureScopeSameMessage && c.Field == "id" {
 			sawSameID = true
 		}
 		if c.Scope == SignatureScopeToolCallBlockByIndex &&
-			c.Message == "torana.v2.ToolCallDelta" && c.Field == "arguments_delta" {
+			c.Message == "torana.v1.ToolCallDelta" && c.Field == "arguments_delta" {
 			sawArgs = true
 		}
 	}
@@ -390,7 +390,7 @@ func TestSignatureBindingsPinned(t *testing.T) {
 		t.Fatal("ToolCallRef.signature must SameMessage id/name and ToolCallBlockByIndex arguments_delta")
 	}
 
-	sig := byMsg["torana.v2.StreamEvent/signature_delta"]
+	sig := byMsg["torana.v1.StreamEvent/signature_delta"]
 	if sig.SignatureField != "signature_delta" {
 		t.Fatal("signature_delta binding missing")
 	}
@@ -404,7 +404,7 @@ func TestSignatureBindingsPinned(t *testing.T) {
 		default:
 			t.Fatalf("signature_delta unexpected scope %v", c.Scope)
 		}
-		if c.Message == "torana.v2.ToolCallRef" || c.Message == "torana.v2.ToolCallDelta" {
+		if c.Message == "torana.v1.ToolCallRef" || c.Message == "torana.v1.ToolCallDelta" {
 			t.Fatal("signature_delta must not bind the tool-call path")
 		}
 		if c.Field != "text_delta" && c.Field != "thinking_delta" {
@@ -428,7 +428,7 @@ func TestRequestThinkingSignatureMutationClassifies(t *testing.T) {
 	var binding SignatureBinding
 	found := false
 	for _, b := range AllSignatureBindings() {
-		if b.Message == "torana.v2.RequestThinkingBlock" && b.SignatureField == "signature" {
+		if b.Message == "torana.v1.RequestThinkingBlock" && b.SignatureField == "signature" {
 			binding = b
 			found = true
 			break
@@ -464,7 +464,7 @@ func TestRequestContentSignatureMutationClassifies(t *testing.T) {
 	var binding SignatureBinding
 	found := false
 	for _, b := range AllSignatureBindings() {
-		if b.Message == "torana.v2.RequestTextBlock" && b.SignatureField == "signature" {
+		if b.Message == "torana.v1.RequestTextBlock" && b.SignatureField == "signature" {
 			binding = b
 			found = true
 			break
@@ -525,25 +525,25 @@ func keysOf(m map[string]bool) []string {
 
 func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 	bad := []SignatureBinding{
-		{Domain: SignatureDomainOutbound, Message: "torana.v2.ToolCall", SignatureField: "signature"},
+		{Domain: SignatureDomainOutbound, Message: "torana.v1.ToolCall", SignatureField: "signature"},
 		{
-			Domain: SignatureDomainOutbound, Message: "torana.v2.ToolCall", SignatureField: "signature",
+			Domain: SignatureDomainOutbound, Message: "torana.v1.ToolCall", SignatureField: "signature",
 			Content: []SignatureContentRef{{Scope: SignatureScopeUnspecified, Field: "name"}},
 		},
 		{
-			Domain: SignatureDomainOutbound, Message: "torana.v2.ToolCall", SignatureField: "signature",
-			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Message: "torana.v2.ToolCallRef", Field: "id"}},
+			Domain: SignatureDomainOutbound, Message: "torana.v1.ToolCall", SignatureField: "signature",
+			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Message: "torana.v1.ToolCallRef", Field: "id"}},
 		},
 		{
-			Domain: SignatureDomainOutbound, Message: "torana.v2.ToolCall", SignatureField: "signature",
-			Content: []SignatureContentRef{{Scope: SignatureScopeToolCallBlockByIndex, Message: "torana.v2.ToolCallDelta", Field: "arguments_delta"}},
+			Domain: SignatureDomainOutbound, Message: "torana.v1.ToolCall", SignatureField: "signature",
+			Content: []SignatureContentRef{{Scope: SignatureScopeToolCallBlockByIndex, Message: "torana.v1.ToolCallDelta", Field: "arguments_delta"}},
 		},
 		{
-			Domain: SignatureDomainOutbound, Message: "torana.v2.StreamEvent", SignatureField: "signature_delta",
+			Domain: SignatureDomainOutbound, Message: "torana.v1.StreamEvent", SignatureField: "signature_delta",
 			Content: []SignatureContentRef{{Scope: SignatureScopeCurrentContentBlock, Field: "text_delta"}},
 		},
 		{ // missing Domain
-			Message: "torana.v2.RequestThinkingBlock", SignatureField: "signature",
+			Message: "torana.v1.RequestThinkingBlock", SignatureField: "signature",
 			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "text"}},
 		},
 		// Request-domain SameMessage is pinned to exactly the thinking-block
@@ -551,17 +551,17 @@ func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 		// be able to relabel an ordinary string field (text) as the opaque
 		// thinking token and still pass the host's startup Validate() check.
 		{
-			Domain: SignatureDomainRequest, Message: "torana.v2.RequestThinkingBlock", SignatureField: "text",
+			Domain: SignatureDomainRequest, Message: "torana.v1.RequestThinkingBlock", SignatureField: "text",
 			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "text"}},
 		},
 		{
-			Domain: SignatureDomainRequest, Message: "torana.v2.ToolCall", SignatureField: "signature",
+			Domain: SignatureDomainRequest, Message: "torana.v1.ToolCall", SignatureField: "signature",
 			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "name"}},
 		},
 		// A relabeled ordinary field (role on a different block message) must
 		// still fail shape validation.
 		{
-			Domain: SignatureDomainRequest, Message: "torana.v2.RequestTextBlock", SignatureField: "role",
+			Domain: SignatureDomainRequest, Message: "torana.v1.RequestTextBlock", SignatureField: "role",
 			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "text"}},
 		},
 		// Request-domain TrailingStandalone is pinned to exactly
@@ -570,16 +570,16 @@ func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 		// string field (text) as the opaque token and still pass the host's
 		// startup Validate() check.
 		{
-			Domain: SignatureDomainRequest, Message: "torana.v2.RequestTextBlock", SignatureField: "text",
+			Domain: SignatureDomainRequest, Message: "torana.v1.RequestTextBlock", SignatureField: "text",
 			Content: []SignatureContentRef{{Scope: SignatureScopeTrailingStandalone, Field: "text"}},
 		},
 		{
-			Domain: SignatureDomainRequest, Message: "torana.v2.ToolCall", SignatureField: "trailing_signature",
+			Domain: SignatureDomainRequest, Message: "torana.v1.ToolCall", SignatureField: "trailing_signature",
 			Content: []SignatureContentRef{{Scope: SignatureScopeTrailingStandalone, Field: "name"}},
 		},
 		{
-			Domain: SignatureDomainRequest, Message: "torana.v2.ToolCall", SignatureField: "trailing_signature",
-			Content: []SignatureContentRef{{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.ToolCall", Field: "name"}},
+			Domain: SignatureDomainRequest, Message: "torana.v1.ToolCall", SignatureField: "trailing_signature",
+			Content: []SignatureContentRef{{Scope: SignatureScopeTrailingStandalone, Message: "torana.v1.ToolCall", Field: "name"}},
 		},
 		// The complete request-domain contracts are pinned, not just the field
 		// allowlist: rebinding a token to different content, swapping the
@@ -588,44 +588,44 @@ func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 		// shape check — edge startup must not report a coherent table when the
 		// verifier would misclassify content changes as intact.
 		{ // rebind: the thinking token covering a different field
-			Domain: SignatureDomainRequest, Message: "torana.v2.RequestThinkingBlock", SignatureField: "signature",
+			Domain: SignatureDomainRequest, Message: "torana.v1.RequestThinkingBlock", SignatureField: "signature",
 			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "data"}},
 		},
 		{ // swapped thinking/text pair: both field names individually valid
-			Domain: SignatureDomainRequest, Message: "torana.v2.RequestThinkingBlock", SignatureField: "signature",
+			Domain: SignatureDomainRequest, Message: "torana.v1.RequestThinkingBlock", SignatureField: "signature",
 			Content: []SignatureContentRef{
 				{Scope: SignatureScopeSameMessage, Field: "data"},
 				{Scope: SignatureScopeSameMessage, Field: "text"},
 			},
 		},
 		{ // swapped pair, other side
-			Domain: SignatureDomainRequest, Message: "torana.v2.RequestTextBlock", SignatureField: "signature",
+			Domain: SignatureDomainRequest, Message: "torana.v1.RequestTextBlock", SignatureField: "signature",
 			Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "text"},
 				{Scope: SignatureScopeSameMessage, Field: "text"}},
 		},
 		{ // wrong scope for the token
-			Domain: SignatureDomainRequest, Message: "torana.v2.RequestTrailingSignatureBlock", SignatureField: "signature",
+			Domain: SignatureDomainRequest, Message: "torana.v1.RequestTrailingSignatureBlock", SignatureField: "signature",
 			Content: []SignatureContentRef{
 				{Scope: SignatureScopeSameMessage, Field: "text"},
 				{Scope: SignatureScopeSameMessage, Field: "text"},
 			},
 		},
 		{ // partial trailing set (missing the thinking block)
-			Domain: SignatureDomainRequest, Message: "torana.v2.RequestTrailingSignatureBlock", SignatureField: "signature",
-			Content: []SignatureContentRef{{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.RequestTextBlock", Field: "text"}},
+			Domain: SignatureDomainRequest, Message: "torana.v1.RequestTrailingSignatureBlock", SignatureField: "signature",
+			Content: []SignatureContentRef{{Scope: SignatureScopeTrailingStandalone, Message: "torana.v1.RequestTextBlock", Field: "text"}},
 		},
 		{ // duplicated covered field
-			Domain: SignatureDomainRequest, Message: "torana.v2.RequestThinkingBlock", SignatureField: "signature",
+			Domain: SignatureDomainRequest, Message: "torana.v1.RequestThinkingBlock", SignatureField: "signature",
 			Content: []SignatureContentRef{
 				{Scope: SignatureScopeSameMessage, Field: "text"},
 				{Scope: SignatureScopeSameMessage, Field: "text"},
 			},
 		},
 		{ // cross-message ref on a SameMessage request binding
-			Domain: SignatureDomainRequest, Message: "torana.v2.RequestThinkingBlock", SignatureField: "signature",
+			Domain: SignatureDomainRequest, Message: "torana.v1.RequestThinkingBlock", SignatureField: "signature",
 			Content: []SignatureContentRef{
 				{Scope: SignatureScopeSameMessage, Field: "text"},
-				{Scope: SignatureScopeSameMessage, Message: "torana.v2.ToolCall", Field: "name"},
+				{Scope: SignatureScopeSameMessage, Message: "torana.v1.ToolCall", Field: "name"},
 			},
 		},
 		// The tool-use token's exact covered set is id + name +
@@ -633,28 +633,28 @@ func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 		// a wrong scope, and a cross-message ref must all fail the shape
 		// check — proving the contract, not just the happy path.
 		{ // tool-use partial: missing id
-			Domain: SignatureDomainRequest, Message: "torana.v2.RequestToolUseBlock", SignatureField: "signature",
+			Domain: SignatureDomainRequest, Message: "torana.v1.RequestToolUseBlock", SignatureField: "signature",
 			Content: []SignatureContentRef{
 				{Scope: SignatureScopeSameMessage, Field: "name"},
 				{Scope: SignatureScopeSameMessage, Field: "arguments_json"},
 			},
 		},
 		{ // tool-use partial: missing name
-			Domain: SignatureDomainRequest, Message: "torana.v2.RequestToolUseBlock", SignatureField: "signature",
+			Domain: SignatureDomainRequest, Message: "torana.v1.RequestToolUseBlock", SignatureField: "signature",
 			Content: []SignatureContentRef{
 				{Scope: SignatureScopeSameMessage, Field: "id"},
 				{Scope: SignatureScopeSameMessage, Field: "arguments_json"},
 			},
 		},
 		{ // tool-use partial: missing arguments_json
-			Domain: SignatureDomainRequest, Message: "torana.v2.RequestToolUseBlock", SignatureField: "signature",
+			Domain: SignatureDomainRequest, Message: "torana.v1.RequestToolUseBlock", SignatureField: "signature",
 			Content: []SignatureContentRef{
 				{Scope: SignatureScopeSameMessage, Field: "id"},
 				{Scope: SignatureScopeSameMessage, Field: "name"},
 			},
 		},
 		{ // tool-use extra member
-			Domain: SignatureDomainRequest, Message: "torana.v2.RequestToolUseBlock", SignatureField: "signature",
+			Domain: SignatureDomainRequest, Message: "torana.v1.RequestToolUseBlock", SignatureField: "signature",
 			Content: []SignatureContentRef{
 				{Scope: SignatureScopeSameMessage, Field: "id"},
 				{Scope: SignatureScopeSameMessage, Field: "name"},
@@ -663,7 +663,7 @@ func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 			},
 		},
 		{ // tool-use duplicated member
-			Domain: SignatureDomainRequest, Message: "torana.v2.RequestToolUseBlock", SignatureField: "signature",
+			Domain: SignatureDomainRequest, Message: "torana.v1.RequestToolUseBlock", SignatureField: "signature",
 			Content: []SignatureContentRef{
 				{Scope: SignatureScopeSameMessage, Field: "id"},
 				{Scope: SignatureScopeSameMessage, Field: "id"},
@@ -672,19 +672,19 @@ func TestSignatureBindingRejectsBadScopes(t *testing.T) {
 			},
 		},
 		{ // tool-use wrong scope
-			Domain: SignatureDomainRequest, Message: "torana.v2.RequestToolUseBlock", SignatureField: "signature",
+			Domain: SignatureDomainRequest, Message: "torana.v1.RequestToolUseBlock", SignatureField: "signature",
 			Content: []SignatureContentRef{
-				{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.RequestToolUseBlock", Field: "id"},
-				{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.RequestToolUseBlock", Field: "name"},
-				{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.RequestToolUseBlock", Field: "arguments_json"},
+				{Scope: SignatureScopeTrailingStandalone, Message: "torana.v1.RequestToolUseBlock", Field: "id"},
+				{Scope: SignatureScopeTrailingStandalone, Message: "torana.v1.RequestToolUseBlock", Field: "name"},
+				{Scope: SignatureScopeTrailingStandalone, Message: "torana.v1.RequestToolUseBlock", Field: "arguments_json"},
 			},
 		},
 		{ // tool-use cross-message ref
-			Domain: SignatureDomainRequest, Message: "torana.v2.RequestToolUseBlock", SignatureField: "signature",
+			Domain: SignatureDomainRequest, Message: "torana.v1.RequestToolUseBlock", SignatureField: "signature",
 			Content: []SignatureContentRef{
 				{Scope: SignatureScopeSameMessage, Field: "id"},
 				{Scope: SignatureScopeSameMessage, Field: "name"},
-				{Scope: SignatureScopeSameMessage, Message: "torana.v2.ToolCall", Field: "arguments_json"},
+				{Scope: SignatureScopeSameMessage, Message: "torana.v1.ToolCall", Field: "arguments_json"},
 			},
 		},
 	}
@@ -724,7 +724,7 @@ func TestRequestBindingCompletenessRequiresEveryToken(t *testing.T) {
 	// An extra, unpinned request token is equally a broken registry.
 	bindings := append([]SignatureBinding{}, signatureBindings...)
 	bindings = append(bindings, SignatureBinding{
-		Domain: SignatureDomainRequest, Message: "torana.v2.RequestTextBlock", SignatureField: "invented_signature",
+		Domain: SignatureDomainRequest, Message: "torana.v1.RequestTextBlock", SignatureField: "invented_signature",
 		Content: []SignatureContentRef{{Scope: SignatureScopeSameMessage, Field: "text"}},
 	})
 	if err := validateRequestBindingCompleteness(bindings); err == nil {
@@ -742,18 +742,18 @@ func TestRequestBindingCompletenessRequiresEveryToken(t *testing.T) {
 func TestRequestBindingShapeOrderIndependent(t *testing.T) {
 	good := []SignatureBinding{
 		{
-			Domain: SignatureDomainRequest, Message: "torana.v2.RequestTextBlock", SignatureField: "signature",
+			Domain: SignatureDomainRequest, Message: "torana.v1.RequestTextBlock", SignatureField: "signature",
 			Content: []SignatureContentRef{
 				{Scope: SignatureScopeSameMessage, Field: "part_metadata_json"},
 				{Scope: SignatureScopeSameMessage, Field: "text"},
 			},
 		},
 		{
-			Domain: SignatureDomainRequest, Message: "torana.v2.RequestTrailingSignatureBlock", SignatureField: "signature",
+			Domain: SignatureDomainRequest, Message: "torana.v1.RequestTrailingSignatureBlock", SignatureField: "signature",
 			Content: []SignatureContentRef{
 				{Scope: SignatureScopeSameMessage, Field: "part_metadata_json"},
-				{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.RequestThinkingBlock", Field: "text"},
-				{Scope: SignatureScopeTrailingStandalone, Message: "torana.v2.RequestTextBlock", Field: "text"},
+				{Scope: SignatureScopeTrailingStandalone, Message: "torana.v1.RequestThinkingBlock", Field: "text"},
+				{Scope: SignatureScopeTrailingStandalone, Message: "torana.v1.RequestTextBlock", Field: "text"},
 			},
 		},
 	}
@@ -774,14 +774,14 @@ func TestPolicyContainerRejectedOnScalar(t *testing.T) {
 	// Simulate a bad registry entry: PolicyContainer on a scalar would be
 	// caught by Validate when wired into outboundMessageFieldPolicies.
 	descs := outboundDescriptors()
-	fd := descs["torana.v2.ChatResponse"].Fields().ByName("model")
+	fd := descs["torana.v1.ChatResponse"].Fields().ByName("model")
 	if fd == nil || fd.Kind() == protoreflect.MessageKind {
 		t.Fatal("expected scalar model field")
 	}
 	if containerPolicy().Kind() != PolicyContainer {
 		t.Fatal("container policy must report PolicyContainer")
 	}
-	old := outboundMessageFieldPolicies["torana.v2.ChatResponse"]
+	old := outboundMessageFieldPolicies["torana.v1.ChatResponse"]
 	bad := map[string]FieldPolicy{}
 	for k, v := range old {
 		bad[k] = v
@@ -793,7 +793,7 @@ func TestPolicyContainerRejectedOnScalar(t *testing.T) {
 }
 
 func TestPolicyFixedContainerRejectedOnSingularMessage(t *testing.T) {
-	old := outboundMessageFieldPolicies["torana.v2.ChatResponse"]
+	old := outboundMessageFieldPolicies["torana.v1.ChatResponse"]
 	bad := map[string]FieldPolicy{}
 	for k, v := range old {
 		bad[k] = v
@@ -809,7 +809,7 @@ func TestPolicyFixedContainerRejectedOnSingularMessage(t *testing.T) {
 }
 
 func TestPolicyFixedContainerRejectedOnScalar(t *testing.T) {
-	old := outboundMessageFieldPolicies["torana.v2.ChatResponse"]
+	old := outboundMessageFieldPolicies["torana.v1.ChatResponse"]
 	bad := map[string]FieldPolicy{}
 	for k, v := range old {
 		bad[k] = v
@@ -821,7 +821,7 @@ func TestPolicyFixedContainerRejectedOnScalar(t *testing.T) {
 }
 
 func TestPolicyDelegateRejectedOnScalar(t *testing.T) {
-	old := outboundMessageFieldPolicies["torana.v2.ChatResponse"]
+	old := outboundMessageFieldPolicies["torana.v1.ChatResponse"]
 	bad := map[string]FieldPolicy{}
 	for k, v := range old {
 		bad[k] = v
@@ -837,10 +837,10 @@ func validateChatResponsePolicies(fields map[string]FieldPolicy) error {
 	for message, original := range outboundMessageFieldPolicies {
 		policies[message] = original
 	}
-	policies["torana.v2.ChatResponse"] = fields
+	policies["torana.v1.ChatResponse"] = fields
 	descs := outboundDescriptors()
 	return validateMessageCompleteness(
-		descs["torana.v2.ChatResponse"],
+		descs["torana.v1.ChatResponse"],
 		map[protoreflect.FullName]bool{},
 		descs,
 		policies,

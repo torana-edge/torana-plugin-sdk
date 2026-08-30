@@ -1,11 +1,11 @@
-package v2
+package v1
 
 import (
 	"encoding/json"
 	"fmt"
 )
 
-// Validation for the v2 hook envelopes.
+// Validation for the v1 hook envelopes.
 //
 // The payload oneof is the sole discriminator, so a frame cannot claim one hook
 // while carrying another's payload — that contradiction is unrepresentable

@@ -1,4 +1,4 @@
-package v2
+package v1
 
 // Wire-number pins for the signed-Part carriers. These fields are ADDITIVE
 // flat members (never oneof members); their numbers are ABI surface —

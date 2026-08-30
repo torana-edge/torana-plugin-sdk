@@ -1,9 +1,9 @@
 syntax = "proto3";
 
-package torana.v2;
-option go_package = "github.com/torana-edge/torana-plugin-sdk/pb/v2";
+package torana.v1;
+option go_package = "github.com/torana-edge/torana-plugin-sdk/pb/v1";
 
-// The Torana plugin ABI, version 2.
+// The Torana plugin ABI, version 1.
 //
 //   - Guests export a single run_hook(ptr, size) -> u64. Hook identity lives
 //     only in the HookInput payload oneof; request_id lives only on HookInput.
@@ -272,7 +272,7 @@ message ChatRequest {
 
   // Proxy-internal metadata the host publishes to plugins: the routed provider,
   // the conversation id, the request path. Never serialized to the wire.
-  // Verdicts are host calls in v2, so this is host-owned: a plugin changing it
+  // Verdicts are host calls in the ABI, so this is host-owned: a plugin changing it
   // is a protocol violation, not a grantable edit.
   bytes torana_meta_json = 11;
 }
@@ -660,7 +660,7 @@ message AfterResponse {
 // is; there is no separate hook field to contradict it. The guest receives it
 // via run_hook(ptr, size) -> u64 — one export, no request_id WASM argument.
 message HookInput {
-  // Minor version of the v2 contract the host is speaking. Additive changes
+  // Minor version of the ABI contract the host is speaking. Additive changes
   // bump this; a plugin may use it to detect fields it can rely on.
   uint32 abi_minor = 1;
   // Host-assigned execution-scope id. This is the only place the id appears —
@@ -935,7 +935,7 @@ message CacheSetArgs {
 
 // MetaAppendArgs is the argument body for host command env.meta_append.
 //
-// Contract (normative; pinned by pb/v2 MetaAppend* constants and tests):
+// Contract (normative; pinned by pb/v1 MetaAppend* constants and tests):
 //
 //   command:    env.meta_append
 //   permission: env.meta_set  (dispatcher special-case — do NOT derive the
@@ -971,4 +971,65 @@ message MetaAppendArgs {
   int32 block_index = 1;
   // Fragment bytes to append. Empty is the no-op/read path (see message docs).
   bytes fragment = 2;
+}
+
+// CredentialGetArgs resolves one operator-bound credential slot declared by
+// this plugin. The successful value arm contains the credential bytes exactly;
+// values are never placed in configuration, logs, or diagnostic errors.
+message CredentialGetArgs {
+  string slot = 1;
+}
+
+// Plugin-private files use logical slash-separated paths. The host maps them
+// into the executing plugin's private data directory; guests never receive or
+// control an operating-system path.
+message FileAppendArgs {
+  string path = 1;
+  bytes data = 2;
+}
+
+message FileReadArgs {
+  string path = 1;
+}
+
+message FileWriteArgs {
+  string path = 1;
+  bytes data = 2;
+}
+
+message FileListArgs {
+  // Empty lists the root of the declared private namespace.
+  string prefix = 1;
+}
+
+message FileListResult {
+  repeated string paths = 1;
+}
+
+message FileDeleteArgs {
+  string path = 1;
+}
+
+message HTTPHeader {
+  string name = 1;
+  repeated string values = 2;
+}
+
+// OutboundHTTPRequestArgs addresses an operator-approved endpoint slot plus a
+// relative path. A plugin cannot provide a scheme or authority at call time.
+message OutboundHTTPRequestArgs {
+  string endpoint = 1;
+  string method = 2;
+  string path = 3;
+  repeated HTTPHeader headers = 4;
+  bytes body = 5;
+  // Zero selects the host's approved default. The host may clamp a smaller
+  // positive value to the endpoint budget.
+  uint32 timeout_ms = 6;
+}
+
+message OutboundHTTPResponse {
+  int32 status = 1;
+  repeated HTTPHeader headers = 2;
+  bytes body = 3;
 }

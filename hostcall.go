@@ -6,7 +6,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 // validator is implemented by host-call argument messages with structural rules.
@@ -21,7 +21,7 @@ type validator interface {
 // *HostError. Empty command, invalid args, empty/malformed replies, and
 // transport failures return a Go error — callers that must not fail open
 // (verdicts) panic on those.
-func HostCall(cmd string, args proto.Message) ([]byte, *pbv2.HostError, error) {
+func HostCall(cmd string, args proto.Message) ([]byte, *pbv1.HostError, error) {
 	if cmd == "" {
 		return nil, nil, fmt.Errorf("torana: host-call command is required")
 	}
@@ -66,7 +66,7 @@ func HostCall(cmd string, args proto.Message) ([]byte, *pbv2.HostError, error) {
 // NOT_CONFIGURED, UNAVAILABLE, PERMISSION_DENIED), and a Go error means the
 // call could not be made or its reply was invalid. v1's `{"status":"error"}`
 // convention is deliberately NOT preserved — it is the ambiguous error channel
-// v2 exists to remove. A domain result may still carry a status field where
+// v1 exists to remove. A domain result may still carry a status field where
 // status is real data, such as a pricing decision.
 //
 // The two paths are disjoint on purpose. This one refuses env.-prefixed
@@ -82,7 +82,7 @@ func HostCall(cmd string, args proto.Message) ([]byte, *pbv2.HostError, error) {
 // Extension commands are NOT open-ended today. sdk.Permissions is a closed
 // allowlist and hosts must not invent names; a third-party extension registry
 // would be a separate platform feature.
-func HostCallExtension(cmd string, args []byte) ([]byte, *pbv2.HostError, error) {
+func HostCallExtension(cmd string, args []byte) ([]byte, *pbv1.HostError, error) {
 	if cmd == "" {
 		return nil, nil, fmt.Errorf("torana: extension host-call command is required")
 	}
@@ -109,7 +109,7 @@ func HostCallExtension(cmd string, args []byte) ([]byte, *pbv2.HostError, error)
 // HostCallExtension differ only in how the REQUEST body is produced; sharing
 // this means the two cannot drift on how a refusal or a malformed frame is
 // reported.
-func dispatchHostCall(cmd string, argBytes []byte) ([]byte, *pbv2.HostError, error) {
+func dispatchHostCall(cmd string, argBytes []byte) ([]byte, *pbv1.HostError, error) {
 	raw, err := hostCallRaw(cmd, argBytes)
 	if err != nil {
 		return nil, nil, err
@@ -118,7 +118,7 @@ func dispatchHostCall(cmd string, argBytes []byte) ([]byte, *pbv2.HostError, err
 		return nil, nil, fmt.Errorf("torana: host-call returned an empty reply; " +
 			"HostCallResult requires a result arm")
 	}
-	var res pbv2.HostCallResult
+	var res pbv1.HostCallResult
 	if err := proto.Unmarshal(raw, &res); err != nil {
 		return nil, nil, fmt.Errorf("torana: decode host-call result: %w", err)
 	}
@@ -126,9 +126,9 @@ func dispatchHostCall(cmd string, argBytes []byte) ([]byte, *pbv2.HostError, err
 		return nil, nil, fmt.Errorf("torana: host-call result: %w", err)
 	}
 	switch r := res.Result.(type) {
-	case *pbv2.HostCallResult_Value:
+	case *pbv1.HostCallResult_Value:
 		return r.Value, nil, nil
-	case *pbv2.HostCallResult_Error:
+	case *pbv1.HostCallResult_Error:
 		return nil, r.Error, nil
 	default:
 		return nil, nil, fmt.Errorf("torana: host-call result has no arm")
@@ -154,22 +154,22 @@ func hostCallRaw(cmd string, args []byte) ([]byte, error) {
 // their callers, and that reason must not be the human-readable message: the
 // message is for logs and can change, while a caller branching on it needs
 // something stable.
-func hostErrorReason(herr *pbv2.HostError) string {
+func hostErrorReason(herr *pbv1.HostError) string {
 	if herr == nil {
 		return ""
 	}
 	switch herr.Code {
-	case pbv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED:
+	case pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED:
 		return "permission_denied"
-	case pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED:
+	case pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED:
 		return "not_configured"
-	case pbv2.ErrorCode_ERROR_CODE_UNAVAILABLE:
+	case pbv1.ErrorCode_ERROR_CODE_UNAVAILABLE:
 		return "unavailable"
-	case pbv2.ErrorCode_ERROR_CODE_NOT_FOUND:
+	case pbv1.ErrorCode_ERROR_CODE_NOT_FOUND:
 		return "not_found"
-	case pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT:
+	case pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT:
 		return "invalid_argument"
-	case pbv2.ErrorCode_ERROR_CODE_INTERNAL:
+	case pbv1.ErrorCode_ERROR_CODE_INTERNAL:
 		return "internal"
 	}
 	// Only UNSPECIFIED or a code from a newer build reaches here. Both mean

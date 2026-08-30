@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	plugin_sdk "github.com/torana-edge/torana-plugin-sdk"
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 // signedScope is a REFERENCE scope diff, deliberately test-only.
@@ -27,16 +27,16 @@ type signedScope struct {
 	arguments string
 }
 
-func scopeOf(events []*pbv2.StreamEvent, index int32) signedScope {
+func scopeOf(events []*pbv1.StreamEvent, index int32) signedScope {
 	var s signedScope
 	for _, ev := range events {
 		switch e := ev.Event.(type) {
-		case *pbv2.StreamEvent_ContentBlockStart:
+		case *pbv1.StreamEvent_ContentBlockStart:
 			cbs := e.ContentBlockStart
 			if cbs.Index != index {
 				continue
 			}
-			tc, ok := cbs.Block.(*pbv2.ContentBlockStart_ToolCall)
+			tc, ok := cbs.Block.(*pbv1.ContentBlockStart_ToolCall)
 			if !ok {
 				continue
 			}
@@ -44,7 +44,7 @@ func scopeOf(events []*pbv2.StreamEvent, index int32) signedScope {
 			s.signature = tc.ToolCall.Signature
 			s.id = tc.ToolCall.Id
 			s.name = tc.ToolCall.Name
-		case *pbv2.StreamEvent_ToolCallDelta:
+		case *pbv1.StreamEvent_ToolCallDelta:
 			if e.ToolCallDelta.Index == index {
 				s.arguments += e.ToolCallDelta.ArgumentsDelta
 			}
@@ -213,7 +213,7 @@ func TestValidateRejectsDuplicateBinding(t *testing.T) {
 	// A conflicting duplicate: same field, different signed content.
 	conflicting := SignatureBinding{
 		Domain:         SignatureDomainOutbound,
-		Message:        "torana.v2.ToolCallRef",
+		Message:        "torana.v1.ToolCallRef",
 		SignatureField: "signature",
 		Content: []SignatureContentRef{
 			{Scope: SignatureScopeSameMessage, Field: "id"},
@@ -237,7 +237,7 @@ func TestValidateRejectsDuplicateContentRef(t *testing.T) {
 	dup := make([]SignatureBinding, len(original))
 	copy(dup, original)
 	for i := range dup {
-		if dup[i].Message == "torana.v2.ToolCallRef" {
+		if dup[i].Message == "torana.v1.ToolCallRef" {
 			dup[i].Content = append(append([]SignatureContentRef{}, dup[i].Content...), dup[i].Content[0])
 		}
 	}
@@ -254,7 +254,7 @@ func TestValidateRejectsDuplicateRequestBinding(t *testing.T) {
 
 	conflicting := SignatureBinding{
 		Domain:         SignatureDomainRequest,
-		Message:        "torana.v2.Message",
+		Message:        "torana.v1.Message",
 		SignatureField: "thinking_signature",
 		Content: []SignatureContentRef{
 			{Scope: SignatureScopeSameMessage, Field: "thinking"},
@@ -279,7 +279,7 @@ func TestValidateRejectsDuplicateRequestContentRef(t *testing.T) {
 	copy(dup, original)
 	for i := range dup {
 		if dup[i].Domain == SignatureDomainRequest &&
-			dup[i].Message == "torana.v2.RequestThinkingBlock" && dup[i].SignatureField == "signature" {
+			dup[i].Message == "torana.v1.RequestThinkingBlock" && dup[i].SignatureField == "signature" {
 			dup[i].Content = append(append([]SignatureContentRef{}, dup[i].Content...), dup[i].Content[0])
 		}
 	}
@@ -296,11 +296,11 @@ func TestValidateRejectsDuplicateRequestContentRef(t *testing.T) {
 // review; each must be caught by at least one case.
 func TestWrongVerifiersFailTheFixtures(t *testing.T) {
 	// Pools every delta regardless of block index.
-	poolsIndexes := func(events []*pbv2.StreamEvent, index int32) signedScope {
+	poolsIndexes := func(events []*pbv1.StreamEvent, index int32) signedScope {
 		s := scopeOf(events, index)
 		s.arguments = ""
 		for _, ev := range events {
-			if d, ok := ev.Event.(*pbv2.StreamEvent_ToolCallDelta); ok {
+			if d, ok := ev.Event.(*pbv1.StreamEvent_ToolCallDelta); ok {
 				s.arguments += d.ToolCallDelta.ArgumentsDelta
 			}
 		}
@@ -309,11 +309,11 @@ func TestWrongVerifiersFailTheFixtures(t *testing.T) {
 	// Signs only the arguments, omitting id and name from the scope.
 	argsOnly := func(a, b signedScope) bool { return a.arguments != b.arguments }
 	// Compares the first fragment instead of the assembled arguments.
-	firstFragment := func(events []*pbv2.StreamEvent, index int32) signedScope {
+	firstFragment := func(events []*pbv1.StreamEvent, index int32) signedScope {
 		s := scopeOf(events, index)
 		s.arguments = ""
 		for _, ev := range events {
-			if d, ok := ev.Event.(*pbv2.StreamEvent_ToolCallDelta); ok && d.ToolCallDelta.Index == index {
+			if d, ok := ev.Event.(*pbv1.StreamEvent_ToolCallDelta); ok && d.ToolCallDelta.Index == index {
 				s.arguments = d.ToolCallDelta.ArgumentsDelta
 				break
 			}
@@ -323,7 +323,7 @@ func TestWrongVerifiersFailTheFixtures(t *testing.T) {
 
 	for _, w := range []struct {
 		name    string
-		scope   func([]*pbv2.StreamEvent, int32) signedScope
+		scope   func([]*pbv1.StreamEvent, int32) signedScope
 		changed func(a, b signedScope) bool
 	}{
 		{"pools deltas across block indexes", poolsIndexes, contentChanged},
@@ -359,7 +359,7 @@ func TestConcurrentToolFixtureCoversBothIndexes(t *testing.T) {
 		// blocks before either closes.
 		var sawStarts []int32
 		for _, ev := range f.Accepted {
-			if s, ok := ev.Event.(*pbv2.StreamEvent_ContentBlockStart); ok && s.ContentBlockStart.GetToolCall() != nil {
+			if s, ok := ev.Event.(*pbv1.StreamEvent_ContentBlockStart); ok && s.ContentBlockStart.GetToolCall() != nil {
 				sawStarts = append(sawStarts, s.ContentBlockStart.Index)
 			}
 		}

@@ -14,7 +14,7 @@ import (
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 // metaHost is a minimal host-backed meta_append store for StreamAssembler Feed tests.
@@ -31,10 +31,10 @@ func (m *metaHost) handle(cmd string, args []byte) ([]byte, error) {
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, cmd)
 	switch cmd {
-	case pbv2.MetaAppendCommand:
-		var a pbv2.MetaAppendArgs
+	case pbv1.MetaAppendCommand:
+		var a pbv1.MetaAppendArgs
 		if err := proto.Unmarshal(args, &a); err != nil {
-			return marshalHostErr(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "bad"), nil
+			return marshalHostErr(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "bad"), nil
 		}
 		key := "block:" + strconv.FormatInt(int64(a.BlockIndex), 10)
 		existing, present := m.meta[key]
@@ -43,9 +43,9 @@ func (m *metaHost) handle(cmd string, args []byte) ([]byte, error) {
 			existing = m.meta[key]
 			present = true
 		}
-		val := pbv2.MetaAppendSuccessValue(a.Fragment, []byte(existing), present)
-		raw, _ := proto.Marshal(&pbv2.HostCallResult{
-			Result: &pbv2.HostCallResult_Value{Value: val},
+		val := pbv1.MetaAppendSuccessValue(a.Fragment, []byte(existing), present)
+		raw, _ := proto.Marshal(&pbv1.HostCallResult{
+			Result: &pbv1.HostCallResult_Value{Value: val},
 		})
 		return raw, nil
 	default:
@@ -53,9 +53,9 @@ func (m *metaHost) handle(cmd string, args []byte) ([]byte, error) {
 	}
 }
 
-func marshalHostErr(code pbv2.ErrorCode, msg string) []byte {
-	raw, _ := proto.Marshal(&pbv2.HostCallResult{
-		Result: &pbv2.HostCallResult_Error{Error: &pbv2.HostError{Code: code, Message: msg}},
+func marshalHostErr(code pbv1.ErrorCode, msg string) []byte {
+	raw, _ := proto.Marshal(&pbv1.HostCallResult{
+		Result: &pbv1.HostCallResult_Error{Error: &pbv1.HostError{Code: code, Message: msg}},
 	})
 	return raw
 }
@@ -66,7 +66,7 @@ func withMetaHost(m *metaHost, fn func()) {
 
 func TestStreamAssemblerFeedPassThroughWithoutAssembly(t *testing.T) {
 	asm := NewStreamAssembler()
-	ev := &pbv2.StreamEvent{Event: &pbv2.StreamEvent_TextDelta{TextDelta: "x"}}
+	ev := &pbv1.StreamEvent{Event: &pbv1.StreamEvent_TextDelta{TextDelta: "x"}}
 	fr := asm.Feed(ev)
 	if fr.Err != nil || fr.Suppress || len(fr.Emit) != 1 || fr.Emit[0] != ev {
 		t.Fatalf("%+v", fr)
@@ -77,10 +77,10 @@ func TestStreamAssemblerFeedCrossInstance(t *testing.T) {
 	m := newMetaHost()
 	withMetaHost(m, func() {
 		a1 := NewStreamAssembler().WithToolAssembly()
-		start := &pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStart{
-			ContentBlockStart: &pbv2.ContentBlockStart{
+		start := &pbv1.StreamEvent{Event: &pbv1.StreamEvent_ContentBlockStart{
+			ContentBlockStart: &pbv1.ContentBlockStart{
 				Index: 3,
-				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{
+				Block: &pbv1.ContentBlockStart_ToolCall{ToolCall: &pbv1.ToolCallRef{
 					Id: "c", Name: "n", Signature: "sig",
 				}},
 			},
@@ -88,21 +88,21 @@ func TestStreamAssemblerFeedCrossInstance(t *testing.T) {
 		if fr := a1.Feed(start); !fr.Suppress || fr.Err != nil {
 			t.Fatalf("start %+v", fr)
 		}
-		if fr := a1.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ToolCallDelta{
-			ToolCallDelta: &pbv2.ToolCallDelta{Index: 3, ArgumentsDelta: `{"p":`},
+		if fr := a1.Feed(&pbv1.StreamEvent{Event: &pbv1.StreamEvent_ToolCallDelta{
+			ToolCallDelta: &pbv1.ToolCallDelta{Index: 3, ArgumentsDelta: `{"p":`},
 		}}); !fr.Suppress || fr.Err != nil {
 			t.Fatalf("delta1 %+v", fr)
 		}
 
 		// New Go object, same request-scoped host meta (cross-dispatch).
 		a2 := NewStreamAssembler().WithToolAssembly()
-		if fr := a2.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ToolCallDelta{
-			ToolCallDelta: &pbv2.ToolCallDelta{Index: 3, ArgumentsDelta: `1}`},
+		if fr := a2.Feed(&pbv1.StreamEvent{Event: &pbv1.StreamEvent_ToolCallDelta{
+			ToolCallDelta: &pbv1.ToolCallDelta{Index: 3, ArgumentsDelta: `1}`},
 		}}); !fr.Suppress || fr.Err != nil {
 			t.Fatalf("delta2 %+v", fr)
 		}
-		fr := a2.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStop{
-			ContentBlockStop: &pbv2.ContentBlockStop{Index: 3},
+		fr := a2.Feed(&pbv1.StreamEvent{Event: &pbv1.StreamEvent_ContentBlockStop{
+			ContentBlockStop: &pbv1.ContentBlockStop{Index: 3},
 		}})
 		if fr.Err != nil || fr.Complete == nil || fr.Complete.Arguments != `{"p":1}` {
 			t.Fatalf("complete %+v", fr)
@@ -121,10 +121,10 @@ func TestStreamAssemblerOneHostCallPerFragment(t *testing.T) {
 	m := newMetaHost()
 	withMetaHost(m, func() {
 		asm := NewStreamAssembler().WithToolAssembly()
-		if fr := asm.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStart{
-			ContentBlockStart: &pbv2.ContentBlockStart{
+		if fr := asm.Feed(&pbv1.StreamEvent{Event: &pbv1.StreamEvent_ContentBlockStart{
+			ContentBlockStart: &pbv1.ContentBlockStart{
 				Index: 0,
-				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{
+				Block: &pbv1.ContentBlockStart_ToolCall{ToolCall: &pbv1.ToolCallRef{
 					Id: "1", Name: "t",
 				}},
 			},
@@ -132,14 +132,14 @@ func TestStreamAssemblerOneHostCallPerFragment(t *testing.T) {
 			t.Fatal(fr.Err)
 		}
 		for i := 0; i < n; i++ {
-			if fr := asm.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ToolCallDelta{
-				ToolCallDelta: &pbv2.ToolCallDelta{Index: 0, ArgumentsDelta: "x"},
+			if fr := asm.Feed(&pbv1.StreamEvent{Event: &pbv1.StreamEvent_ToolCallDelta{
+				ToolCallDelta: &pbv1.ToolCallDelta{Index: 0, ArgumentsDelta: "x"},
 			}}); fr.Err != nil {
 				t.Fatal(fr.Err)
 			}
 		}
-		if fr := asm.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStop{
-			ContentBlockStop: &pbv2.ContentBlockStop{Index: 0},
+		if fr := asm.Feed(&pbv1.StreamEvent{Event: &pbv1.StreamEvent_ContentBlockStop{
+			ContentBlockStop: &pbv1.ContentBlockStop{Index: 0},
 		}}); fr.Err != nil || fr.Complete == nil {
 			t.Fatalf("%+v", fr)
 		}
@@ -147,7 +147,7 @@ func TestStreamAssemblerOneHostCallPerFragment(t *testing.T) {
 	want := n + 2 // start + N deltas + stop read
 	var metaAppend int
 	for _, c := range m.calls {
-		if c == pbv2.MetaAppendCommand {
+		if c == pbv1.MetaAppendCommand {
 			metaAppend++
 		}
 		if c == "env.meta_set" || c == "env.meta_get" {
@@ -162,17 +162,17 @@ func TestStreamAssemblerOneHostCallPerFragment(t *testing.T) {
 func TestStreamAssemblerFeedMetaAppendDenied(t *testing.T) {
 	WithTestHost(&TestHost{
 		HostCall: func(cmd string, args []byte) ([]byte, error) {
-			if cmd == pbv2.MetaAppendCommand {
-				return marshalHostErr(pbv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "permission denied"), nil
+			if cmd == pbv1.MetaAppendCommand {
+				return marshalHostErr(pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "permission denied"), nil
 			}
 			return nil, nil
 		},
 	}, func() {
 		asm := NewStreamAssembler().WithToolAssembly()
-		fr := asm.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStart{
-			ContentBlockStart: &pbv2.ContentBlockStart{
+		fr := asm.Feed(&pbv1.StreamEvent{Event: &pbv1.StreamEvent_ContentBlockStart{
+			ContentBlockStart: &pbv1.ContentBlockStart{
 				Index: 0,
-				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{
+				Block: &pbv1.ContentBlockStart_ToolCall{ToolCall: &pbv1.ToolCallRef{
 					Id: "1", Name: "n",
 				}},
 			},
@@ -189,33 +189,33 @@ func TestStreamAssemblerFeedMetaAppendDenied(t *testing.T) {
 func TestStreamAssemblerFeedCorruptFrameOnStop(t *testing.T) {
 	WithTestHost(&TestHost{
 		HostCall: func(cmd string, args []byte) ([]byte, error) {
-			if cmd != pbv2.MetaAppendCommand {
+			if cmd != pbv1.MetaAppendCommand {
 				return nil, nil
 			}
-			var a pbv2.MetaAppendArgs
+			var a pbv1.MetaAppendArgs
 			_ = proto.Unmarshal(args, &a)
 			// Read path: return garbage that is not a framed ToolCallRef.
 			if len(a.Fragment) == 0 {
-				raw, _ := proto.Marshal(&pbv2.HostCallResult{
-					Result: &pbv2.HostCallResult_Value{Value: []byte("!!!")},
+				raw, _ := proto.Marshal(&pbv1.HostCallResult{
+					Result: &pbv1.HostCallResult_Value{Value: []byte("!!!")},
 				})
 				return raw, nil
 			}
-			raw, _ := proto.Marshal(&pbv2.HostCallResult{
-				Result: &pbv2.HostCallResult_Value{Value: nil},
+			raw, _ := proto.Marshal(&pbv1.HostCallResult{
+				Result: &pbv1.HostCallResult_Value{Value: nil},
 			})
 			return raw, nil
 		},
 	}, func() {
 		asm := NewStreamAssembler().WithToolAssembly()
-		_ = asm.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStart{
-			ContentBlockStart: &pbv2.ContentBlockStart{
+		_ = asm.Feed(&pbv1.StreamEvent{Event: &pbv1.StreamEvent_ContentBlockStart{
+			ContentBlockStart: &pbv1.ContentBlockStart{
 				Index: 0,
-				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{Id: "1", Name: "n"}},
+				Block: &pbv1.ContentBlockStart_ToolCall{ToolCall: &pbv1.ToolCallRef{Id: "1", Name: "n"}},
 			},
 		}})
-		fr := asm.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStop{
-			ContentBlockStop: &pbv2.ContentBlockStop{Index: 0},
+		fr := asm.Feed(&pbv1.StreamEvent{Event: &pbv1.StreamEvent_ContentBlockStop{
+			ContentBlockStop: &pbv1.ContentBlockStop{Index: 0},
 		}})
 		if fr.Err == nil {
 			t.Fatal("corrupt frame must error")
@@ -234,21 +234,21 @@ func TestStreamAssemblerInterleavedToolBlocks(t *testing.T) {
 	m := newMetaHost()
 	withMetaHost(m, func() {
 		asm := NewStreamAssembler().WithToolAssembly()
-		events := []*pbv2.StreamEvent{
-			{Event: &pbv2.StreamEvent_ContentBlockStart{ContentBlockStart: &pbv2.ContentBlockStart{
+		events := []*pbv1.StreamEvent{
+			{Event: &pbv1.StreamEvent_ContentBlockStart{ContentBlockStart: &pbv1.ContentBlockStart{
 				Index: 0,
-				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{Id: "call_1", Name: "read_file"}},
+				Block: &pbv1.ContentBlockStart_ToolCall{ToolCall: &pbv1.ToolCallRef{Id: "call_1", Name: "read_file"}},
 			}}},
-			{Event: &pbv2.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv2.ToolCallDelta{Index: 0, ArgumentsDelta: `{"path":`}}},
-			{Event: &pbv2.StreamEvent_ContentBlockStart{ContentBlockStart: &pbv2.ContentBlockStart{
+			{Event: &pbv1.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv1.ToolCallDelta{Index: 0, ArgumentsDelta: `{"path":`}}},
+			{Event: &pbv1.StreamEvent_ContentBlockStart{ContentBlockStart: &pbv1.ContentBlockStart{
 				Index: 1,
-				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{Id: "call_2", Name: "write_file"}},
+				Block: &pbv1.ContentBlockStart_ToolCall{ToolCall: &pbv1.ToolCallRef{Id: "call_2", Name: "write_file"}},
 			}}},
-			{Event: &pbv2.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv2.ToolCallDelta{Index: 1, ArgumentsDelta: `{"path":`}}},
-			{Event: &pbv2.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv2.ToolCallDelta{Index: 0, ArgumentsDelta: `"/a"}`}}},
-			{Event: &pbv2.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv2.ToolCallDelta{Index: 1, ArgumentsDelta: `"/b"}`}}},
-			{Event: &pbv2.StreamEvent_ContentBlockStop{ContentBlockStop: &pbv2.ContentBlockStop{Index: 0}}},
-			{Event: &pbv2.StreamEvent_ContentBlockStop{ContentBlockStop: &pbv2.ContentBlockStop{Index: 1}}},
+			{Event: &pbv1.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv1.ToolCallDelta{Index: 1, ArgumentsDelta: `{"path":`}}},
+			{Event: &pbv1.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv1.ToolCallDelta{Index: 0, ArgumentsDelta: `"/a"}`}}},
+			{Event: &pbv1.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv1.ToolCallDelta{Index: 1, ArgumentsDelta: `"/b"}`}}},
+			{Event: &pbv1.StreamEvent_ContentBlockStop{ContentBlockStop: &pbv1.ContentBlockStop{Index: 0}}},
+			{Event: &pbv1.StreamEvent_ContentBlockStop{ContentBlockStop: &pbv1.ContentBlockStop{Index: 1}}},
 		}
 
 		var got []ToolCall
@@ -286,10 +286,10 @@ func TestStreamAssemblerPassesNonToolStartThroughWhileToolOpen(t *testing.T) {
 	m := newMetaHost()
 	withMetaHost(m, func() {
 		asm := NewStreamAssembler().WithToolAssembly()
-		fr := asm.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStart{
-			ContentBlockStart: &pbv2.ContentBlockStart{
+		fr := asm.Feed(&pbv1.StreamEvent{Event: &pbv1.StreamEvent_ContentBlockStart{
+			ContentBlockStart: &pbv1.ContentBlockStart{
 				Index: 0,
-				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{Id: "c", Name: "n"}},
+				Block: &pbv1.ContentBlockStart_ToolCall{ToolCall: &pbv1.ToolCallRef{Id: "c", Name: "n"}},
 			},
 		}})
 		if !fr.Suppress || fr.Err != nil {
@@ -297,10 +297,10 @@ func TestStreamAssemblerPassesNonToolStartThroughWhileToolOpen(t *testing.T) {
 		}
 
 		// Text start while the tool block is open: passed through, not buffered.
-		fr = asm.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStart{
-			ContentBlockStart: &pbv2.ContentBlockStart{
+		fr = asm.Feed(&pbv1.StreamEvent{Event: &pbv1.StreamEvent_ContentBlockStart{
+			ContentBlockStart: &pbv1.ContentBlockStart{
 				Index: 1,
-				Block: &pbv2.ContentBlockStart_Text{Text: &pbv2.TextBlock{}},
+				Block: &pbv1.ContentBlockStart_Text{Text: &pbv1.TextBlock{}},
 			},
 		}})
 		if fr.Err != nil || fr.Suppress || fr.Complete != nil || len(fr.Emit) != 1 {
@@ -308,13 +308,13 @@ func TestStreamAssemblerPassesNonToolStartThroughWhileToolOpen(t *testing.T) {
 		}
 
 		// The tool block's own deltas still assemble independently.
-		if fr := asm.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ToolCallDelta{
-			ToolCallDelta: &pbv2.ToolCallDelta{Index: 0, ArgumentsDelta: `{"a":1}`},
+		if fr := asm.Feed(&pbv1.StreamEvent{Event: &pbv1.StreamEvent_ToolCallDelta{
+			ToolCallDelta: &pbv1.ToolCallDelta{Index: 0, ArgumentsDelta: `{"a":1}`},
 		}}); !fr.Suppress || fr.Err != nil {
 			t.Fatalf("delta %+v", fr)
 		}
-		fr = asm.Feed(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStop{
-			ContentBlockStop: &pbv2.ContentBlockStop{Index: 0},
+		fr = asm.Feed(&pbv1.StreamEvent{Event: &pbv1.StreamEvent_ContentBlockStop{
+			ContentBlockStop: &pbv1.ContentBlockStop{Index: 0},
 		}})
 		if fr.Err != nil || fr.Complete == nil || fr.Complete.Arguments != `{"a":1}` {
 			t.Fatalf("stop %+v", fr)
@@ -334,24 +334,24 @@ func TestStreamHandlerConcurrentToolBlocks(t *testing.T) {
 			got = append(got, call)
 			return PassToolCall(), nil
 		})
-		events := []*pbv2.StreamEvent{
-			{Event: &pbv2.StreamEvent_ContentBlockStart{ContentBlockStart: &pbv2.ContentBlockStart{
+		events := []*pbv1.StreamEvent{
+			{Event: &pbv1.StreamEvent_ContentBlockStart{ContentBlockStart: &pbv1.ContentBlockStart{
 				Index: 0,
-				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{Id: "call_1", Name: "read_file"}},
+				Block: &pbv1.ContentBlockStart_ToolCall{ToolCall: &pbv1.ToolCallRef{Id: "call_1", Name: "read_file"}},
 			}}},
-			{Event: &pbv2.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv2.ToolCallDelta{Index: 0, ArgumentsDelta: `{"path":`}}},
-			{Event: &pbv2.StreamEvent_ContentBlockStart{ContentBlockStart: &pbv2.ContentBlockStart{
+			{Event: &pbv1.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv1.ToolCallDelta{Index: 0, ArgumentsDelta: `{"path":`}}},
+			{Event: &pbv1.StreamEvent_ContentBlockStart{ContentBlockStart: &pbv1.ContentBlockStart{
 				Index: 1,
-				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{Id: "call_2", Name: "write_file"}},
+				Block: &pbv1.ContentBlockStart_ToolCall{ToolCall: &pbv1.ToolCallRef{Id: "call_2", Name: "write_file"}},
 			}}},
-			{Event: &pbv2.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv2.ToolCallDelta{Index: 1, ArgumentsDelta: `{"path":`}}},
-			{Event: &pbv2.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv2.ToolCallDelta{Index: 0, ArgumentsDelta: `"/a"}`}}},
-			{Event: &pbv2.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv2.ToolCallDelta{Index: 1, ArgumentsDelta: `"/b"}`}}},
-			{Event: &pbv2.StreamEvent_ContentBlockStop{ContentBlockStop: &pbv2.ContentBlockStop{Index: 0}}},
-			{Event: &pbv2.StreamEvent_ContentBlockStop{ContentBlockStop: &pbv2.ContentBlockStop{Index: 1}}},
+			{Event: &pbv1.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv1.ToolCallDelta{Index: 1, ArgumentsDelta: `{"path":`}}},
+			{Event: &pbv1.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv1.ToolCallDelta{Index: 0, ArgumentsDelta: `"/a"}`}}},
+			{Event: &pbv1.StreamEvent_ToolCallDelta{ToolCallDelta: &pbv1.ToolCallDelta{Index: 1, ArgumentsDelta: `"/b"}`}}},
+			{Event: &pbv1.StreamEvent_ContentBlockStop{ContentBlockStop: &pbv1.ContentBlockStop{Index: 0}}},
+			{Event: &pbv1.StreamEvent_ContentBlockStop{ContentBlockStop: &pbv1.ContentBlockStop{Index: 1}}},
 		}
 
-		var emitted []*pbv2.StreamEvent
+		var emitted []*pbv1.StreamEvent
 		for _, ev := range events {
 			res, err := h.Handle(context.Background(), ev)
 			if err != nil {
@@ -418,7 +418,7 @@ func TestEmitAssembledToolCallClearsSignatureOnReplace(t *testing.T) {
 }
 
 func TestToolFrameRoundTripPreservesFraming(t *testing.T) {
-	ref := &pbv2.ToolCallRef{Id: "id", Name: "name", Signature: "sig"}
+	ref := &pbv1.ToolCallRef{Id: "id", Name: "name", Signature: "sig"}
 	frame, err := encodeToolFrameHeader(ref)
 	if err != nil {
 		t.Fatal(err)
@@ -438,16 +438,16 @@ func TestToolFrameRoundTripPreservesFraming(t *testing.T) {
 
 // refWithUnknownField builds a ToolCallRef carrying a field this build does
 // not know, the way a newer host would send one.
-func refWithUnknownField(t *testing.T, id, name, sig string) *pbv2.ToolCallRef {
+func refWithUnknownField(t *testing.T, id, name, sig string) *pbv1.ToolCallRef {
 	t.Helper()
-	raw, err := proto.Marshal(&pbv2.ToolCallRef{Id: id, Name: name, Signature: sig})
+	raw, err := proto.Marshal(&pbv1.ToolCallRef{Id: id, Name: name, Signature: sig})
 	if err != nil {
 		t.Fatal(err)
 	}
 	raw = protowire.AppendTag(raw, 99, protowire.BytesType)
 	raw = protowire.AppendBytes(raw, []byte("from-a-newer-host"))
 
-	ref := &pbv2.ToolCallRef{}
+	ref := &pbv1.ToolCallRef{}
 	if err := proto.Unmarshal(raw, ref); err != nil {
 		t.Fatal(err)
 	}
@@ -457,14 +457,14 @@ func refWithUnknownField(t *testing.T, id, name, sig string) *pbv2.ToolCallRef {
 	return ref
 }
 
-func unknownOf(t *testing.T, events []*pbv2.StreamEvent) []byte {
+func unknownOf(t *testing.T, events []*pbv1.StreamEvent) []byte {
 	t.Helper()
 	for _, ev := range events {
-		s, ok := ev.Event.(*pbv2.StreamEvent_ContentBlockStart)
+		s, ok := ev.Event.(*pbv1.StreamEvent_ContentBlockStart)
 		if !ok {
 			continue
 		}
-		tc, ok := s.ContentBlockStart.Block.(*pbv2.ContentBlockStart_ToolCall)
+		tc, ok := s.ContentBlockStart.Block.(*pbv1.ContentBlockStart_ToolCall)
 		if !ok {
 			t.Fatal("block start is not a tool call")
 		}
@@ -517,8 +517,8 @@ func TestClonedRefStillClearsSignatureOnReplace(t *testing.T) {
 	}
 	events := EmitAssembledToolCall(call, `{"path":"/b"}`)
 	for _, ev := range events {
-		if s, ok := ev.Event.(*pbv2.StreamEvent_ContentBlockStart); ok {
-			tc := s.ContentBlockStart.Block.(*pbv2.ContentBlockStart_ToolCall)
+		if s, ok := ev.Event.(*pbv1.StreamEvent_ContentBlockStart); ok {
+			tc := s.ContentBlockStart.Block.(*pbv1.ContentBlockStart_ToolCall)
 			if tc.ToolCall.Signature != "" {
 				t.Fatalf("signature survived an argument replacement: %q", tc.ToolCall.Signature)
 			}
@@ -536,8 +536,8 @@ func TestReemitDoesNotAliasTheStoredRef(t *testing.T) {
 	}
 	events := EmitAssembledToolCall(call, `{"path":"/a"}`)
 	for _, ev := range events {
-		if s, ok := ev.Event.(*pbv2.StreamEvent_ContentBlockStart); ok {
-			s.ContentBlockStart.Block.(*pbv2.ContentBlockStart_ToolCall).ToolCall.Id = "mutated"
+		if s, ok := ev.Event.(*pbv1.StreamEvent_ContentBlockStart); ok {
+			s.ContentBlockStart.Block.(*pbv1.ContentBlockStart_ToolCall).ToolCall.Id = "mutated"
 		}
 	}
 	if call.ref.Id != "call_1" {

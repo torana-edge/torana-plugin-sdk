@@ -1,7 +1,7 @@
 # Torana Plugin SDK for Rust
 
 Rust bindings, safe memory plumbing, typed host-call results, and a single-hook
-dispatcher for Torana's WASM Plugin ABI v2. The crate requires Rust 1.85 or
+dispatcher for Torana's WASM Plugin ABI v1. The crate requires Rust 1.85 or
 newer and `protoc`.
 
 Add the crate and build for WASI Preview 1:
@@ -19,14 +19,14 @@ rustup target add wasm32-wasip1
 cargo build --release --target wasm32-wasip1
 ```
 
-Declare the hooks your dispatcher handles and export the v2 surface:
+Declare the hooks your dispatcher handles and export the v1 surface:
 
 ```rust
-use torana_plugin_sdk::{export_plugin_v2, pbv2, HOOK_BEFORE_REQUEST};
+use torana_plugin_sdk::{export_plugin_v1, pbv1, HOOK_BEFORE_REQUEST};
 
-fn dispatch(input: pbv2::HookInput) -> Result<Option<pbv2::HookResult>, String> {
+fn dispatch(input: pbv1::HookInput) -> Result<Option<pbv1::HookResult>, String> {
     match input.payload {
-        Some(pbv2::hook_input::Payload::ChatRequest(request)) => {
+        Some(pbv1::hook_input::Payload::ChatRequest(request)) => {
             println!("model: {}", request.model);
             Ok(None) // exact pass-through
         }
@@ -34,11 +34,11 @@ fn dispatch(input: pbv2::HookInput) -> Result<Option<pbv2::HookResult>, String> 
     }
 }
 
-export_plugin_v2!(HOOK_BEFORE_REQUEST, dispatch);
+export_plugin_v1!(HOOK_BEFORE_REQUEST, dispatch);
 ```
 
 `Ok(None)` is the only pass-through spelling. A returned `HookResult` must use
-the action belonging to the dispatched hook. Use `host_call_v2` for
+the action belonging to the dispatched hook. Use `host_call` for
 protobuf-framed host calls and branch on `HostCallError::Refused(error).code`,
 never the diagnostic text.
 

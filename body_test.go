@@ -13,27 +13,27 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
-func textBlock(text string) *pbv2.RequestBlock {
-	return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: text}}}
+func textBlock(text string) *pbv1.RequestBlock {
+	return &pbv1.RequestBlock{Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: text}}}
 }
 
-func helperMsg() *pbv2.Message {
-	return &pbv2.Message{
+func helperMsg() *pbv1.Message {
+	return &pbv1.Message{
 		Role: "assistant",
-		Blocks: []*pbv2.RequestBlock{
-			{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "one", Signature: "S1"}}},
-			{Kind: &pbv2.RequestBlock_Thinking{Thinking: &pbv2.RequestThinkingBlock{Text: "reason", Signature: "ST"}}},
-			{Kind: &pbv2.RequestBlock_ToolUse{ToolUse: &pbv2.RequestToolUseBlock{
+		Blocks: []*pbv1.RequestBlock{
+			{Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: "one", Signature: "S1"}}},
+			{Kind: &pbv1.RequestBlock_Thinking{Thinking: &pbv1.RequestThinkingBlock{Text: "reason", Signature: "ST"}}},
+			{Kind: &pbv1.RequestBlock_ToolUse{ToolUse: &pbv1.RequestToolUseBlock{
 				Id: "t1", Name: "read", ArgumentsJson: []byte(`{"path":"x"}`), Signature: "SC",
 			}}},
-			{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "two"}}},
-			{Kind: &pbv2.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.RequestCacheBreakpoint{
+			{Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: "two"}}},
+			{Kind: &pbv1.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv1.RequestCacheBreakpoint{
 				MarkerJson: []byte(`{"type":"ephemeral"}`),
 			}}},
-			{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: &pbv2.RequestTrailingSignatureBlock{Signature: "STRAIL"}}},
+			{Kind: &pbv1.RequestBlock_TrailingSignature{TrailingSignature: &pbv1.RequestTrailingSignatureBlock{Signature: "STRAIL"}}},
 		},
 	}
 }
@@ -117,8 +117,8 @@ func TestReplaceAllText(t *testing.T) {
 	}
 
 	// No text block at all: appended at the end.
-	none := &pbv2.Message{Role: "user", Blocks: []*pbv2.RequestBlock{{
-		Kind: &pbv2.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.RequestCacheBreakpoint{MarkerJson: []byte(`{}`)}},
+	none := &pbv1.Message{Role: "user", Blocks: []*pbv1.RequestBlock{{
+		Kind: &pbv1.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv1.RequestCacheBreakpoint{MarkerJson: []byte(`{}`)}},
 	}}}
 	if err := ReplaceAllText(none, "added"); err != nil {
 		t.Fatal(err)
@@ -143,12 +143,12 @@ func TestToolCallsAndResults(t *testing.T) {
 		t.Fatal("view shares memory with the message")
 	}
 
-	results := ToolResults(&pbv2.Message{Role: "user", Blocks: []*pbv2.RequestBlock{{
-		Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+	results := ToolResults(&pbv1.Message{Role: "user", Blocks: []*pbv1.RequestBlock{{
+		Kind: &pbv1.RequestBlock_ToolResult{ToolResult: &pbv1.RequestToolResultBlock{
 			ToolCallId: "t1",
-			Content: []*pbv2.ToolResultContentBlock{
-				{Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: "ok"}}},
-				{Kind: &pbv2.ToolResultContentBlock_Unknown{Unknown: &pbv2.ToolResultUnknownBlock{
+			Content: []*pbv1.ToolResultContentBlock{
+				{Kind: &pbv1.ToolResultContentBlock_Text{Text: &pbv1.ToolResultTextBlock{Text: "ok"}}},
+				{Kind: &pbv1.ToolResultContentBlock_Unknown{Unknown: &pbv1.ToolResultUnknownBlock{
 					Kind: "json", PayloadJson: []byte(`{"score":42}`),
 				}}},
 			},
@@ -163,7 +163,7 @@ func TestToolCallsAndResults(t *testing.T) {
 }
 
 func TestAddAndReplaceToolCall(t *testing.T) {
-	m := &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{textBlock("hi")}}
+	m := &pbv1.Message{Role: "assistant", Blocks: []*pbv1.RequestBlock{textBlock("hi")}}
 	if err := AddToolCall(m, 1, ToolCallInput{Id: "t9", Name: "write", Arguments: []byte(`{"f":"g"}`)}); err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestCacheBreakpoints(t *testing.T) {
 	if cc := CacheControl(m); cc["type"] != "ephemeral" {
 		t.Fatalf("CacheControl: %+v", cc)
 	}
-	if CacheControl(&pbv2.Message{Role: "user", Blocks: []*pbv2.RequestBlock{textBlock("x")}}) != nil {
+	if CacheControl(&pbv1.Message{Role: "user", Blocks: []*pbv1.RequestBlock{textBlock("x")}}) != nil {
 		t.Fatal("CacheControl on a marker-free message must be nil")
 	}
 
@@ -256,8 +256,8 @@ func TestCacheBreakpoints(t *testing.T) {
 // decode/re-encode would reorder keys and change the cached prefix.
 func TestBodyHelpersMarkerBytesVerbatim(t *testing.T) {
 	marker := []byte(`{ "zebra" : 1 , "apple" : 2 }`)
-	m := &pbv2.Message{Role: "user", Blocks: []*pbv2.RequestBlock{
-		{Kind: &pbv2.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.RequestCacheBreakpoint{MarkerJson: marker}}},
+	m := &pbv1.Message{Role: "user", Blocks: []*pbv1.RequestBlock{
+		{Kind: &pbv1.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv1.RequestCacheBreakpoint{MarkerJson: marker}}},
 	}}
 	views := CacheBreakpoints(m)
 	if !bytes.Equal(views[0].Marker, marker) {
@@ -269,12 +269,12 @@ func TestBodyHelpersMarkerBytesVerbatim(t *testing.T) {
 // text compaction, tool-result scanning, and cache marker placement.
 
 func ExampleReplaceAllText_textCompaction() {
-	msg := &pbv2.Message{
+	msg := &pbv1.Message{
 		Role: "tool",
-		Blocks: []*pbv2.RequestBlock{
-			{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "long output line one\n"}}},
-			{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "long output line two\n"}}},
-			{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "long output line three\n"}}},
+		Blocks: []*pbv1.RequestBlock{
+			{Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: "long output line one\n"}}},
+			{Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: "long output line two\n"}}},
+			{Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: "long output line three\n"}}},
 		},
 	}
 	// A compactor collapses the whole text to its replacement, exactly once.
@@ -286,15 +286,15 @@ func ExampleReplaceAllText_textCompaction() {
 }
 
 func ExampleToolResults_toolResultScanning() {
-	msg := &pbv2.Message{
+	msg := &pbv1.Message{
 		Role: "user",
-		Blocks: []*pbv2.RequestBlock{
-			{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "see"}}},
-			{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+		Blocks: []*pbv1.RequestBlock{
+			{Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: "see"}}},
+			{Kind: &pbv1.RequestBlock_ToolResult{ToolResult: &pbv1.RequestToolResultBlock{
 				ToolCallId: "call_1",
-				Content: []*pbv2.ToolResultContentBlock{
-					{Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: "the answer"}}},
-					{Kind: &pbv2.ToolResultContentBlock_Unknown{Unknown: &pbv2.ToolResultUnknownBlock{
+				Content: []*pbv1.ToolResultContentBlock{
+					{Kind: &pbv1.ToolResultContentBlock_Text{Text: &pbv1.ToolResultTextBlock{Text: "the answer"}}},
+					{Kind: &pbv1.ToolResultContentBlock_Unknown{Unknown: &pbv1.ToolResultUnknownBlock{
 						Kind: "json", PayloadJson: []byte(`{"score":42}`),
 					}}},
 				},
@@ -316,10 +316,10 @@ func ExampleToolResults_toolResultScanning() {
 }
 
 func ExampleCacheBreakpoints_cacheMarkerPlacement() {
-	msg := &pbv2.Message{
+	msg := &pbv1.Message{
 		Role: "assistant",
-		Blocks: []*pbv2.RequestBlock{
-			{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "answer"}}},
+		Blocks: []*pbv1.RequestBlock{
+			{Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: "answer"}}},
 		},
 	}
 	// A warmer places a breakpoint after the content it covers.
@@ -341,24 +341,24 @@ func ExampleCacheBreakpoints_cacheMarkerPlacement() {
 // unchanged; typed-nil block adversaries must error, not panic; and no
 // helper may break trailing-signature finality.
 func TestHelperPropertyMatrix(t *testing.T) {
-	valid := func(m *pbv2.Message) bool {
-		return (&pbv2.ChatRequest{Messages: []*pbv2.Message{m}}).ValidateReplacement() == nil
+	valid := func(m *pbv1.Message) bool {
+		return (&pbv1.ChatRequest{Messages: []*pbv1.Message{m}}).ValidateReplacement() == nil
 	}
-	snapshot := func(m *pbv2.Message) []byte {
+	snapshot := func(m *pbv1.Message) []byte {
 		b, err := proto.Marshal(m)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return b
 	}
-	expectValid := func(t *testing.T, what string, m *pbv2.Message) {
+	expectValid := func(t *testing.T, what string, m *pbv1.Message) {
 		t.Helper()
 		if !valid(m) {
 			t.Fatalf("%s: helper output is not absolutely valid: %v",
-				what, (&pbv2.ChatRequest{Messages: []*pbv2.Message{m}}).ValidateReplacement())
+				what, (&pbv1.ChatRequest{Messages: []*pbv1.Message{m}}).ValidateReplacement())
 		}
 	}
-	expectNoopPreserves := func(t *testing.T, what string, m *pbv2.Message, before []byte) {
+	expectNoopPreserves := func(t *testing.T, what string, m *pbv1.Message, before []byte) {
 		t.Helper()
 		if !bytes.Equal(before, snapshot(m)) {
 			t.Fatalf("%s: semantic no-op changed the message", what)
@@ -394,10 +394,10 @@ func TestHelperPropertyMatrix(t *testing.T) {
 
 	// 3. No-op ReplaceAllText preserves every token (already-collapsed
 	// message with one text block equal to the requested value).
-	m = &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{
-		{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "onetwo", Signature: "S1"}}},
-		{Kind: &pbv2.RequestBlock_Thinking{Thinking: &pbv2.RequestThinkingBlock{Text: "reason", Signature: "ST"}}},
-		{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: &pbv2.RequestTrailingSignatureBlock{Signature: "STRAIL"}}},
+	m = &pbv1.Message{Role: "assistant", Blocks: []*pbv1.RequestBlock{
+		{Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: "onetwo", Signature: "S1"}}},
+		{Kind: &pbv1.RequestBlock_Thinking{Thinking: &pbv1.RequestThinkingBlock{Text: "reason", Signature: "ST"}}},
+		{Kind: &pbv1.RequestBlock_TrailingSignature{TrailingSignature: &pbv1.RequestTrailingSignatureBlock{Signature: "STRAIL"}}},
 	}}
 	before = snapshot(m)
 	if err := ReplaceAllText(m, "onetwo"); err != nil {
@@ -449,8 +449,8 @@ func TestHelperPropertyMatrix(t *testing.T) {
 	// 7. ReplaceAllText with no text block: an EXPLICIT EMPTY text block is
 	// created for the empty string (absence != empty), and a stale trailing
 	// token is removed before appending.
-	toolOnly := &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{{
-		Kind: &pbv2.RequestBlock_ToolUse{ToolUse: &pbv2.RequestToolUseBlock{
+	toolOnly := &pbv1.Message{Role: "assistant", Blocks: []*pbv1.RequestBlock{{
+		Kind: &pbv1.RequestBlock_ToolUse{ToolUse: &pbv1.RequestToolUseBlock{
 			Id: "t1", Name: "read", ArgumentsJson: []byte(`{}`),
 		}},
 	}}}
@@ -462,8 +462,8 @@ func TestHelperPropertyMatrix(t *testing.T) {
 	}
 	expectValid(t, "ReplaceAllText empty append", toolOnly)
 
-	thinkingOnly := &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{
-		{Kind: &pbv2.RequestBlock_Thinking{Thinking: &pbv2.RequestThinkingBlock{Text: "r"}}},
+	thinkingOnly := &pbv1.Message{Role: "assistant", Blocks: []*pbv1.RequestBlock{
+		{Kind: &pbv1.RequestBlock_Thinking{Thinking: &pbv1.RequestThinkingBlock{Text: "r"}}},
 	}}
 	if err := ReplaceAllText(thinkingOnly, ""); err != nil {
 		t.Fatal(err)
@@ -473,9 +473,9 @@ func TestHelperPropertyMatrix(t *testing.T) {
 	}
 	expectValid(t, "ReplaceAllText thinking + empty", thinkingOnly)
 
-	thinkingTrailing := &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{
-		{Kind: &pbv2.RequestBlock_Thinking{Thinking: &pbv2.RequestThinkingBlock{Text: "r", Signature: "ST"}}},
-		{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: &pbv2.RequestTrailingSignatureBlock{Signature: "S"}}},
+	thinkingTrailing := &pbv1.Message{Role: "assistant", Blocks: []*pbv1.RequestBlock{
+		{Kind: &pbv1.RequestBlock_Thinking{Thinking: &pbv1.RequestThinkingBlock{Text: "r", Signature: "ST"}}},
+		{Kind: &pbv1.RequestBlock_TrailingSignature{TrailingSignature: &pbv1.RequestTrailingSignatureBlock{Signature: "S"}}},
 	}}
 	if err := ReplaceAllText(thinkingTrailing, ""); err != nil {
 		t.Fatal(err)
@@ -491,10 +491,10 @@ func TestHelperPropertyMatrix(t *testing.T) {
 	// An already-explicit-empty single text block with the empty request is
 	// a byte-identical no-op preserving its signature and a valid trailing
 	// token.
-	already := &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{
-		{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "", Signature: "S1"}}},
-		{Kind: &pbv2.RequestBlock_Thinking{Thinking: &pbv2.RequestThinkingBlock{Text: "r", Signature: "ST"}}},
-		{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: &pbv2.RequestTrailingSignatureBlock{Signature: "S"}}},
+	already := &pbv1.Message{Role: "assistant", Blocks: []*pbv1.RequestBlock{
+		{Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: "", Signature: "S1"}}},
+		{Kind: &pbv1.RequestBlock_Thinking{Thinking: &pbv1.RequestThinkingBlock{Text: "r", Signature: "ST"}}},
+		{Kind: &pbv1.RequestBlock_TrailingSignature{TrailingSignature: &pbv1.RequestTrailingSignatureBlock{Signature: "S"}}},
 	}}
 	before = snapshot(already)
 	if err := ReplaceAllText(already, ""); err != nil {
@@ -505,9 +505,9 @@ func TestHelperPropertyMatrix(t *testing.T) {
 
 	// 8. ReplaceAllText with no text block and a trailing signature: the
 	// stale token is removed, the text is appended, and the result is valid.
-	none := &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{
-		{Kind: &pbv2.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.RequestCacheBreakpoint{MarkerJson: []byte(`{}`)}}},
-		{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: &pbv2.RequestTrailingSignatureBlock{Signature: "S"}}},
+	none := &pbv1.Message{Role: "assistant", Blocks: []*pbv1.RequestBlock{
+		{Kind: &pbv1.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv1.RequestCacheBreakpoint{MarkerJson: []byte(`{}`)}}},
+		{Kind: &pbv1.RequestBlock_TrailingSignature{TrailingSignature: &pbv1.RequestTrailingSignatureBlock{Signature: "S"}}},
 	}}
 	if err := ReplaceAllText(none, "added"); err != nil {
 		t.Fatal(err)
@@ -521,16 +521,16 @@ func TestHelperPropertyMatrix(t *testing.T) {
 	// 9. Errors leave the input byte-for-byte unchanged.
 	for _, tc := range []struct {
 		name string
-		call func(*pbv2.Message) error
+		call func(*pbv1.Message) error
 	}{
-		{"SetTextAt wrong kind", func(m *pbv2.Message) error { return SetTextAt(m, 1, "x") }},
-		{"SetTextAt nil block", func(m *pbv2.Message) error { return SetTextAt(m, 2, "x") }},
-		{"ReplaceToolCall nil block", func(m *pbv2.Message) error {
+		{"SetTextAt wrong kind", func(m *pbv1.Message) error { return SetTextAt(m, 1, "x") }},
+		{"SetTextAt nil block", func(m *pbv1.Message) error { return SetTextAt(m, 2, "x") }},
+		{"ReplaceToolCall nil block", func(m *pbv1.Message) error {
 			return ReplaceToolCall(m, 2, ToolCallInput{Id: "a", Name: "b", Arguments: []byte(`{}`)})
 		}},
-		{"SetCacheBreakpoint nil block", func(m *pbv2.Message) error { return SetCacheBreakpoint(m, 2, []byte(`{}`)) }},
-		{"DeleteCacheBreakpoint nil block", func(m *pbv2.Message) error { return DeleteCacheBreakpoint(m, 2) }},
-		{"AddToolCall after trailing", func(m *pbv2.Message) error {
+		{"SetCacheBreakpoint nil block", func(m *pbv1.Message) error { return SetCacheBreakpoint(m, 2, []byte(`{}`)) }},
+		{"DeleteCacheBreakpoint nil block", func(m *pbv1.Message) error { return DeleteCacheBreakpoint(m, 2) }},
+		{"AddToolCall after trailing", func(m *pbv1.Message) error {
 			return AddToolCall(m, 6, ToolCallInput{Id: "a", Name: "b", Arguments: []byte(`{}`)})
 		}},
 	} {
@@ -552,7 +552,7 @@ func TestHelperPropertyMatrix(t *testing.T) {
 
 	// 10. Typed-nil arm adversaries: wrong-kind errors, never panics.
 	m = helperMsg()
-	m.Blocks = append(m.Blocks, &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_Text{}})
+	m.Blocks = append(m.Blocks, &pbv1.RequestBlock{Kind: &pbv1.RequestBlock_Text{}})
 	before = snapshot(m)
 	if err := SetTextAt(m, 6, "x"); err == nil {
 		t.Fatal("typed-nil text arm accepted")
@@ -565,8 +565,8 @@ func TestHelperPropertyMatrix(t *testing.T) {
 // TestCacheControlUseNumber: contract-valid numeric markers must not vanish
 // through the convenience decode.
 func TestCacheControlUseNumber(t *testing.T) {
-	m := &pbv2.Message{Role: "user", Blocks: []*pbv2.RequestBlock{{
-		Kind: &pbv2.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.RequestCacheBreakpoint{
+	m := &pbv1.Message{Role: "user", Blocks: []*pbv1.RequestBlock{{
+		Kind: &pbv1.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv1.RequestCacheBreakpoint{
 			MarkerJson: []byte(`{"n":1e999,"big":18446744073709551615}`),
 		}},
 	}}}

@@ -8,7 +8,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 // StreamAssembler is the advanced, host-backed stream state machine.
@@ -40,7 +40,7 @@ func (a *StreamAssembler) WithToolAssembly() *StreamAssembler {
 // FeedResult is what Feed returns for one inbound event.
 type FeedResult struct {
 	// Emit is the events to send onward. Nil/empty with Suppress means drop.
-	Emit []*pbv2.StreamEvent
+	Emit []*pbv1.StreamEvent
 	// Suppress is true when the inbound event must not be forwarded as-is.
 	Suppress bool
 	// Complete is set when a tool-call block finished assembling.
@@ -54,7 +54,7 @@ type FeedResult struct {
 // start/deltas are suppressed and stored; on stop, Complete carries the
 // assembled call and Emit is empty until the caller decides pass/replace/
 // suppress (see EmitAssembledToolCall).
-func (a *StreamAssembler) Feed(ev *pbv2.StreamEvent) FeedResult {
+func (a *StreamAssembler) Feed(ev *pbv1.StreamEvent) FeedResult {
 	if ev == nil {
 		return FeedResult{Err: fmt.Errorf("StreamAssembler.Feed: nil event")}
 	}
@@ -62,15 +62,15 @@ func (a *StreamAssembler) Feed(ev *pbv2.StreamEvent) FeedResult {
 		return FeedResult{Err: err}
 	}
 	if !a.assembleTools {
-		return FeedResult{Emit: []*pbv2.StreamEvent{ev}}
+		return FeedResult{Emit: []*pbv1.StreamEvent{ev}}
 	}
 
 	switch e := ev.Event.(type) {
-	case *pbv2.StreamEvent_ContentBlockStart:
+	case *pbv1.StreamEvent_ContentBlockStart:
 		start := e.ContentBlockStart
 		tc := start.GetToolCall()
 		if tc == nil {
-			return FeedResult{Emit: []*pbv2.StreamEvent{ev}}
+			return FeedResult{Emit: []*pbv1.StreamEvent{ev}}
 		}
 		frame, err := encodeToolFrameHeader(tc)
 		if err != nil {
@@ -83,7 +83,7 @@ func (a *StreamAssembler) Feed(ev *pbv2.StreamEvent) FeedResult {
 		}
 		return FeedResult{Suppress: true}
 
-	case *pbv2.StreamEvent_ToolCallDelta:
+	case *pbv1.StreamEvent_ToolCallDelta:
 		d := e.ToolCallDelta
 		// Empty fragment is the meta_append read path — skip the host call.
 		if len(d.ArgumentsDelta) == 0 {
@@ -96,7 +96,7 @@ func (a *StreamAssembler) Feed(ev *pbv2.StreamEvent) FeedResult {
 		}
 		return FeedResult{Suppress: true}
 
-	case *pbv2.StreamEvent_ContentBlockStop:
+	case *pbv1.StreamEvent_ContentBlockStop:
 		stop := e.ContentBlockStop
 		buf, herr, err := MetaAppend(stop.Index, nil)
 		if err != nil {
@@ -107,7 +107,7 @@ func (a *StreamAssembler) Feed(ev *pbv2.StreamEvent) FeedResult {
 		}
 		if len(buf) == 0 {
 			// No buffer for this index — not a tool block we started.
-			return FeedResult{Emit: []*pbv2.StreamEvent{ev}}
+			return FeedResult{Emit: []*pbv1.StreamEvent{ev}}
 		}
 		ref, args, err := decodeToolFrame(buf)
 		if err != nil {
@@ -125,12 +125,12 @@ func (a *StreamAssembler) Feed(ev *pbv2.StreamEvent) FeedResult {
 			},
 		}
 
-	case *pbv2.StreamEvent_Error:
+	case *pbv1.StreamEvent_Error:
 		// Terminal mid-block: incomplete buffers stay in meta and are unused.
-		return FeedResult{Emit: []*pbv2.StreamEvent{ev}}
+		return FeedResult{Emit: []*pbv1.StreamEvent{ev}}
 
 	default:
-		return FeedResult{Emit: []*pbv2.StreamEvent{ev}}
+		return FeedResult{Emit: []*pbv1.StreamEvent{ev}}
 	}
 }
 
@@ -143,11 +143,11 @@ func (a *StreamAssembler) Feed(ev *pbv2.StreamEvent) FeedResult {
 //
 // A caller that constructed the ToolCall itself has no ref to preserve, so one
 // is built from the known fields.
-func reemitRef(call ToolCall, sig string) *pbv2.ToolCallRef {
+func reemitRef(call ToolCall, sig string) *pbv1.ToolCallRef {
 	if call.ref == nil {
-		return &pbv2.ToolCallRef{Id: call.ID, Name: call.Name, Signature: sig}
+		return &pbv1.ToolCallRef{Id: call.ID, Name: call.Name, Signature: sig}
 	}
-	out, _ := proto.Clone(call.ref).(*pbv2.ToolCallRef)
+	out, _ := proto.Clone(call.ref).(*pbv1.ToolCallRef)
 	out.Id = call.ID
 	out.Name = call.Name
 	out.Signature = sig
@@ -157,7 +157,7 @@ func reemitRef(call ToolCall, sig string) *pbv2.ToolCallRef {
 // encodeToolFrameHeader builds the initial meta_append fragment for a tool
 // block: big-endian uint32 length + protobuf ToolCallRef. Argument bytes are
 // appended by later MetaAppend calls; decodeToolFrame splits them on read.
-func encodeToolFrameHeader(ref *pbv2.ToolCallRef) ([]byte, error) {
+func encodeToolFrameHeader(ref *pbv1.ToolCallRef) ([]byte, error) {
 	if ref == nil {
 		return nil, fmt.Errorf("tool-call frame: nil ToolCallRef")
 	}
@@ -171,7 +171,7 @@ func encodeToolFrameHeader(ref *pbv2.ToolCallRef) ([]byte, error) {
 	return out, nil
 }
 
-func decodeToolFrame(buf []byte) (*pbv2.ToolCallRef, string, error) {
+func decodeToolFrame(buf []byte) (*pbv1.ToolCallRef, string, error) {
 	if len(buf) < 4 {
 		return nil, "", fmt.Errorf("shorter than length prefix")
 	}
@@ -179,7 +179,7 @@ func decodeToolFrame(buf []byte) (*pbv2.ToolCallRef, string, error) {
 	if uint64(4)+uint64(n) > uint64(len(buf)) {
 		return nil, "", fmt.Errorf("header length %d exceeds buffer %d", n, len(buf))
 	}
-	ref := &pbv2.ToolCallRef{}
+	ref := &pbv1.ToolCallRef{}
 	if err := proto.Unmarshal(buf[4:4+n], ref); err != nil {
 		return nil, "", err
 	}
@@ -193,26 +193,26 @@ func decodeToolFrame(buf []byte) (*pbv2.ToolCallRef, string, error) {
 // Pass and fail-open re-emission keep call.Arguments (and thus Signature)
 // byte-identical so the host can verify the buffered tool block transactionally
 // — temporary suppress-then-reemit is not deletion/forgery.
-func EmitAssembledToolCall(call ToolCall, args string) []*pbv2.StreamEvent {
+func EmitAssembledToolCall(call ToolCall, args string) []*pbv1.StreamEvent {
 	sig := call.Signature
 	if args != call.Arguments {
 		sig = ""
 	}
-	return []*pbv2.StreamEvent{
-		{Event: &pbv2.StreamEvent_ContentBlockStart{
-			ContentBlockStart: &pbv2.ContentBlockStart{
+	return []*pbv1.StreamEvent{
+		{Event: &pbv1.StreamEvent_ContentBlockStart{
+			ContentBlockStart: &pbv1.ContentBlockStart{
 				Index: call.Index,
-				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: reemitRef(call, sig)},
+				Block: &pbv1.ContentBlockStart_ToolCall{ToolCall: reemitRef(call, sig)},
 			},
 		}},
-		{Event: &pbv2.StreamEvent_ToolCallDelta{
-			ToolCallDelta: &pbv2.ToolCallDelta{
+		{Event: &pbv1.StreamEvent_ToolCallDelta{
+			ToolCallDelta: &pbv1.ToolCallDelta{
 				Index:          call.Index,
 				ArgumentsDelta: args,
 			},
 		}},
-		{Event: &pbv2.StreamEvent_ContentBlockStop{
-			ContentBlockStop: &pbv2.ContentBlockStop{Index: call.Index},
+		{Event: &pbv1.StreamEvent_ContentBlockStop{
+			ContentBlockStop: &pbv1.ContentBlockStop{Index: call.Index},
 		}},
 	}
 }
@@ -239,7 +239,7 @@ type ToolCall struct {
 	// Nil when the caller constructed the ToolCall itself rather than
 	// receiving it from the assembler; EmitAssembledToolCall builds a fresh
 	// ref in that case.
-	ref *pbv2.ToolCallRef
+	ref *pbv1.ToolCallRef
 }
 
 // ToolCallAction is what OnToolCall returns.
@@ -311,13 +311,13 @@ func (s *StreamHandler) OnTextDelta(fn func(context.Context, string) (TextAction
 // Handle implements the stream-chunk hook signature. Semantic callback errors
 // are consumed for fail-open re-emission; assembler/protocol errors are returned
 // so the trampoline traps.
-func (s *StreamHandler) Handle(ctx context.Context, ev *pbv2.StreamEvent) (StreamResult, error) {
+func (s *StreamHandler) Handle(ctx context.Context, ev *pbv1.StreamEvent) (StreamResult, error) {
 	if ev == nil {
 		return StreamResult{}, fmt.Errorf("StreamHandler: nil event")
 	}
 
 	// Text deltas can be rewritten without assembly.
-	if td, ok := ev.Event.(*pbv2.StreamEvent_TextDelta); ok && s.onText != nil {
+	if td, ok := ev.Event.(*pbv1.StreamEvent_TextDelta); ok && s.onText != nil {
 		action, cbErr := s.onText(ctx, td.TextDelta)
 		if cbErr != nil {
 			return PassEvent(), nil
@@ -326,8 +326,8 @@ func (s *StreamHandler) Handle(ctx context.Context, ev *pbv2.StreamEvent) (Strea
 			return SuppressEvent(), nil
 		}
 		if action.hasReplace {
-			return EmitEvents(&pbv2.StreamEvent{
-				Event: &pbv2.StreamEvent_TextDelta{TextDelta: action.replace},
+			return EmitEvents(&pbv1.StreamEvent{
+				Event: &pbv1.StreamEvent_TextDelta{TextDelta: action.replace},
 			}), nil
 		}
 		return PassEvent(), nil

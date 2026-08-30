@@ -19,15 +19,15 @@
 //			return sdktest.HostResultValue([]byte(`{"completion":"EMAIL"}`)), nil
 //		})
 //
-//		res := h.BeforeRequest(&pbv2.ChatRequest{Messages: []*pbv2.Message{
-//			{Role: "user", Blocks: []*pbv2.RequestBlock{{
-//				Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "hi"}},
+//		res := h.BeforeRequest(&pbv1.ChatRequest{Messages: []*pbv1.Message{
+//			{Role: "user", Blocks: []*pbv1.RequestBlock{{
+//				Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: "hi"}},
 //			}}},
-//			{Role: "tool", Blocks: []*pbv2.RequestBlock{{
-//				Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+//			{Role: "tool", Blocks: []*pbv1.RequestBlock{{
+//				Kind: &pbv1.RequestBlock_ToolResult{ToolResult: &pbv1.RequestToolResultBlock{
 //					ToolCallId: "t1",
-//					Content: []*pbv2.ToolResultContentBlock{{
-//						Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: "contact: someone@example.com"}},
+//					Content: []*pbv1.ToolResultContentBlock{{
+//						Kind: &pbv1.ToolResultContentBlock_Text{Text: &pbv1.ToolResultTextBlock{Text: "contact: someone@example.com"}},
 //					}},
 //				}},
 //			}}},
@@ -54,7 +54,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	sdk "github.com/torana-edge/torana-plugin-sdk"
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 // LogEntry is one captured sdk.Log call.
@@ -211,14 +211,14 @@ func (h *Harness) StubHostCall(cmd string, fn func(args string) (string, error))
 }
 
 // DenyPermission makes cmd answer with the host's permission-denied envelope,
-// so a plugin's handling of a refused capability is testable. Typed v2 commands
+// so a plugin's handling of a refused capability is testable. Typed v1 commands
 // get a HostCallResult error arm; transitional JSON commands keep the legacy
 // denial string.
 func (h *Harness) DenyPermission(cmd string) *Harness {
 	return h.StubHostCall(cmd, func(string) (string, error) {
 		if typedHostReply(cmd) {
 			return string(hostCallResultError(
-				pbv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "permission denied")), nil
+				pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "permission denied")), nil
 		}
 		return `{"status":"error","message":"permission denied"}`, nil
 	})
@@ -234,7 +234,7 @@ func (h *Harness) SetNow(ms int64) *Harness {
 }
 
 // SetOriginalRequest sets what env.original_request returns.
-func (h *Harness) SetOriginalRequest(req *pbv2.ChatRequest) *Harness {
+func (h *Harness) SetOriginalRequest(req *pbv1.ChatRequest) *Harness {
 	raw, err := proto.Marshal(req)
 	if err != nil {
 		h.t.Fatalf("sdktest: marshal original request: %v", err)
@@ -345,7 +345,7 @@ func (h *Harness) hostCallBytes(cmd string, args []byte) ([]byte, error) {
 func typedHostReply(cmd string) bool {
 	switch cmd {
 	case "env.block_request", "env.respond_request", "env.route_request",
-		"env.set_identity", pbv2.MetaAppendCommand,
+		"env.set_identity", pbv1.MetaAppendCommand,
 		"env.meta_get", "env.meta_set", "env.cache_get", "env.cache_set",
 		"env.shared_cache_get", "env.shared_cache_set",
 		"env.state_get", "env.state_set", "env.state_delete", "env.state_keys",
@@ -353,7 +353,7 @@ func typedHostReply(cmd string) bool {
 		"env.original_request", "env.original_response":
 		return true
 	default:
-		// Extension commands (torana_*, verify_virtual_key) also speak the v2
+		// Extension commands (torana_*, verify_virtual_key) also speak the v1
 		// result envelope — only their ARGUMENT body is opaque. Framing them
 		// as legacy JSON would make HostCallExtension unusable here, which is
 		// how the typed meta/cache helpers were unusable before.
@@ -369,15 +369,15 @@ func isExtensionCommand(cmd string) bool {
 }
 
 func hostCallResultValue(value []byte) []byte {
-	raw, _ := proto.Marshal(&pbv2.HostCallResult{
-		Result: &pbv2.HostCallResult_Value{Value: value},
+	raw, _ := proto.Marshal(&pbv1.HostCallResult{
+		Result: &pbv1.HostCallResult_Value{Value: value},
 	})
 	return raw
 }
 
-func hostCallResultError(code pbv2.ErrorCode, msg string) []byte {
-	raw, _ := proto.Marshal(&pbv2.HostCallResult{
-		Result: &pbv2.HostCallResult_Error{Error: &pbv2.HostError{Code: code, Message: msg}},
+func hostCallResultError(code pbv1.ErrorCode, msg string) []byte {
+	raw, _ := proto.Marshal(&pbv1.HostCallResult{
+		Result: &pbv1.HostCallResult_Error{Error: &pbv1.HostError{Code: code, Message: msg}},
 	})
 	return raw
 }
@@ -388,52 +388,52 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 
 	switch cmd {
 	case "env.block_request":
-		var a pbv2.BlockRequestArgs
+		var a pbv1.BlockRequestArgs
 		if err := proto.Unmarshal(args, &a); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid BlockRequestArgs"), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid BlockRequestArgs"), nil
 		}
 		if err := a.Validate(); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
 		}
 		return hostCallResultValue(nil), nil
 
 	case "env.respond_request":
-		var a pbv2.RespondRequestArgs
+		var a pbv1.RespondRequestArgs
 		if err := proto.Unmarshal(args, &a); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid RespondRequestArgs"), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid RespondRequestArgs"), nil
 		}
 		if err := a.Validate(); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
 		}
 		return hostCallResultValue(nil), nil
 
 	case "env.route_request":
-		var a pbv2.RouteRequestArgs
+		var a pbv1.RouteRequestArgs
 		if err := proto.Unmarshal(args, &a); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid RouteRequestArgs"), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid RouteRequestArgs"), nil
 		}
 		if err := a.Validate(); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
 		}
 		return hostCallResultValue(nil), nil
 
 	case "env.set_identity":
-		var a pbv2.SetIdentityArgs
+		var a pbv1.SetIdentityArgs
 		if err := proto.Unmarshal(args, &a); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid SetIdentityArgs"), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid SetIdentityArgs"), nil
 		}
 		if err := a.Validate(); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
 		}
 		return hostCallResultValue(nil), nil
 
-	case pbv2.MetaAppendCommand:
-		var a pbv2.MetaAppendArgs
+	case pbv1.MetaAppendCommand:
+		var a pbv1.MetaAppendArgs
 		if err := proto.Unmarshal(args, &a); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid MetaAppendArgs"), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid MetaAppendArgs"), nil
 		}
 		if err := a.Validate(); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
 		}
 		key := "block:" + strconv.FormatInt(int64(a.BlockIndex), 10)
 		existing, present := h.meta[key]
@@ -447,109 +447,109 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 			present = true
 			existing = h.meta[key]
 		}
-		val := pbv2.MetaAppendSuccessValue(a.Fragment, []byte(existing), present)
+		val := pbv1.MetaAppendSuccessValue(a.Fragment, []byte(existing), present)
 		return hostCallResultValue(val), nil
 	case "env.meta_get":
-		var a pbv2.MetaGetArgs
+		var a pbv1.MetaGetArgs
 		if err := proto.Unmarshal(args, &a); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid MetaGetArgs"), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid MetaGetArgs"), nil
 		}
 		if err := a.Validate(); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
 		}
 		// Presence, not emptiness. Returning "" for a missing key would make
 		// the harness disagree with the contract in the one place an author
 		// would trust it.
 		v, present := h.meta[a.Key]
 		if !present {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_FOUND, "meta key not found"), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_FOUND, "meta key not found"), nil
 		}
 		return hostCallResultValue([]byte(v)), nil
 
 	case "env.meta_set":
-		var a pbv2.MetaSetArgs
+		var a pbv1.MetaSetArgs
 		if err := proto.Unmarshal(args, &a); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid MetaSetArgs"), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid MetaSetArgs"), nil
 		}
 		if err := a.Validate(); err != nil {
 			// Rejected arguments must not mutate. A harness that stored the
 			// value anyway would hide the failure from the test asserting it.
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
 		}
 		// An empty value STORES an empty value; it is not a delete.
 		h.meta[a.Key] = a.Value
 		return hostCallResultValue(nil), nil
 
 	case "env.cache_get":
-		var a pbv2.CacheGetArgs
+		var a pbv1.CacheGetArgs
 		if err := proto.Unmarshal(args, &a); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid CacheGetArgs"), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid CacheGetArgs"), nil
 		}
 		if err := a.Validate(); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
 		}
 		v, present := h.cache[a.Key]
 		if !present {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_FOUND, "cache key not found"), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_FOUND, "cache key not found"), nil
 		}
 		return hostCallResultValue([]byte(v)), nil
 
 	case "env.cache_set":
-		var a pbv2.CacheSetArgs
+		var a pbv1.CacheSetArgs
 		if err := proto.Unmarshal(args, &a); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid CacheSetArgs"), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid CacheSetArgs"), nil
 		}
 		if err := a.Validate(); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
 		}
 		h.cache[a.Key] = a.Value
 		return hostCallResultValue(nil), nil
 	case "env.shared_cache_get":
-		var a pbv2.CacheGetArgs
+		var a pbv1.CacheGetArgs
 		if err := proto.Unmarshal(args, &a); err != nil || a.Validate() != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid CacheGetArgs"), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid CacheGetArgs"), nil
 		}
 		v, ok := h.cache[a.Key]
 		if !ok {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_FOUND, "cache key not found"), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_FOUND, "cache key not found"), nil
 		}
 		return hostCallResultValue([]byte(v)), nil
 	case "env.shared_cache_set":
-		var a pbv2.CacheSetArgs
+		var a pbv1.CacheSetArgs
 		if err := proto.Unmarshal(args, &a); err != nil || a.Validate() != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid CacheSetArgs"), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid CacheSetArgs"), nil
 		}
 		h.cache[a.Key] = a.Value
 		return hostCallResultValue(nil), nil
 
 	case "env.state_get":
-		var a pbv2.StateGetArgs
+		var a pbv1.StateGetArgs
 		if err := proto.Unmarshal(args, &a); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid StateGetArgs"), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid StateGetArgs"), nil
 		}
 		if err := a.Validate(); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
 		}
 		if !h.StateConfigured {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
 				"durable plugin state is not configured"), nil
 		}
 		v, present := h.state[a.Key]
 		if !present {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_FOUND, "state key not found"), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_FOUND, "state key not found"), nil
 		}
 		return hostCallResultValue([]byte(v)), nil
 
 	case "env.state_set":
-		var a pbv2.StateSetArgs
+		var a pbv1.StateSetArgs
 		if err := proto.Unmarshal(args, &a); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid StateSetArgs"), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid StateSetArgs"), nil
 		}
 		if err := a.Validate(); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
 		}
 		if !h.StateConfigured {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
 				"durable plugin state is not configured"), nil
 		}
 		// An empty value STORES an empty value. v1 deleted the key here, which
@@ -558,15 +558,15 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 		return hostCallResultValue(nil), nil
 
 	case "env.state_delete":
-		var a pbv2.StateDeleteArgs
+		var a pbv1.StateDeleteArgs
 		if err := proto.Unmarshal(args, &a); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid StateDeleteArgs"), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid StateDeleteArgs"), nil
 		}
 		if err := a.Validate(); err != nil {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
 		}
 		if !h.StateConfigured {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
 				"durable plugin state is not configured"), nil
 		}
 		// Deleting an absent key succeeds: the caller wants it gone.
@@ -575,7 +575,7 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 
 	case "env.state_keys":
 		if !h.StateConfigured {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
 				"durable plugin state is not configured"), nil
 		}
 		keys := make([]string, 0, len(h.state))
@@ -594,14 +594,14 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 
 	case "env.original_request":
 		if !h.originSet {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_FOUND,
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_FOUND,
 				"no original request captured"), nil
 		}
 		return hostCallResultValue(h.original), nil
 
 	case "env.original_response":
 		if !h.origRespSet {
-			return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_FOUND,
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_FOUND,
 				"no original response captured"), nil
 		}
 		return hostCallResultValue(h.origResp), nil
@@ -612,10 +612,10 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 		// answer -- a harness with no compaction backend really does not have
 		// one -- and it is framed, so a plugin's degrade path is exercised
 		// rather than a decode failure.
-		return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
+		return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
 			"extension command "+cmd+" is not configured in sdktest; StubHostCall it"), nil
 	}
-	return hostCallResultError(pbv2.ErrorCode_ERROR_CODE_NOT_FOUND, "unknown typed command"), nil
+	return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_FOUND, "unknown typed command"), nil
 }
 
 // builtin answers the commands the harness can emulate faithfully. Replies
@@ -783,8 +783,8 @@ func HostResultValue(value []byte) string {
 // plugin under test, and the author would debug their plugin instead of their
 // fixture. A test that deliberately wants a malformed frame can return a raw
 // string from StubHostCall.
-func HostResultError(code pbv2.ErrorCode, msg string) string {
-	frame := &pbv2.HostError{Code: code, Message: msg}
+func HostResultError(code pbv1.ErrorCode, msg string) string {
+	frame := &pbv1.HostError{Code: code, Message: msg}
 	if err := frame.Validate(); err != nil {
 		panic(fmt.Sprintf("sdktest: HostResultError(%v): %v — this constructor "+
 			"builds classified refusals; return a raw string from StubHostCall "+

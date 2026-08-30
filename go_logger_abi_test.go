@@ -8,9 +8,8 @@ import (
 	"testing"
 )
 
-// The shipped Go logger is the customer-facing template. A compile-only check
-// previously let abi_version:v1 ship beside a v2 run_hook guest.
-func TestGoLoggerManifestMatchesV2Surface(t *testing.T) {
+// The shipped Go logger is the customer-facing template.
+func TestGoLoggerManifestMatchesV1Surface(t *testing.T) {
 	manifestPath := filepath.Join("examples", "go-logger", "plugin.json")
 	raw, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -25,8 +24,8 @@ func TestGoLoggerManifestMatchesV2Surface(t *testing.T) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	if m.ABIVersion != "v2" {
-		t.Fatalf("%s abi_version=%q, want v2 (Go guests export run_hook)", manifestPath, m.ABIVersion)
+	if m.ABIVersion != "v1" {
+		t.Fatalf("%s abi_version=%q, want v1 (Go guests export run_hook)", manifestPath, m.ABIVersion)
 	}
 	if len(m.Hooks) == 0 {
 		t.Fatal("go-logger must declare at least one hook")
@@ -52,36 +51,36 @@ func TestGoLoggerManifestMatchesV2Surface(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(src)
-	if !strings.Contains(body, "torana-plugin-sdk/pb/v2") {
-		t.Fatal("go-logger must import pb/v2")
+	if !strings.Contains(body, "torana-plugin-sdk/pb/v1") {
+		t.Fatal("go-logger must import pb/v1")
 	}
 	if strings.Contains(body, "github.com/torana-edge/torana-plugin-sdk/pb\"") {
 		t.Fatal("go-logger must not import the v1 pb package")
 	}
 }
 
-func TestRustLoggerManifestMatchesV2Surface(t *testing.T) {
+func TestRustLoggerManifestMatchesV1Surface(t *testing.T) {
 	manifestPath := filepath.Join("examples", "rust-logger", "plugin.json")
 	raw, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), `"abi_version": "v2"`) {
-		t.Fatal("rust-logger must declare abi_version v2")
+	if !strings.Contains(string(raw), `"abi_version": "v1"`) {
+		t.Fatal("rust-logger must declare abi_version v1")
 	}
 	src, err := os.ReadFile(filepath.Join("examples", "rust-logger", "src", "main.rs"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	body := string(src)
-	for _, required := range []string{"export_plugin_v2!", "HOOK_BEFORE_REQUEST", "pbv2::HookInput"} {
+	for _, required := range []string{"export_plugin_v1!", "HOOK_BEFORE_REQUEST", "pbv1::HookInput"} {
 		if !strings.Contains(body, required) {
 			t.Fatalf("rust-logger source is missing %q", required)
 		}
 	}
 	for _, obsolete := range []string{"export_before_request!", "pb::ChatRequest"} {
 		if strings.Contains(body, obsolete) {
-			t.Fatalf("rust-logger source retains ABI-v1 surface %q", obsolete)
+			t.Fatalf("rust-logger source retains ABI surface %q", obsolete)
 		}
 	}
 }

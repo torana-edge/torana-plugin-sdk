@@ -3,7 +3,7 @@ package plugin_sdk
 import (
 	"context"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 // Handler registrations and the context key for request_id. Shared by the
@@ -22,23 +22,23 @@ func withRequestID(ctx context.Context, id uint64) context.Context {
 }
 
 var (
-	beforeRequestHandler func(context.Context, *pbv2.ChatRequest) (RequestResult, error)
-	afterResponseHandler func(context.Context, *pbv2.ChatResponse, bool) (ResponseResult, error)
-	streamChunkHandler   func(context.Context, *pbv2.StreamEvent) (StreamResult, error)
-	httpRequestHandler   func(context.Context, *pbv2.HttpRequest) (HTTPResult, error)
-	tickHandler          func(context.Context, *pbv2.TickRequest) (TickResult, error)
+	beforeRequestHandler func(context.Context, *pbv1.ChatRequest) (RequestResult, error)
+	afterResponseHandler func(context.Context, *pbv1.ChatResponse, bool) (ResponseResult, error)
+	streamChunkHandler   func(context.Context, *pbv1.StreamEvent) (StreamResult, error)
+	httpRequestHandler   func(context.Context, *pbv1.HttpRequest) (HTTPResult, error)
+	tickHandler          func(context.Context, *pbv1.TickRequest) (TickResult, error)
 )
 
 // OnBeforeRequest registers the before-request handler.
 // A non-nil error traps the guest so the host applies failure_mode.
-func OnBeforeRequest(handler func(context.Context, *pbv2.ChatRequest) (RequestResult, error)) {
+func OnBeforeRequest(handler func(context.Context, *pbv1.ChatRequest) (RequestResult, error)) {
 	claimHook(HookBeforeRequest, handler)
 	beforeRequestHandler = handler
 }
 
 // OnAfterResponse registers the after-response handler.
 // mutable is false for observational dispatches (streamed or errored responses).
-func OnAfterResponse(handler func(context.Context, *pbv2.ChatResponse, bool) (ResponseResult, error)) {
+func OnAfterResponse(handler func(context.Context, *pbv1.ChatResponse, bool) (ResponseResult, error)) {
 	claimHook(HookAfterResponse, handler)
 	afterResponseHandler = handler
 }
@@ -47,19 +47,19 @@ func OnAfterResponse(handler func(context.Context, *pbv2.ChatResponse, bool) (Re
 // Prefer StreamHandler for tool-call assembly and multiple stream interests.
 // Errors from a raw stream handler trap; StreamHandler.Handle consumes its
 // own semantic-callback errors for fail-open re-emission.
-func OnStreamChunk(handler func(context.Context, *pbv2.StreamEvent) (StreamResult, error)) {
+func OnStreamChunk(handler func(context.Context, *pbv1.StreamEvent) (StreamResult, error)) {
 	claimHook(HookStreamChunk, handler)
 	streamChunkHandler = handler
 }
 
 // OnHTTPRequest registers the plugin-served HTTP handler.
-func OnHTTPRequest(handler func(context.Context, *pbv2.HttpRequest) (HTTPResult, error)) {
+func OnHTTPRequest(handler func(context.Context, *pbv1.HttpRequest) (HTTPResult, error)) {
 	claimHook(HookHTTPRequest, handler)
 	httpRequestHandler = handler
 }
 
 // OnTick registers the background-tick handler.
-func OnTick(handler func(context.Context, *pbv2.TickRequest) (TickResult, error)) {
+func OnTick(handler func(context.Context, *pbv1.TickRequest) (TickResult, error)) {
 	claimHook(HookTick, handler)
 	tickHandler = handler
 }

@@ -1,8 +1,8 @@
 # Notes for AI coding agents
 
-The current Torana Edge host accepts ABI v2 plugins. Use the Go SDK and
-`pb/v2`; declare `"abi_version": "v2"`. The Go and Rust SDKs both implement
-ABI v2 and run through the host conformance harness.
+The current Torana Edge host accepts ABI v1 plugins. Use the Go SDK and
+`pb/v1`; declare `"abi_version": "v1"`. The Go and Rust SDKs both implement
+ABI v1 and run through the host conformance harness.
 
 Before changing a plugin, read in order:
 
@@ -12,7 +12,7 @@ Before changing a plugin, read in order:
 
 ## Boundaries that must stay explicit
 
-- Use typed v2 result constructors. An empty `HookResult` is pass-through; a
+- Use typed v1 result constructors. An empty `HookResult` is pass-through; a
   non-nil handler error traps and the host applies the approved failure mode.
 - Request mutations must be deterministic. Nondeterminism destroys provider
   cache identity and costs users money.
@@ -33,4 +33,4 @@ Before changing a plugin, read in order:
 - Changes spanning SDK, Edge, and official plugins land in that dependency
   order with exact revision pins and a final cross-repository gate.
 
-Only ABI v2 exists in current source. Do not add legacy compatibility layers.
+Only ABI v1 exists in current source. Do not add legacy compatibility layers.
