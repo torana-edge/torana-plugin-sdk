@@ -85,16 +85,18 @@ type Harness struct {
 	t    testing.TB
 	host *sdk.TestHost
 
-	mu      sync.Mutex
-	meta    map[string]string
-	cache   map[string]string
-	state   map[string]string
-	config  string
-	stubs   map[string]func(args string) (string, error)
-	logs    []LogEntry
-	metrics []MetricEntry
-	calls   []HostCallEntry
-	now     func() int64
+	mu          sync.Mutex
+	meta        map[string]string
+	cache       map[string]string
+	state       map[string]string
+	files       map[string][]byte
+	credentials map[string][]byte
+	config      string
+	stubs       map[string]func(args string) (string, error)
+	logs        []LogEntry
+	metrics     []MetricEntry
+	calls       []HostCallEntry
+	now         func() int64
 	// Presence is tracked separately from the byte slices. An all-default
 	// ChatRequest marshals to zero bytes and an upstream body can legitimately
 	// be empty, so length is not presence — a harness that conflated them
@@ -133,6 +135,8 @@ func New(t testing.TB) *Harness {
 		meta:            map[string]string{},
 		cache:           map[string]string{},
 		state:           map[string]string{},
+		files:           map[string][]byte{},
+		credentials:     map[string][]byte{},
 		config:          "{}",
 		stubs:           map[string]func(string) (string, error){},
 		now:             func() int64 { return time.Now().UnixMilli() },
@@ -273,6 +277,30 @@ func (h *Harness) SeedState(key, value string) *Harness {
 	return h
 }
 
+// SetCredential binds a test value to a plugin-declared credential slot.
+func (h *Harness) SetCredential(slot string, value []byte) *Harness {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.credentials[slot] = append([]byte(nil), value...)
+	return h
+}
+
+// SeedFile initializes one plugin-private logical file.
+func (h *Harness) SeedFile(path string, value []byte) *Harness {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.files[path] = append([]byte(nil), value...)
+	return h
+}
+
+// File returns a defensive copy of one plugin-private logical file.
+func (h *Harness) File(path string) ([]byte, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	value, ok := h.files[path]
+	return append([]byte(nil), value...), ok
+}
+
 // Logs, Metrics and Calls return what the plugin did, in order.
 
 func (h *Harness) Logs() []LogEntry {
@@ -350,7 +378,9 @@ func typedHostReply(cmd string) bool {
 		"env.shared_cache_get", "env.shared_cache_set",
 		"env.state_get", "env.state_set", "env.state_delete", "env.state_keys",
 		"env.now", "env.plugin_config",
-		"env.original_request", "env.original_response":
+		"env.original_request", "env.original_response",
+		"env.credential_get", "env.file_append", "env.file_read",
+		"env.file_write", "env.file_list", "env.file_delete", "env.http_request":
 		return true
 	default:
 		// Extension commands (torana_*, verify_virtual_key) also speak the v1
@@ -387,6 +417,74 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 	defer h.mu.Unlock()
 
 	switch cmd {
+	case "env.credential_get":
+		var a pbv1.CredentialGetArgs
+		if err := proto.Unmarshal(args, &a); err != nil || a.Validate() != nil {
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid CredentialGetArgs"), nil
+		}
+		value, ok := h.credentials[a.Slot]
+		if !ok {
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED, "credential slot is not configured"), nil
+		}
+		return hostCallResultValue(append([]byte(nil), value...)), nil
+
+	case "env.file_append":
+		var a pbv1.FileAppendArgs
+		if err := proto.Unmarshal(args, &a); err != nil || a.Validate() != nil {
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid FileAppendArgs"), nil
+		}
+		h.files[a.Path] = append(h.files[a.Path], a.Data...)
+		return hostCallResultValue(nil), nil
+
+	case "env.file_read":
+		var a pbv1.FileReadArgs
+		if err := proto.Unmarshal(args, &a); err != nil || a.Validate() != nil {
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid FileReadArgs"), nil
+		}
+		value, ok := h.files[a.Path]
+		if !ok {
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_FOUND, "file not found"), nil
+		}
+		return hostCallResultValue(append([]byte(nil), value...)), nil
+
+	case "env.file_write":
+		var a pbv1.FileWriteArgs
+		if err := proto.Unmarshal(args, &a); err != nil || a.Validate() != nil {
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid FileWriteArgs"), nil
+		}
+		h.files[a.Path] = append([]byte(nil), a.Data...)
+		return hostCallResultValue(nil), nil
+
+	case "env.file_list":
+		var a pbv1.FileListArgs
+		if err := proto.Unmarshal(args, &a); err != nil || a.Validate() != nil {
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid FileListArgs"), nil
+		}
+		paths := make([]string, 0)
+		for path := range h.files {
+			if strings.HasPrefix(path, a.Prefix) {
+				paths = append(paths, path)
+			}
+		}
+		sort.Strings(paths)
+		value, _ := proto.Marshal(&pbv1.FileListResult{Paths: paths})
+		return hostCallResultValue(value), nil
+
+	case "env.file_delete":
+		var a pbv1.FileDeleteArgs
+		if err := proto.Unmarshal(args, &a); err != nil || a.Validate() != nil {
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid FileDeleteArgs"), nil
+		}
+		delete(h.files, a.Path)
+		return hostCallResultValue(nil), nil
+
+	case "env.http_request":
+		var a pbv1.OutboundHTTPRequestArgs
+		if err := proto.Unmarshal(args, &a); err != nil || a.Validate() != nil {
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid OutboundHTTPRequestArgs"), nil
+		}
+		return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED, "stub env.http_request in this test"), nil
+
 	case "env.block_request":
 		var a pbv1.BlockRequestArgs
 		if err := proto.Unmarshal(args, &a); err != nil {
