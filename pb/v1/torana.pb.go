@@ -1698,9 +1698,12 @@ type ChatResponse struct {
 	ProviderExtensionsJson []byte `protobuf:"bytes,8,opt,name=provider_extensions_json,json=providerExtensionsJson,proto3" json:"provider_extensions_json,omitempty"`
 	// Host-owned configured provider name that produced (or attempted) this
 	// response. This is Torana routing identity, not a provider wire field.
-	Provider      string `protobuf:"bytes,9,opt,name=provider,proto3" json:"provider,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Provider string `protobuf:"bytes,9,opt,name=provider,proto3" json:"provider,omitempty"`
+	// Host-owned completion wall-clock time in Unix milliseconds. Observability
+	// plugins can timestamp records without requesting ambient clock authority.
+	CompletedAtUnixMs int64 `protobuf:"varint,10,opt,name=completed_at_unix_ms,json=completedAtUnixMs,proto3" json:"completed_at_unix_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ChatResponse) Reset() {
@@ -1794,6 +1797,13 @@ func (x *ChatResponse) GetProvider() string {
 		return x.Provider
 	}
 	return ""
+}
+
+func (x *ChatResponse) GetCompletedAtUnixMs() int64 {
+	if x != nil {
+		return x.CompletedAtUnixMs
+	}
+	return 0
 }
 
 // Identifies the tool call a "tool_call" content block is assembling. Its
@@ -4923,7 +4933,7 @@ const file_proto_torana_v1_torana_proto_rawDesc = "" +
 	"\n" +
 	"tool_calls\x18\x02 \x03(\v2\x13.torana.v1.ToolCallR\ttoolCallsB\n" +
 	"\n" +
-	"\b_content\"\xd7\x02\n" +
+	"\b_content\"\x88\x03\n" +
 	"\fChatResponse\x12\x14\n" +
 	"\x05model\x18\x01 \x01(\tR\x05model\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x124\n" +
@@ -4934,7 +4944,9 @@ const file_proto_torana_v1_torana_proto_rawDesc = "" +
 	"\vduration_ms\x18\a \x01(\x03R\n" +
 	"durationMs\x128\n" +
 	"\x18provider_extensions_json\x18\b \x01(\fR\x16providerExtensionsJson\x12\x1a\n" +
-	"\bprovider\x18\t \x01(\tR\bprovider\"O\n" +
+	"\bprovider\x18\t \x01(\tR\bprovider\x12/\n" +
+	"\x14completed_at_unix_ms\x18\n" +
+	" \x01(\x03R\x11completedAtUnixMs\"O\n" +
 	"\vToolCallRef\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1c\n" +

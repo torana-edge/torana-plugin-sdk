@@ -326,6 +326,9 @@ message ChatResponse {
   // Host-owned configured provider name that produced (or attempted) this
   // response. This is Torana routing identity, not a provider wire field.
   string provider = 9;
+  // Host-owned completion wall-clock time in Unix milliseconds. Observability
+  // plugins can timestamp records without requesting ambient clock authority.
+  int64 completed_at_unix_ms = 10;
 }
 
 // ---------------------------------------------------------------------------

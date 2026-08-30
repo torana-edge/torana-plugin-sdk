@@ -900,6 +900,7 @@ var chatResponseFieldPolicies = map[string]FieldPolicy{
 	"duration_ms":              hostOwnedPolicy(),
 	"provider_extensions_json": hostOwnedPolicy(),
 	"provider":                 hostOwnedPolicy(),
+	"completed_at_unix_ms":     hostOwnedPolicy(),
 }
 
 var responseMessageFieldPolicies = map[string]FieldPolicy{
