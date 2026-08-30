@@ -6,31 +6,31 @@ package plugin_sdk
 import (
 	"testing"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 	"google.golang.org/protobuf/proto"
 )
 
-func trContent(cs ...*pbv2.ToolResultContentBlock) *pbv2.RequestToolResultBlock {
-	return &pbv2.RequestToolResultBlock{ToolCallId: "c1", ToolName: "read", Content: cs}
+func trContent(cs ...*pbv1.ToolResultContentBlock) *pbv1.RequestToolResultBlock {
+	return &pbv1.RequestToolResultBlock{ToolCallId: "c1", ToolName: "read", Content: cs}
 }
 
-func trText(s string) *pbv2.ToolResultContentBlock {
-	return &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: s}}}
+func trText(s string) *pbv1.ToolResultContentBlock {
+	return &pbv1.ToolResultContentBlock{Kind: &pbv1.ToolResultContentBlock_Text{Text: &pbv1.ToolResultTextBlock{Text: s}}}
 }
 
-func trUnknown() *pbv2.ToolResultContentBlock {
-	return &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_Unknown{Unknown: &pbv2.ToolResultUnknownBlock{Kind: "provider_blob", PayloadJson: []byte(`{"x":1}`)}}}
+func trUnknown() *pbv1.ToolResultContentBlock {
+	return &pbv1.ToolResultContentBlock{Kind: &pbv1.ToolResultContentBlock_Unknown{Unknown: &pbv1.ToolResultUnknownBlock{Kind: "provider_blob", PayloadJson: []byte(`{"x":1}`)}}}
 }
 
-func trMarker(m string) *pbv2.ToolResultContentBlock {
-	return &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.ToolResultCacheBreakpoint{MarkerJson: []byte(m)}}}
+func trMarker(m string) *pbv1.ToolResultContentBlock {
+	return &pbv1.ToolResultContentBlock{Kind: &pbv1.ToolResultContentBlock_CacheBreakpoint{CacheBreakpoint: &pbv1.ToolResultCacheBreakpoint{MarkerJson: []byte(m)}}}
 }
 
-func toolResultMsg(tr *pbv2.RequestToolResultBlock) *pbv2.Message {
-	return &pbv2.Message{Role: "user", Blocks: []*pbv2.RequestBlock{{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: tr}}}}
+func toolResultMsg(tr *pbv1.RequestToolResultBlock) *pbv1.Message {
+	return &pbv1.Message{Role: "user", Blocks: []*pbv1.RequestBlock{{Kind: &pbv1.RequestBlock_ToolResult{ToolResult: tr}}}}
 }
 
-func scalarOf(t *testing.T, msg *pbv2.Message) (string, bool) {
+func scalarOf(t *testing.T, msg *pbv1.Message) (string, bool) {
 	t.Helper()
 	views := ToolResults(msg)
 	if len(views) != 1 {
@@ -46,7 +46,7 @@ func scalarOf(t *testing.T, msg *pbv2.Message) (string, bool) {
 func TestToolResultScalarTextMatrix(t *testing.T) {
 	rows := []struct {
 		name string
-		tr   *pbv2.RequestToolResultBlock
+		tr   *pbv1.RequestToolResultBlock
 		want string
 		ok   bool
 	}{
@@ -75,31 +75,31 @@ func TestToolResultScalarTextMatrix(t *testing.T) {
 // metadata, multiple cache markers, an unrelated SIBLING result with its
 // own content, surrounding text blocks, and a final trailing-signature
 // block (assistant-role, per the SDK's assistant-only trailing rule).
-func richToolResultMsg() *pbv2.Message {
-	return &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{
-		{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "leading"}}},
-		{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+func richToolResultMsg() *pbv1.Message {
+	return &pbv1.Message{Role: "assistant", Blocks: []*pbv1.RequestBlock{
+		{Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: "leading"}}},
+		{Kind: &pbv1.RequestBlock_ToolResult{ToolResult: &pbv1.RequestToolResultBlock{
 			ToolCallId:       "c1",
 			ToolName:         "read",
 			WillContinue:     proto.Bool(false),
 			Scheduling:       proto.String("WHEN_IDLE"), // normative vocabulary
 			PartMetadataJson: []byte(`{"outer":{"b":1,"a":2}}`),
 			Signature:        "result-sig",
-			Content: []*pbv2.ToolResultContentBlock{
+			Content: []*pbv1.ToolResultContentBlock{
 				trMarker(`{"type":"ephemeral"}`),
 				trText("before"),
 				trMarker(`{"type":"standard"}`),
 			},
 		}}},
-		{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+		{Kind: &pbv1.RequestBlock_ToolResult{ToolResult: &pbv1.RequestToolResultBlock{
 			ToolCallId: "c2",
 			ToolName:   "write",
-			Content: []*pbv2.ToolResultContentBlock{
+			Content: []*pbv1.ToolResultContentBlock{
 				trText("sibling-content"),
 			},
 		}}},
-		{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "trailing"}}},
-		{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: &pbv2.RequestTrailingSignatureBlock{Signature: "trailing-sig"}}},
+		{Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: "trailing"}}},
+		{Kind: &pbv1.RequestBlock_TrailingSignature{TrailingSignature: &pbv1.RequestTrailingSignatureBlock{Signature: "trailing-sig"}}},
 	}}
 }
 
@@ -113,15 +113,15 @@ func richToolResultMsg() *pbv2.Message {
 func TestReplaceToolResultTextRichStructuralEquality(t *testing.T) {
 	original := richToolResultMsg()
 	// The rich original is genuinely IN-DOMAIN before mutation.
-	if err := (&pbv2.ChatRequest{Model: "m", Messages: []*pbv2.Message{original}}).ValidateReplacement(); err != nil {
+	if err := (&pbv1.ChatRequest{Model: "m", Messages: []*pbv1.Message{original}}).ValidateReplacement(); err != nil {
 		t.Fatalf("the rich original is not a valid request: %v", err)
 	}
-	actual := proto.Clone(original).(*pbv2.Message)
+	actual := proto.Clone(original).(*pbv1.Message)
 	changed, err := ReplaceToolResultText(actual, 1, "after")
 	if err != nil || !changed {
 		t.Fatalf("changed=%v err=%v", changed, err)
 	}
-	expected := proto.Clone(original).(*pbv2.Message)
+	expected := proto.Clone(original).(*pbv1.Message)
 	expected.Blocks[1].GetToolResult().Content[1].GetText().Text = "after"
 	expected.Blocks[1].GetToolResult().Signature = ""
 	// EXACTLY TWO authorized changes: the text value and the result
@@ -132,14 +132,14 @@ func TestReplaceToolResultTextRichStructuralEquality(t *testing.T) {
 		t.Fatalf("mutation is not exactly the two authorized changes\n got: %v\nwant: %v", actual, expected)
 	}
 	// Both the actual and the independent expected stay IN-DOMAIN.
-	if err := (&pbv2.ChatRequest{Model: "m", Messages: []*pbv2.Message{actual}}).ValidateReplacement(); err != nil {
+	if err := (&pbv1.ChatRequest{Model: "m", Messages: []*pbv1.Message{actual}}).ValidateReplacement(); err != nil {
 		t.Fatalf("the mutated request left the replacement domain: %v", err)
 	}
-	if err := (&pbv2.ChatRequest{Model: "m", Messages: []*pbv2.Message{expected}}).ValidateReplacement(); err != nil {
+	if err := (&pbv1.ChatRequest{Model: "m", Messages: []*pbv1.Message{expected}}).ValidateReplacement(); err != nil {
 		t.Fatalf("the expected request left the replacement domain: %v", err)
 	}
 	// The byte-identical replay is a structural no-op on the RICH message.
-	before := proto.Clone(actual).(*pbv2.Message)
+	before := proto.Clone(actual).(*pbv1.Message)
 	changed, err = ReplaceToolResultText(actual, 1, "after")
 	if err != nil || changed {
 		t.Fatalf("no-op: changed=%v err=%v", changed, err)
@@ -154,40 +154,40 @@ func TestReplaceToolResultTextRichStructuralEquality(t *testing.T) {
 // the structural equality: the rich pin is not vacuous.
 func TestReplaceToolResultTextWeakenedProductionMutation(t *testing.T) {
 	original := richToolResultMsg()
-	actual := proto.Clone(original).(*pbv2.Message)
+	actual := proto.Clone(original).(*pbv1.Message)
 	if _, err := ReplaceToolResultText(actual, 1, "after"); err != nil {
 		t.Fatal(err)
 	}
-	expected := proto.Clone(original).(*pbv2.Message)
+	expected := proto.Clone(original).(*pbv1.Message)
 	expected.Blocks[1].GetToolResult().Content[1].GetText().Text = "after"
 	expected.Blocks[1].GetToolResult().Signature = ""
 
-	for name, tamper := range map[string]func(*pbv2.Message){
-		"marker byte": func(m *pbv2.Message) {
+	for name, tamper := range map[string]func(*pbv1.Message){
+		"marker byte": func(m *pbv1.Message) {
 			m.Blocks[1].GetToolResult().Content[0].GetCacheBreakpoint().MarkerJson = []byte(`{"type":"standard"}`)
 		},
-		"marker position": func(m *pbv2.Message) {
+		"marker position": func(m *pbv1.Message) {
 			c := m.Blocks[1].GetToolResult().Content
 			c[0], c[2] = c[2], c[0]
 		},
-		"tool-call identity": func(m *pbv2.Message) {
+		"tool-call identity": func(m *pbv1.Message) {
 			m.Blocks[1].GetToolResult().ToolCallId = "other"
 		},
-		"optional scalar": func(m *pbv2.Message) {
+		"optional scalar": func(m *pbv1.Message) {
 			m.Blocks[1].GetToolResult().WillContinue = proto.Bool(true)
 		},
-		"outer metadata": func(m *pbv2.Message) {
+		"outer metadata": func(m *pbv1.Message) {
 			m.Blocks[1].GetToolResult().PartMetadataJson = []byte(`{"outer":1}`)
 		},
-		"sibling result": func(m *pbv2.Message) {
+		"sibling result": func(m *pbv1.Message) {
 			m.Blocks[2].GetToolResult().Content[0].GetText().Text = "tampered"
 		},
-		"surrounding text": func(m *pbv2.Message) {
+		"surrounding text": func(m *pbv1.Message) {
 			m.Blocks[0].GetText().Text = "tampered"
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			tampered := proto.Clone(expected).(*pbv2.Message)
+			tampered := proto.Clone(expected).(*pbv1.Message)
 			tamper(tampered)
 			if proto.Equal(actual, tampered) {
 				t.Fatalf("weakened production mutation %q went undetected", name)
@@ -205,27 +205,27 @@ func TestReplaceToolResultTextAtomicErrors(t *testing.T) {
 	}
 	cases := []struct {
 		name  string
-		msg   *pbv2.Message
+		msg   *pbv1.Message
 		block int
 	}{
 		{"out of range", toolResultMsg(trContent(trText("r"))), 1},
-		{"non-tool-result block", &pbv2.Message{Role: "user", Blocks: []*pbv2.RequestBlock{{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "t"}}}}}, 0},
+		{"non-tool-result block", &pbv1.Message{Role: "user", Blocks: []*pbv1.RequestBlock{{Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: "t"}}}}}, 0},
 		{"zero text arms", toolResultMsg(trContent(trMarker(`{"type":"ephemeral"}`))), 0},
 		{"multiple text arms", toolResultMsg(trContent(trText("a"), trText("b"))), 0},
 		{"unknown arm", toolResultMsg(trContent(trText("r"), trUnknown())), 0},
 		// Malformed nested elements: fail closed BEFORE any mutation.
 		{"nil content element", toolResultMsg(trContent(trText("r"), nil)), 0},
-		{"arm-less element", toolResultMsg(trContent(trText("r"), &pbv2.ToolResultContentBlock{})), 0},
-		{"typed-nil text arm", toolResultMsg(trContent(trText("r"), &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_Text{}})), 0},
-		{"typed-nil unknown arm", toolResultMsg(trContent(trText("r"), &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_Unknown{}})), 0},
-		{"typed-nil cache arm", toolResultMsg(trContent(trText("r"), &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_CacheBreakpoint{}})), 0},
+		{"arm-less element", toolResultMsg(trContent(trText("r"), &pbv1.ToolResultContentBlock{})), 0},
+		{"typed-nil text arm", toolResultMsg(trContent(trText("r"), &pbv1.ToolResultContentBlock{Kind: &pbv1.ToolResultContentBlock_Text{}})), 0},
+		{"typed-nil unknown arm", toolResultMsg(trContent(trText("r"), &pbv1.ToolResultContentBlock{Kind: &pbv1.ToolResultContentBlock_Unknown{}})), 0},
+		{"typed-nil cache arm", toolResultMsg(trContent(trText("r"), &pbv1.ToolResultContentBlock{Kind: &pbv1.ToolResultContentBlock_CacheBreakpoint{}})), 0},
 		{"malformed marker", toolResultMsg(trContent(trText("r"), trMarker(`not json`))), 0},
 		{"incorrect-shape marker", toolResultMsg(trContent(trText("r"), trMarker(`[1,2]`))), 0},
 		{"duplicate-key marker", toolResultMsg(trContent(trText("r"), trMarker(`{"type":"a","type":"b"}`))), 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			before := proto.Clone(tc.msg).(*pbv2.Message)
+			before := proto.Clone(tc.msg).(*pbv1.Message)
 			if _, err := ReplaceToolResultText(tc.msg, tc.block, "x"); err == nil {
 				t.Fatal("error case accepted")
 			}
@@ -242,15 +242,15 @@ func TestReplaceToolResultTextAtomicErrors(t *testing.T) {
 // still in the SDK replacement domain (ValidateReplacement green). No stale
 // token survives.
 func TestReplaceToolResultTextProvenance(t *testing.T) {
-	msg := &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{
-		{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "covered"}}},
-		{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+	msg := &pbv1.Message{Role: "assistant", Blocks: []*pbv1.RequestBlock{
+		{Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: "covered"}}},
+		{Kind: &pbv1.RequestBlock_ToolResult{ToolResult: &pbv1.RequestToolResultBlock{
 			ToolCallId:       "c1",
 			PartMetadataJson: []byte(`{"custom":1}`),
 			Signature:        "sig-token",
-			Content:          []*pbv2.ToolResultContentBlock{trText("before")},
+			Content:          []*pbv1.ToolResultContentBlock{trText("before")},
 		}}},
-		{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: &pbv2.RequestTrailingSignatureBlock{Signature: "trailing-token"}}},
+		{Kind: &pbv1.RequestBlock_TrailingSignature{TrailingSignature: &pbv1.RequestTrailingSignatureBlock{Signature: "trailing-token"}}},
 	}}
 	changed, err := ReplaceToolResultText(msg, 1, "after")
 	if err != nil || !changed {
@@ -269,22 +269,22 @@ func TestReplaceToolResultTextProvenance(t *testing.T) {
 	if ts := last.GetTrailingSignature(); ts == nil || ts.Signature != "trailing-token" {
 		t.Fatal("the trailing-signature carrier was disturbed by a result-text change")
 	}
-	if err := (&pbv2.ChatRequest{Model: "m", Messages: []*pbv2.Message{msg}}).ValidateReplacement(); err != nil {
+	if err := (&pbv1.ChatRequest{Model: "m", Messages: []*pbv1.Message{msg}}).ValidateReplacement(); err != nil {
 		t.Fatalf("the changed result left the replacement domain: %v", err)
 	}
 
 	// The no-op keeps every token byte-for-byte.
-	msg2 := &pbv2.Message{Role: "assistant", Blocks: []*pbv2.RequestBlock{
-		{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "covered"}}},
-		{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+	msg2 := &pbv1.Message{Role: "assistant", Blocks: []*pbv1.RequestBlock{
+		{Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: "covered"}}},
+		{Kind: &pbv1.RequestBlock_ToolResult{ToolResult: &pbv1.RequestToolResultBlock{
 			ToolCallId:       "c1",
 			PartMetadataJson: []byte(`{"custom":1}`),
 			Signature:        "sig-token",
-			Content:          []*pbv2.ToolResultContentBlock{trText("same")},
+			Content:          []*pbv1.ToolResultContentBlock{trText("same")},
 		}}},
-		{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: &pbv2.RequestTrailingSignatureBlock{Signature: "trailing-token"}}},
+		{Kind: &pbv1.RequestBlock_TrailingSignature{TrailingSignature: &pbv1.RequestTrailingSignatureBlock{Signature: "trailing-token"}}},
 	}}
-	before := proto.Clone(msg2).(*pbv2.Message)
+	before := proto.Clone(msg2).(*pbv1.Message)
 	changed, err = ReplaceToolResultText(msg2, 1, "same")
 	if err != nil || changed {
 		t.Fatalf("no-op: changed=%v err=%v", changed, err)
@@ -304,14 +304,14 @@ func TestReplaceToolResultTextRevertProof(t *testing.T) {
 	}
 	// Tamper with a marker byte: the structural equality in the in-place
 	// test would catch it.
-	tampered := proto.Clone(msg).(*pbv2.Message)
+	tampered := proto.Clone(msg).(*pbv1.Message)
 	tampered.Blocks[0].GetToolResult().Content[0].GetCacheBreakpoint().MarkerJson = []byte(`{"type":"standard"}`)
 	if proto.Equal(msg, tampered) {
 		t.Fatal("revert proof: a marker change went undetected")
 	}
 	// Tamper with the signature: a kept stale signature fails the provenance
 	// expectations.
-	tampered2 := proto.Clone(msg).(*pbv2.Message)
+	tampered2 := proto.Clone(msg).(*pbv1.Message)
 	tampered2.Blocks[0].GetToolResult().Signature = "stale"
 	if proto.Equal(msg, tampered2) {
 		t.Fatal("revert proof: a stale signature went undetected")
@@ -324,37 +324,37 @@ func TestReplaceToolResultTextRevertProof(t *testing.T) {
 // marker real changes clear NO signatures; no-op preserves everything;
 // errors atomic.
 func TestReplaceLastCacheBreakpointProvenance(t *testing.T) {
-	trText := func(s string) *pbv2.ToolResultContentBlock {
-		return &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: s}}}
+	trText := func(s string) *pbv1.ToolResultContentBlock {
+		return &pbv1.ToolResultContentBlock{Kind: &pbv1.ToolResultContentBlock_Text{Text: &pbv1.ToolResultTextBlock{Text: s}}}
 	}
-	trMarker := func(m string) *pbv2.ToolResultContentBlock {
-		return &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.ToolResultCacheBreakpoint{MarkerJson: []byte(m)}}}
+	trMarker := func(m string) *pbv1.ToolResultContentBlock {
+		return &pbv1.ToolResultContentBlock{Kind: &pbv1.ToolResultContentBlock_CacheBreakpoint{CacheBreakpoint: &pbv1.ToolResultCacheBreakpoint{MarkerJson: []byte(m)}}}
 	}
-	resultBlock := func(sig string, content ...*pbv2.ToolResultContentBlock) *pbv2.RequestBlock {
-		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+	resultBlock := func(sig string, content ...*pbv1.ToolResultContentBlock) *pbv1.RequestBlock {
+		return &pbv1.RequestBlock{Kind: &pbv1.RequestBlock_ToolResult{ToolResult: &pbv1.RequestToolResultBlock{
 			ToolCallId: "c1", Signature: sig, Content: content,
 		}}}
 	}
-	textBlock := func(s string) *pbv2.RequestBlock {
-		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: s}}}
+	textBlock := func(s string) *pbv1.RequestBlock {
+		return &pbv1.RequestBlock{Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: s}}}
 	}
-	trailingBlock := func() *pbv2.RequestBlock {
-		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: &pbv2.RequestTrailingSignatureBlock{Signature: "trailing-token"}}}
+	trailingBlock := func() *pbv1.RequestBlock {
+		return &pbv1.RequestBlock{Kind: &pbv1.RequestBlock_TrailingSignature{TrailingSignature: &pbv1.RequestTrailingSignatureBlock{Signature: "trailing-token"}}}
 	}
-	signedResultMsg := func() *pbv2.Message {
-		m := &pbv2.Message{Role: "user"}
-		m.Blocks = []*pbv2.RequestBlock{resultBlock("result-sig", trText("r"), trMarker(`{"type":"ephemeral"}`))}
+	signedResultMsg := func() *pbv1.Message {
+		m := &pbv1.Message{Role: "user"}
+		m.Blocks = []*pbv1.RequestBlock{resultBlock("result-sig", trText("r"), trMarker(`{"type":"ephemeral"}`))}
 		return m
 	}
 
 	// Nested marker real change: ONLY the containing result signature is
 	// cleared; the trailing carrier and unrelated tokens are preserved.
 	t.Run("nested marker clears only the result signature", func(t *testing.T) {
-		req := &pbv2.ChatRequest{Model: "m", Messages: []*pbv2.Message{
+		req := &pbv1.ChatRequest{Model: "m", Messages: []*pbv1.Message{
 			signedResultMsg(),
-			{Role: "assistant", Blocks: []*pbv2.RequestBlock{textBlock("covered"), trailingBlock()}},
+			{Role: "assistant", Blocks: []*pbv1.RequestBlock{textBlock("covered"), trailingBlock()}},
 		}}
-		changed, err := pbv2.ReplaceLastCacheBreakpoint(req, []byte(`{"type":"standard"}`))
+		changed, err := pbv1.ReplaceLastCacheBreakpoint(req, []byte(`{"type":"standard"}`))
 		if err != nil || !changed {
 			t.Fatalf("changed=%v err=%v", changed, err)
 		}
@@ -372,13 +372,13 @@ func TestReplaceLastCacheBreakpointProvenance(t *testing.T) {
 
 	// Top-level marker real change: NO signature is cleared.
 	t.Run("top-level marker preserves every token", func(t *testing.T) {
-		req := &pbv2.ChatRequest{Model: "m", Messages: []*pbv2.Message{{Role: "assistant", Blocks: []*pbv2.RequestBlock{
+		req := &pbv1.ChatRequest{Model: "m", Messages: []*pbv1.Message{{Role: "assistant", Blocks: []*pbv1.RequestBlock{
 			textBlock("covered"),
 			resultBlock("result-sig", trText("r")),
-			{Kind: &pbv2.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.RequestCacheBreakpoint{MarkerJson: []byte(`{"type":"ephemeral"}`)}}},
+			{Kind: &pbv1.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv1.RequestCacheBreakpoint{MarkerJson: []byte(`{"type":"ephemeral"}`)}}},
 			trailingBlock(),
 		}}}}
-		changed, err := pbv2.ReplaceLastCacheBreakpoint(req, []byte(`{"type":"standard"}`))
+		changed, err := pbv1.ReplaceLastCacheBreakpoint(req, []byte(`{"type":"standard"}`))
 		if err != nil || !changed {
 			t.Fatalf("changed=%v err=%v", changed, err)
 		}
@@ -395,13 +395,13 @@ func TestReplaceLastCacheBreakpointProvenance(t *testing.T) {
 	// result carries NO nested marker, so the tool-def carrier is the LAST
 	// one in serialization order.
 	t.Run("tool-def marker clears nothing", func(t *testing.T) {
-		plain := &pbv2.Message{Role: "user"}
-		plain.Blocks = []*pbv2.RequestBlock{resultBlock("result-sig", trText("r"))}
-		req := &pbv2.ChatRequest{Model: "m",
-			Tools:    []*pbv2.ToolDef{{Name: "read", ParametersJson: []byte(`{}`), CacheControlJson: []byte(`{"type":"ephemeral"}`)}},
-			Messages: []*pbv2.Message{plain},
+		plain := &pbv1.Message{Role: "user"}
+		plain.Blocks = []*pbv1.RequestBlock{resultBlock("result-sig", trText("r"))}
+		req := &pbv1.ChatRequest{Model: "m",
+			Tools:    []*pbv1.ToolDef{{Name: "read", ParametersJson: []byte(`{}`), CacheControlJson: []byte(`{"type":"ephemeral"}`)}},
+			Messages: []*pbv1.Message{plain},
 		}
-		changed, err := pbv2.ReplaceLastCacheBreakpoint(req, []byte(`{"type":"standard"}`))
+		changed, err := pbv1.ReplaceLastCacheBreakpoint(req, []byte(`{"type":"standard"}`))
 		if err != nil || !changed {
 			t.Fatalf("changed=%v err=%v", changed, err)
 		}
@@ -412,9 +412,9 @@ func TestReplaceLastCacheBreakpointProvenance(t *testing.T) {
 
 	// Byte-identical replay: everything preserved.
 	t.Run("no-op preserves everything", func(t *testing.T) {
-		req := &pbv2.ChatRequest{Model: "m", Messages: []*pbv2.Message{signedResultMsg()}}
-		before := proto.Clone(req).(*pbv2.ChatRequest)
-		changed, err := pbv2.ReplaceLastCacheBreakpoint(req, []byte(`{"type":"ephemeral"}`))
+		req := &pbv1.ChatRequest{Model: "m", Messages: []*pbv1.Message{signedResultMsg()}}
+		before := proto.Clone(req).(*pbv1.ChatRequest)
+		changed, err := pbv1.ReplaceLastCacheBreakpoint(req, []byte(`{"type":"ephemeral"}`))
 		if err != nil || changed {
 			t.Fatalf("changed=%v err=%v", changed, err)
 		}
@@ -425,9 +425,9 @@ func TestReplaceLastCacheBreakpointProvenance(t *testing.T) {
 
 	// Errors atomic.
 	t.Run("errors atomic", func(t *testing.T) {
-		req := &pbv2.ChatRequest{Model: "m", Messages: []*pbv2.Message{signedResultMsg()}}
-		before := proto.Clone(req).(*pbv2.ChatRequest)
-		if _, err := pbv2.ReplaceLastCacheBreakpoint(req, []byte(`not json`)); err == nil {
+		req := &pbv1.ChatRequest{Model: "m", Messages: []*pbv1.Message{signedResultMsg()}}
+		before := proto.Clone(req).(*pbv1.ChatRequest)
+		if _, err := pbv1.ReplaceLastCacheBreakpoint(req, []byte(`not json`)); err == nil {
 			t.Fatal("a malformed marker was accepted")
 		}
 		if !proto.Equal(req, before) {
@@ -445,52 +445,52 @@ func TestReplaceLastCacheBreakpointProvenance(t *testing.T) {
 // "every signature", "unrelated tokens", and "entire trailing carrier".
 // Weakened tamper rows prove each protected carrier is non-vacuous.
 func TestReplaceLastCacheBreakpointRichStructural(t *testing.T) {
-	text := func(s string) *pbv2.RequestBlock {
-		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: s, Signature: "text-sig"}}}
+	text := func(s string) *pbv1.RequestBlock {
+		return &pbv1.RequestBlock{Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: s, Signature: "text-sig"}}}
 	}
-	thinking := func(s string) *pbv2.RequestBlock {
-		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_Thinking{Thinking: &pbv2.RequestThinkingBlock{Text: s, Signature: "think-sig"}}}
+	thinking := func(s string) *pbv1.RequestBlock {
+		return &pbv1.RequestBlock{Kind: &pbv1.RequestBlock_Thinking{Thinking: &pbv1.RequestThinkingBlock{Text: s, Signature: "think-sig"}}}
 	}
-	toolUse := func() *pbv2.RequestBlock {
-		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_ToolUse{ToolUse: &pbv2.RequestToolUseBlock{Id: "c9", Name: "write", ArgumentsJson: []byte(`{}`), Signature: "tu-sig"}}}
+	toolUse := func() *pbv1.RequestBlock {
+		return &pbv1.RequestBlock{Kind: &pbv1.RequestBlock_ToolUse{ToolUse: &pbv1.RequestToolUseBlock{Id: "c9", Name: "write", ArgumentsJson: []byte(`{}`), Signature: "tu-sig"}}}
 	}
-	unknown := func() *pbv2.RequestBlock {
-		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_Unknown{Unknown: &pbv2.RequestUnknownBlock{Kind: "k", PayloadJson: []byte(`{}`), Signature: "unk-sig"}}}
+	unknown := func() *pbv1.RequestBlock {
+		return &pbv1.RequestBlock{Kind: &pbv1.RequestBlock_Unknown{Unknown: &pbv1.RequestUnknownBlock{Kind: "k", PayloadJson: []byte(`{}`), Signature: "unk-sig"}}}
 	}
-	trText := func(s string) *pbv2.ToolResultContentBlock {
-		return &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: s}}}
+	trText := func(s string) *pbv1.ToolResultContentBlock {
+		return &pbv1.ToolResultContentBlock{Kind: &pbv1.ToolResultContentBlock_Text{Text: &pbv1.ToolResultTextBlock{Text: s}}}
 	}
-	trMarker := func(m string) *pbv2.ToolResultContentBlock {
-		return &pbv2.ToolResultContentBlock{Kind: &pbv2.ToolResultContentBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.ToolResultCacheBreakpoint{MarkerJson: []byte(m)}}}
+	trMarker := func(m string) *pbv1.ToolResultContentBlock {
+		return &pbv1.ToolResultContentBlock{Kind: &pbv1.ToolResultContentBlock_CacheBreakpoint{CacheBreakpoint: &pbv1.ToolResultCacheBreakpoint{MarkerJson: []byte(m)}}}
 	}
-	result := func(sig, marker string, hasMarker bool) *pbv2.RequestBlock {
-		content := []*pbv2.ToolResultContentBlock{trText("r")}
+	result := func(sig, marker string, hasMarker bool) *pbv1.RequestBlock {
+		content := []*pbv1.ToolResultContentBlock{trText("r")}
 		if hasMarker {
 			content = append(content, trMarker(marker))
 		}
-		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+		return &pbv1.RequestBlock{Kind: &pbv1.RequestBlock_ToolResult{ToolResult: &pbv1.RequestToolResultBlock{
 			ToolCallId: "c1", ToolName: "read", Signature: sig, Content: content,
 		}}}
 	}
-	topMarker := func(m string) *pbv2.RequestBlock {
-		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.RequestCacheBreakpoint{MarkerJson: []byte(m)}}}
+	topMarker := func(m string) *pbv1.RequestBlock {
+		return &pbv1.RequestBlock{Kind: &pbv1.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv1.RequestCacheBreakpoint{MarkerJson: []byte(m)}}}
 	}
-	trailing := func() *pbv2.RequestBlock {
-		return &pbv2.RequestBlock{Kind: &pbv2.RequestBlock_TrailingSignature{TrailingSignature: &pbv2.RequestTrailingSignatureBlock{Signature: "trailing-sig", PartMetadataJson: []byte(`{"t":1}`)}}}
+	trailing := func() *pbv1.RequestBlock {
+		return &pbv1.RequestBlock{Kind: &pbv1.RequestBlock_TrailingSignature{TrailingSignature: &pbv1.RequestTrailingSignatureBlock{Signature: "trailing-sig", PartMetadataJson: []byte(`{"t":1}`)}}}
 	}
 
 	// The rich request: all five embedded signatures + trailing-with-meta +
 	// unrelated blocks + BOTH a top-level marker and a nested marker.
-	rich := func() *pbv2.ChatRequest {
-		return &pbv2.ChatRequest{Model: "m",
-			Tools: []*pbv2.ToolDef{{Name: "read", ParametersJson: []byte(`{}`), CacheControlJson: []byte(`{"type":"ephemeral"}`)}},
-			Messages: []*pbv2.Message{
-				{Role: "assistant", Blocks: []*pbv2.RequestBlock{text("covered"), thinking("thought"), toolUse(), unknown(), result("result-sig", `{"type":"standard"}`, true), topMarker(`{"type":"ephemeral"}`), trailing()}},
-				{Role: "user", Blocks: []*pbv2.RequestBlock{result("unrelated-sig", "", false)}},
+	rich := func() *pbv1.ChatRequest {
+		return &pbv1.ChatRequest{Model: "m",
+			Tools: []*pbv1.ToolDef{{Name: "read", ParametersJson: []byte(`{}`), CacheControlJson: []byte(`{"type":"ephemeral"}`)}},
+			Messages: []*pbv1.Message{
+				{Role: "assistant", Blocks: []*pbv1.RequestBlock{text("covered"), thinking("thought"), toolUse(), unknown(), result("result-sig", `{"type":"standard"}`, true), topMarker(`{"type":"ephemeral"}`), trailing()}},
+				{Role: "user", Blocks: []*pbv1.RequestBlock{result("unrelated-sig", "", false)}},
 			},
 		}
 	}
-	validate := func(t *testing.T, name string, req *pbv2.ChatRequest) {
+	validate := func(t *testing.T, name string, req *pbv1.ChatRequest) {
 		t.Helper()
 		if err := req.ValidateReplacement(); err != nil {
 			t.Fatalf("%s is not in the replacement domain: %v", name, err)
@@ -505,7 +505,7 @@ func TestReplaceLastCacheBreakpointRichStructural(t *testing.T) {
 		// marker block (blocks[5]).
 		actual.Messages[0].Blocks = append(actual.Messages[0].Blocks[:5], actual.Messages[0].Blocks[6:]...)
 		validate(t, "nested input", actual)
-		changed, err := pbv2.ReplaceLastCacheBreakpoint(actual, []byte(`{"type":"1h"}`))
+		changed, err := pbv1.ReplaceLastCacheBreakpoint(actual, []byte(`{"type":"1h"}`))
 		if err != nil || !changed {
 			t.Fatalf("changed=%v err=%v", changed, err)
 		}
@@ -538,20 +538,20 @@ func TestReplaceLastCacheBreakpointRichStructural(t *testing.T) {
 		// independently non-vacuous.
 		tampers := []struct {
 			name   string
-			tamper func(*pbv2.ChatRequest)
+			tamper func(*pbv1.ChatRequest)
 		}{
-			{"text signature", func(r *pbv2.ChatRequest) { r.Messages[0].Blocks[0].GetText().Signature = "" }},
-			{"thinking signature", func(r *pbv2.ChatRequest) { r.Messages[0].Blocks[1].GetThinking().Signature = "" }},
-			{"tool-use signature", func(r *pbv2.ChatRequest) { r.Messages[0].Blocks[2].GetToolUse().Signature = "" }},
-			{"unknown signature", func(r *pbv2.ChatRequest) { r.Messages[0].Blocks[3].GetUnknown().Signature = "" }},
-			{"containing result signature", func(r *pbv2.ChatRequest) { r.Messages[0].Blocks[4].GetToolResult().Signature = "stale-sig" }},
-			{"unrelated result signature", func(r *pbv2.ChatRequest) { r.Messages[1].Blocks[0].GetToolResult().Signature = "" }},
-			{"trailing signature value", func(r *pbv2.ChatRequest) { r.Messages[0].Blocks[5].GetTrailingSignature().Signature = "altered" }},
-			{"trailing metadata", func(r *pbv2.ChatRequest) { r.Messages[0].Blocks[5].GetTrailingSignature().PartMetadataJson = nil }},
+			{"text signature", func(r *pbv1.ChatRequest) { r.Messages[0].Blocks[0].GetText().Signature = "" }},
+			{"thinking signature", func(r *pbv1.ChatRequest) { r.Messages[0].Blocks[1].GetThinking().Signature = "" }},
+			{"tool-use signature", func(r *pbv1.ChatRequest) { r.Messages[0].Blocks[2].GetToolUse().Signature = "" }},
+			{"unknown signature", func(r *pbv1.ChatRequest) { r.Messages[0].Blocks[3].GetUnknown().Signature = "" }},
+			{"containing result signature", func(r *pbv1.ChatRequest) { r.Messages[0].Blocks[4].GetToolResult().Signature = "stale-sig" }},
+			{"unrelated result signature", func(r *pbv1.ChatRequest) { r.Messages[1].Blocks[0].GetToolResult().Signature = "" }},
+			{"trailing signature value", func(r *pbv1.ChatRequest) { r.Messages[0].Blocks[5].GetTrailingSignature().Signature = "altered" }},
+			{"trailing metadata", func(r *pbv1.ChatRequest) { r.Messages[0].Blocks[5].GetTrailingSignature().PartMetadataJson = nil }},
 		}
 		for _, tc := range tampers {
 			t.Run("tamper/"+tc.name, func(t *testing.T) {
-				tampered := proto.Clone(expected).(*pbv2.ChatRequest)
+				tampered := proto.Clone(expected).(*pbv1.ChatRequest)
 				tc.tamper(tampered)
 				if proto.Equal(actual, tampered) {
 					t.Fatalf("weakened: a disturbed %s went undetected", tc.name)
@@ -564,14 +564,14 @@ func TestReplaceLastCacheBreakpointRichStructural(t *testing.T) {
 	// marker is dropped from this variant); NO signature changes.
 	t.Run("top-level marker structural", func(t *testing.T) {
 		base := rich()
-		base.Messages[0].Blocks[4].GetToolResult().Content = []*pbv2.ToolResultContentBlock{trText("r")} // no nested marker
+		base.Messages[0].Blocks[4].GetToolResult().Content = []*pbv1.ToolResultContentBlock{trText("r")} // no nested marker
 		actual := base
-		changed, err := pbv2.ReplaceLastCacheBreakpoint(actual, []byte(`{"type":"1h"}`))
+		changed, err := pbv1.ReplaceLastCacheBreakpoint(actual, []byte(`{"type":"1h"}`))
 		if err != nil || !changed {
 			t.Fatalf("changed=%v err=%v", changed, err)
 		}
 		expected := rich()
-		expected.Messages[0].Blocks[4].GetToolResult().Content = []*pbv2.ToolResultContentBlock{trText("r")}
+		expected.Messages[0].Blocks[4].GetToolResult().Content = []*pbv1.ToolResultContentBlock{trText("r")}
 		expected.Messages[0].Blocks[5].GetCacheBreakpoint().MarkerJson = []byte(`{"type":"1h"}`)
 		if !proto.Equal(actual, expected) {
 			t.Fatal("top-level mutation is not exactly the permitted marker change")
@@ -584,15 +584,15 @@ func TestReplaceLastCacheBreakpointRichStructural(t *testing.T) {
 	// TOOL-DEF row: the tool-def marker is the only carrier.
 	t.Run("tool-def marker structural", func(t *testing.T) {
 		base := rich()
-		base.Messages[0].Blocks[4].GetToolResult().Content = []*pbv2.ToolResultContentBlock{trText("r")}
+		base.Messages[0].Blocks[4].GetToolResult().Content = []*pbv1.ToolResultContentBlock{trText("r")}
 		base.Messages[0].Blocks = append(base.Messages[0].Blocks[:5], base.Messages[0].Blocks[6:]...) // drop the top-level marker
 		actual := base
-		changed, err := pbv2.ReplaceLastCacheBreakpoint(actual, []byte(`{"type":"1h"}`))
+		changed, err := pbv1.ReplaceLastCacheBreakpoint(actual, []byte(`{"type":"1h"}`))
 		if err != nil || !changed {
 			t.Fatalf("changed=%v err=%v", changed, err)
 		}
 		expected := rich()
-		expected.Messages[0].Blocks[4].GetToolResult().Content = []*pbv2.ToolResultContentBlock{trText("r")}
+		expected.Messages[0].Blocks[4].GetToolResult().Content = []*pbv1.ToolResultContentBlock{trText("r")}
 		expected.Messages[0].Blocks = append(expected.Messages[0].Blocks[:5], expected.Messages[0].Blocks[6:]...)
 		expected.Tools[0].CacheControlJson = []byte(`{"type":"1h"}`)
 		if !proto.Equal(actual, expected) {
@@ -606,8 +606,8 @@ func TestReplaceLastCacheBreakpointRichStructural(t *testing.T) {
 	// NO-OP row: byte-identical replay preserves everything.
 	t.Run("no-op structural", func(t *testing.T) {
 		actual := rich()
-		before := proto.Clone(actual).(*pbv2.ChatRequest)
-		changed, err := pbv2.ReplaceLastCacheBreakpoint(actual, []byte(`{"type":"ephemeral"}`))
+		before := proto.Clone(actual).(*pbv1.ChatRequest)
+		changed, err := pbv1.ReplaceLastCacheBreakpoint(actual, []byte(`{"type":"ephemeral"}`))
 		if err != nil || changed {
 			t.Fatalf("changed=%v err=%v", changed, err)
 		}

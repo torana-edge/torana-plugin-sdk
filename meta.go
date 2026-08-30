@@ -1,7 +1,7 @@
 package plugin_sdk
 
 import (
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 // Request-scoped metadata plus private and explicitly shared caches.
@@ -30,7 +30,7 @@ import (
 // code NOT_FOUND; a key holding an empty string returns success with an empty
 // value. An earlier draft of this file allowed storing an empty value AND
 // documented a miss as returning empty, which made the two indistinguishable —
-// exactly the v1 ambiguity v2 exists to remove. Use IsNotFound to branch.
+// exactly the v1 ambiguity v1 exists to remove. Use IsNotFound to branch.
 
 // IsNotFound reports whether a HostError means the key does not exist, as
 // opposed to any other refusal such as a missing permission.
@@ -38,8 +38,8 @@ import (
 // Without this, distinguishing a miss from a denial means comparing enum
 // constants at every call site, and the easy mistake — treating every
 // HostError as a miss — silently swallows permission failures.
-func IsNotFound(herr *pbv2.HostError) bool {
-	return herr != nil && herr.Code == pbv2.ErrorCode_ERROR_CODE_NOT_FOUND
+func IsNotFound(herr *pbv1.HostError) bool {
+	return herr != nil && herr.Code == pbv1.ErrorCode_ERROR_CODE_NOT_FOUND
 }
 
 // MetaGet reads one of this plugin's request-scoped keys.
@@ -47,8 +47,8 @@ func IsNotFound(herr *pbv2.HostError) bool {
 // A key that was never written returns a NOT_FOUND HostError. A key holding an
 // empty string returns "" with no HostError. Callers that treat absence as a
 // default should branch with IsNotFound rather than testing the value.
-func MetaGet(key string) (string, *pbv2.HostError, error) {
-	raw, herr, err := HostCall("env.meta_get", &pbv2.MetaGetArgs{Key: key})
+func MetaGet(key string) (string, *pbv1.HostError, error) {
+	raw, herr, err := HostCall("env.meta_get", &pbv1.MetaGetArgs{Key: key})
 	if err != nil || herr != nil {
 		return "", herr, err
 	}
@@ -61,8 +61,8 @@ func MetaGet(key string) (string, *pbv2.HostError, error) {
 // is what left v1 unable to express "I looked, and the answer was nothing".
 // After MetaSet(k, ""), MetaGet(k) succeeds with an empty value rather than
 // reporting NOT_FOUND.
-func MetaSet(key, value string) (*pbv2.HostError, error) {
-	_, herr, err := HostCall("env.meta_set", &pbv2.MetaSetArgs{Key: key, Value: value})
+func MetaSet(key, value string) (*pbv1.HostError, error) {
+	_, herr, err := HostCall("env.meta_set", &pbv1.MetaSetArgs{Key: key, Value: value})
 	return herr, err
 }
 
@@ -71,8 +71,8 @@ func MetaSet(key, value string) (*pbv2.HostError, error) {
 // A miss returns a NOT_FOUND HostError, not an empty value — the same
 // distinction as MetaGet, and the reason a cached empty string is usable at
 // all.
-func CacheGet(key string) (string, *pbv2.HostError, error) {
-	raw, herr, err := HostCall("env.cache_get", &pbv2.CacheGetArgs{Key: key})
+func CacheGet(key string) (string, *pbv1.HostError, error) {
+	raw, herr, err := HostCall("env.cache_get", &pbv1.CacheGetArgs{Key: key})
 	if err != nil || herr != nil {
 		return "", herr, err
 	}
@@ -80,8 +80,8 @@ func CacheGet(key string) (string, *pbv2.HostError, error) {
 }
 
 // CacheSet writes a key to this plugin's private cross-request cache.
-func CacheSet(key, value string) (*pbv2.HostError, error) {
-	_, herr, err := HostCall("env.cache_set", &pbv2.CacheSetArgs{Key: key, Value: value})
+func CacheSet(key, value string) (*pbv1.HostError, error) {
+	_, herr, err := HostCall("env.cache_set", &pbv1.CacheSetArgs{Key: key, Value: value})
 	return herr, err
 }
 
@@ -89,8 +89,8 @@ func CacheSet(key, value string) (*pbv2.HostError, error) {
 // Most plugins should use CacheGet. Shared cache capabilities are appropriate
 // only when two separately approved plugins intentionally exchange data under
 // a documented key contract.
-func SharedCacheGet(key string) (string, *pbv2.HostError, error) {
-	raw, herr, err := HostCall("env.shared_cache_get", &pbv2.CacheGetArgs{Key: key})
+func SharedCacheGet(key string) (string, *pbv1.HostError, error) {
+	raw, herr, err := HostCall("env.shared_cache_get", &pbv1.CacheGetArgs{Key: key})
 	if err != nil || herr != nil {
 		return "", herr, err
 	}
@@ -99,7 +99,7 @@ func SharedCacheGet(key string) (string, *pbv2.HostError, error) {
 
 // SharedCacheSet writes a key to the explicit cross-plugin cache namespace.
 // Possessing private env.cache_set never authorizes this operation.
-func SharedCacheSet(key, value string) (*pbv2.HostError, error) {
-	_, herr, err := HostCall("env.shared_cache_set", &pbv2.CacheSetArgs{Key: key, Value: value})
+func SharedCacheSet(key, value string) (*pbv1.HostError, error) {
+	_, herr, err := HostCall("env.shared_cache_set", &pbv1.CacheSetArgs{Key: key, Value: value})
 	return herr, err
 }

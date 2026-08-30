@@ -32,7 +32,7 @@ plugins" from one place — they live in their own repositories.
 
 Torana uses a strict Protobuf contract for all WASM boundaries to prevent schema corruption.
 When Torana invokes `run_before_request`, it passes serialized bytes of
-`pb/v2.ChatRequest` inside a `HookInput` frame.
+`pb/v1.ChatRequest` inside a `HookInput` frame.
 
 The Go plugin SDK handles all the underlying memory allocation, pointer packing, and Protobuf marshaling for you.
 
@@ -40,7 +40,7 @@ The Go plugin SDK handles all the underlying memory allocation, pointer packing,
 
 ### The Correct Unmarshaling Pattern
 
-Use the generated `pb/v2` types and the `sdk` handlers. The SDK automatically unmarshals the request and marshals the response, fully preserving unknown fields under the hood.
+Use the generated `pb/v1` types and the `sdk` handlers. The SDK automatically unmarshals the request and marshals the response, fully preserving unknown fields under the hood.
 
 ```go
 package main
@@ -48,13 +48,13 @@ package main
 import (
 	"context"
 	sdk "github.com/torana-edge/torana-plugin-sdk"
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 func main() {}
 
 func init() {
-	sdk.OnBeforeRequest(func(ctx context.Context, req *pbv2.ChatRequest) (sdk.RequestResult, error) {
+	sdk.OnBeforeRequest(func(ctx context.Context, req *pbv1.ChatRequest) (sdk.RequestResult, error) {
 		modified := false
 
 		// Extract and modify the fields you care about
@@ -244,7 +244,7 @@ must never be able to inspect different logical requests. Accepted host input
 is normalized into this closed domain before plugin dispatch, so a plugin
 only ever sees canonical shapes.
 
-Executable field table (see `pb/v2/request_validate.go` for the normative
+Executable field table (see `pb/v1/request_validate.go` for the normative
 implementation):
 
 The message body is the ordered `RequestBlock` sequence (`Message.blocks`) —
@@ -291,7 +291,7 @@ Universal rules:
 - `temperature` and `top_p` are finite when present; `max_tokens` is
   strictly positive when present; no provider-specific ranges are invented;
 - JSON fields must be valid UTF-8, surrogate-safe, and duplicate-free, with
-  exactly one top-level value (`pb/v2/jsontext`). Empty bytes are absence
+  exactly one top-level value (`pb/v1/jsontext`). Empty bytes are absence
   only for absent-capable fields; a literal JSON `null` is a wrong top-level
   value everywhere.
 

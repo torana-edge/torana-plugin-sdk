@@ -1,4 +1,4 @@
-//! Rust bindings and WASI Preview 1 trampolines for Torana Plugin ABI v2.
+//! Rust bindings and WASI Preview 1 trampolines for Torana Plugin ABI v1.
 //!
 //! The SDK deliberately exposes only the host calls granted by Torana. A
 //! plugin cannot gain a capability by importing a function that the operator
@@ -10,16 +10,16 @@ use core::{ptr, slice};
 #[doc(hidden)]
 pub use prost;
 
-pub mod pbv2 {
-    include!(concat!(env!("OUT_DIR"), "/torana.v2.rs"));
+pub mod pbv1 {
+    include!(concat!(env!("OUT_DIR"), "/torana.v1.rs"));
 }
 
-/// Error returned by an ABI-v2 host call.
+/// Error returned by an ABI-v1 host call.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HostCallError {
     /// The host refused the operation with a stable, machine-readable code.
-    Refused(pbv2::HostError),
-    /// The host returned a frame that violates the ABI-v2 result contract.
+    Refused(pbv1::HostError),
+    /// The host returned a frame that violates the ABI-v1 result contract.
     Protocol(String),
 }
 
@@ -34,41 +34,41 @@ impl core::fmt::Display for HostCallError {
 
 impl std::error::Error for HostCallError {}
 
-/// ABI-v2 hook bitmap bits. Bit N corresponds to `pbv2::Hook` value N.
-pub const HOOK_BEFORE_REQUEST: u32 = 1 << (pbv2::Hook::BeforeRequest as u32);
-pub const HOOK_AFTER_RESPONSE: u32 = 1 << (pbv2::Hook::AfterResponse as u32);
-pub const HOOK_ON_STREAM_CHUNK: u32 = 1 << (pbv2::Hook::OnStreamChunk as u32);
-pub const HOOK_ON_HTTP_REQUEST: u32 = 1 << (pbv2::Hook::OnHttpRequest as u32);
-pub const HOOK_ON_TICK: u32 = 1 << (pbv2::Hook::OnTick as u32);
-const ALL_V2_HOOKS: u32 = HOOK_BEFORE_REQUEST
+/// ABI-v1 hook bitmap bits. Bit N corresponds to `pbv1::Hook` value N.
+pub const HOOK_BEFORE_REQUEST: u32 = 1 << (pbv1::Hook::BeforeRequest as u32);
+pub const HOOK_AFTER_RESPONSE: u32 = 1 << (pbv1::Hook::AfterResponse as u32);
+pub const HOOK_ON_STREAM_CHUNK: u32 = 1 << (pbv1::Hook::OnStreamChunk as u32);
+pub const HOOK_ON_HTTP_REQUEST: u32 = 1 << (pbv1::Hook::OnHttpRequest as u32);
+pub const HOOK_ON_TICK: u32 = 1 << (pbv1::Hook::OnTick as u32);
+const ALL_V1_HOOKS: u32 = HOOK_BEFORE_REQUEST
     | HOOK_AFTER_RESPONSE
     | HOOK_ON_STREAM_CHUNK
     | HOOK_ON_HTTP_REQUEST
     | HOOK_ON_TICK;
 
-/// Returns the hook selected by a valid ABI-v2 input envelope.
-pub fn hook_of(input: &pbv2::HookInput) -> Result<pbv2::Hook, String> {
-    use pbv2::hook_input::Payload;
+/// Returns the hook selected by a valid ABI-v1 input envelope.
+pub fn hook_of(input: &pbv1::HookInput) -> Result<pbv1::Hook, String> {
+    use pbv1::hook_input::Payload;
     match input.payload.as_ref() {
-        Some(Payload::ChatRequest(_)) => Ok(pbv2::Hook::BeforeRequest),
-        Some(Payload::AfterResponse(_)) => Ok(pbv2::Hook::AfterResponse),
-        Some(Payload::StreamEvent(_)) => Ok(pbv2::Hook::OnStreamChunk),
-        Some(Payload::HttpRequest(_)) => Ok(pbv2::Hook::OnHttpRequest),
-        Some(Payload::TickRequest(_)) => Ok(pbv2::Hook::OnTick),
+        Some(Payload::ChatRequest(_)) => Ok(pbv1::Hook::BeforeRequest),
+        Some(Payload::AfterResponse(_)) => Ok(pbv1::Hook::AfterResponse),
+        Some(Payload::StreamEvent(_)) => Ok(pbv1::Hook::OnStreamChunk),
+        Some(Payload::HttpRequest(_)) => Ok(pbv1::Hook::OnHttpRequest),
+        Some(Payload::TickRequest(_)) => Ok(pbv1::Hook::OnTick),
         None => Err("torana sdk: HookInput requires a payload".to_owned()),
     }
 }
 
-fn validate_hook_result(hook: pbv2::Hook, result: &pbv2::HookResult) -> Result<(), String> {
-    use pbv2::hook_result::Action;
+fn validate_hook_result(hook: pbv1::Hook, result: &pbv1::HookResult) -> Result<(), String> {
+    use pbv1::hook_result::Action;
     let valid = matches!(
         (hook, result.action.as_ref()),
-        (pbv2::Hook::BeforeRequest, Some(Action::ReplaceRequest(_)))
-            | (pbv2::Hook::AfterResponse, Some(Action::ReplaceResponse(_)))
-            | (pbv2::Hook::OnStreamChunk, Some(Action::EmitEvents(_)))
-            | (pbv2::Hook::OnStreamChunk, Some(Action::Suppress(_)))
-            | (pbv2::Hook::OnHttpRequest, Some(Action::ServeHttp(_)))
-            | (pbv2::Hook::OnTick, Some(Action::TickOutcome(_)))
+        (pbv1::Hook::BeforeRequest, Some(Action::ReplaceRequest(_)))
+            | (pbv1::Hook::AfterResponse, Some(Action::ReplaceResponse(_)))
+            | (pbv1::Hook::OnStreamChunk, Some(Action::EmitEvents(_)))
+            | (pbv1::Hook::OnStreamChunk, Some(Action::Suppress(_)))
+            | (pbv1::Hook::OnHttpRequest, Some(Action::ServeHttp(_)))
+            | (pbv1::Hook::OnTick, Some(Action::TickOutcome(_)))
     );
     if valid {
         Ok(())
@@ -80,25 +80,25 @@ fn validate_hook_result(hook: pbv2::Hook, result: &pbv2::HookResult) -> Result<(
     }
 }
 
-/// Decodes, dispatches, validates, and encodes one ABI-v2 hook invocation.
+/// Decodes, dispatches, validates, and encodes one ABI-v1 hook invocation.
 ///
 /// Returning `Ok(None)` from `handler` is the sole pass-through representation.
 /// This ordinary Rust function owns the contract logic so it is testable off
-/// WASM; [`export_plugin_v2!`] only supplies the two required exports.
+/// WASM; [`export_plugin_v1!`] only supplies the two required exports.
 #[doc(hidden)]
-pub fn __dispatch_v2<E: core::fmt::Display>(
+pub fn __dispatch_v1<E: core::fmt::Display>(
     input: &[u8],
     hooks: u32,
-    handler: fn(pbv2::HookInput) -> Result<Option<pbv2::HookResult>, E>,
+    handler: fn(pbv1::HookInput) -> Result<Option<pbv1::HookResult>, E>,
 ) -> Result<Vec<u8>, String> {
     use prost::Message;
 
-    if hooks == 0 || hooks & !ALL_V2_HOOKS != 0 {
+    if hooks == 0 || hooks & !ALL_V1_HOOKS != 0 {
         return Err(
             "torana sdk: supported hook bitmap is empty or contains unknown bits".to_owned(),
         );
     }
-    let input = pbv2::HookInput::decode(input)
+    let input = pbv1::HookInput::decode(input)
         .map_err(|err| format!("torana sdk: decode run_hook: {err}"))?;
     let hook = hook_of(&input)?;
     if hooks & (1 << hook as u32) == 0 {
@@ -121,11 +121,11 @@ pub fn __dispatch_v2<E: core::fmt::Display>(
     Ok(output)
 }
 
-/// Exports the two functions required by ABI v2: `supported_hooks` and
+/// Exports the two functions required by ABI v1: `supported_hooks` and
 /// `run_hook`. The handler receives the typed HookInput and returns `Ok(None)`
 /// for pass-through or one hook-appropriate HookResult.
 #[macro_export]
-macro_rules! export_plugin_v2 {
+macro_rules! export_plugin_v1 {
     ($hooks:expr, $handler:path) => {
         #[no_mangle]
         pub extern "C" fn supported_hooks() -> u32 {
@@ -134,7 +134,7 @@ macro_rules! export_plugin_v2 {
 
         #[no_mangle]
         pub extern "C" fn run_hook(ptr: u32, len: u32) -> u64 {
-            let output = $crate::__dispatch_v2($crate::__input(ptr, len), $hooks, $handler)
+            let output = $crate::__dispatch_v1($crate::__input(ptr, len), $hooks, $handler)
                 .unwrap_or_else(|error| panic!("{error}"));
             $crate::__result(&output)
         }
@@ -186,7 +186,7 @@ pub fn log(message: &str, level: i32) {
 /// The buffer is uninitialised. Hosts call [`dealloc`] with the same size after
 /// consuming a non-zero hook result.
 ///
-/// Allocation failure TRAPS rather than returning a sentinel. ABI v2 defines
+/// Allocation failure TRAPS rather than returning a sentinel. ABI v1 defines
 /// no failure value for `alloc`, and the host treats 0 as a valid pointer — it
 /// would write the payload at linear-memory offset 0, over the guest's own
 /// memory, and then call the hook with `ptr = 0`.
@@ -336,11 +336,11 @@ pub fn emit_metric(name: &str, kind: i32, value: f64, labels: &serde_json::Value
 }
 
 fn decode_host_call_result(bytes: &[u8]) -> Result<Vec<u8>, HostCallError> {
-    use pbv2::host_call_result::Result as ResultArm;
+    use pbv1::host_call_result::Result as ResultArm;
     use prost::Message;
 
     validate_host_call_result_wire(bytes)?;
-    let result = pbv2::HostCallResult::decode(bytes)
+    let result = pbv1::HostCallResult::decode(bytes)
         .map_err(|err| HostCallError::Protocol(format!("decode HostCallResult: {err}")))?;
     match result.result {
         Some(ResultArm::Value(value)) => Ok(value),
@@ -401,11 +401,11 @@ fn read_varint(bytes: &[u8]) -> Result<(u64, usize), HostCallError> {
     ))
 }
 
-/// Invokes a host command with protobuf arguments and decodes the ABI-v2
+/// Invokes a host command with protobuf arguments and decodes the ABI-v1
 /// `HostCallResult` envelope. Empty successful values remain distinguishable
 /// from typed refusals; callers must branch on [`HostCallError::Refused`]'s
 /// code, never its diagnostic message.
-pub fn host_call_v2<M: prost::Message>(
+pub fn host_call<M: prost::Message>(
     command: &str,
     arguments: &M,
 ) -> Result<Vec<u8>, HostCallError> {
@@ -428,6 +428,88 @@ pub fn host_call_v2<M: prost::Message>(
     let bytes = __input(ptr, len).to_vec();
     dealloc(ptr, len);
     decode_host_call_result(&bytes)
+}
+
+/// Resolves one operator-bound credential slot. Treat the returned bytes as a
+/// secret and do not place them in logs or diagnostic errors.
+pub fn get_credential(slot: &str) -> Result<Vec<u8>, HostCallError> {
+    host_call(
+        "env.credential_get",
+        &pbv1::CredentialGetArgs {
+            slot: slot.to_owned(),
+        },
+    )
+}
+
+pub fn append_file(path: &str, data: &[u8]) -> Result<(), HostCallError> {
+    host_call(
+        "env.file_append",
+        &pbv1::FileAppendArgs {
+            path: path.to_owned(),
+            data: data.to_vec(),
+        },
+    )
+    .map(|_| ())
+}
+
+pub fn read_file(path: &str) -> Result<Vec<u8>, HostCallError> {
+    host_call(
+        "env.file_read",
+        &pbv1::FileReadArgs {
+            path: path.to_owned(),
+        },
+    )
+}
+
+pub fn write_file(path: &str, data: &[u8]) -> Result<(), HostCallError> {
+    host_call(
+        "env.file_write",
+        &pbv1::FileWriteArgs {
+            path: path.to_owned(),
+            data: data.to_vec(),
+        },
+    )
+    .map(|_| ())
+}
+
+pub fn list_files(prefix: &str) -> Result<Vec<String>, HostCallError> {
+    use prost::Message;
+    let value = host_call(
+        "env.file_list",
+        &pbv1::FileListArgs {
+            prefix: prefix.to_owned(),
+        },
+    )?;
+    pbv1::FileListResult::decode(value.as_slice())
+        .map(|result| result.paths)
+        .map_err(|error| HostCallError::Protocol(format!("decode FileListResult: {error}")))
+}
+
+pub fn delete_file(path: &str) -> Result<(), HostCallError> {
+    host_call(
+        "env.file_delete",
+        &pbv1::FileDeleteArgs {
+            path: path.to_owned(),
+        },
+    )
+    .map(|_| ())
+}
+
+pub fn http_request(
+    request: &pbv1::OutboundHttpRequestArgs,
+) -> Result<pbv1::OutboundHttpResponse, HostCallError> {
+    use prost::Message;
+    let value = host_call("env.http_request", request)?;
+    let response = pbv1::OutboundHttpResponse::decode(value.as_slice()).map_err(|error| {
+        HostCallError::Protocol(format!("decode OutboundHTTPResponse: {error}"))
+    })?;
+    if !(100..=599).contains(&response.status) {
+        return Err(HostCallError::Protocol(format!(
+            "OutboundHTTPResponse status {} is invalid",
+            response.status
+        )));
+    }
+    Ok(response)
 }
 
 #[cfg(test)]
@@ -552,33 +634,33 @@ mod tests {
         assert!(__input(10, 0).is_empty());
     }
 
-    fn pass(_input: pbv2::HookInput) -> Result<Option<pbv2::HookResult>, String> {
+    fn pass(_input: pbv1::HookInput) -> Result<Option<pbv1::HookResult>, String> {
         Ok(None)
     }
 
-    fn replace(input: pbv2::HookInput) -> Result<Option<pbv2::HookResult>, String> {
+    fn replace(input: pbv1::HookInput) -> Result<Option<pbv1::HookResult>, String> {
         let request = match input.payload {
-            Some(pbv2::hook_input::Payload::ChatRequest(request)) => request,
+            Some(pbv1::hook_input::Payload::ChatRequest(request)) => request,
             _ => return Err("wrong payload".to_owned()),
         };
-        Ok(Some(pbv2::HookResult {
-            action: Some(pbv2::hook_result::Action::ReplaceRequest(request)),
+        Ok(Some(pbv1::HookResult {
+            action: Some(pbv1::hook_result::Action::ReplaceRequest(request)),
         }))
     }
 
-    fn wrong_action(_input: pbv2::HookInput) -> Result<Option<pbv2::HookResult>, String> {
-        Ok(Some(pbv2::HookResult {
-            action: Some(pbv2::hook_result::Action::Suppress(pbv2::Suppress {})),
+    fn wrong_action(_input: pbv1::HookInput) -> Result<Option<pbv1::HookResult>, String> {
+        Ok(Some(pbv1::HookResult {
+            action: Some(pbv1::hook_result::Action::Suppress(pbv1::Suppress {})),
         }))
     }
 
     fn before_request_input() -> Vec<u8> {
         use prost::Message;
-        pbv2::HookInput {
+        pbv1::HookInput {
             abi_minor: 0,
             request_id: 7,
-            payload: Some(pbv2::hook_input::Payload::ChatRequest(pbv2::ChatRequest {
-                model: "rust-v2".to_owned(),
+            payload: Some(pbv1::hook_input::Payload::ChatRequest(pbv1::ChatRequest {
+                model: "rust-v1".to_owned(),
                 ..Default::default()
             })),
         }
@@ -586,68 +668,68 @@ mod tests {
     }
 
     #[test]
-    fn v2_pass_through_is_exactly_empty_output() {
+    fn v1_pass_through_is_exactly_empty_output() {
         assert_eq!(
-            __dispatch_v2(&before_request_input(), HOOK_BEFORE_REQUEST, pass).unwrap(),
+            __dispatch_v1(&before_request_input(), HOOK_BEFORE_REQUEST, pass).unwrap(),
             Vec::<u8>::new()
         );
     }
 
     #[test]
-    fn v2_replacement_round_trips_through_the_single_action_envelope() {
+    fn v1_replacement_round_trips_through_the_single_action_envelope() {
         use prost::Message;
-        let output = __dispatch_v2(&before_request_input(), HOOK_BEFORE_REQUEST, replace).unwrap();
-        let result = pbv2::HookResult::decode(output.as_slice()).unwrap();
-        let Some(pbv2::hook_result::Action::ReplaceRequest(request)) = result.action else {
+        let output = __dispatch_v1(&before_request_input(), HOOK_BEFORE_REQUEST, replace).unwrap();
+        let result = pbv1::HookResult::decode(output.as_slice()).unwrap();
+        let Some(pbv1::hook_result::Action::ReplaceRequest(request)) = result.action else {
             panic!("expected replace_request")
         };
-        assert_eq!(request.model, "rust-v2");
+        assert_eq!(request.model, "rust-v1");
     }
 
     #[test]
-    fn v2_dispatch_rejects_undeclared_and_mismatched_hooks() {
-        let err = __dispatch_v2(&before_request_input(), HOOK_ON_TICK, pass).unwrap_err();
+    fn v1_dispatch_rejects_undeclared_and_mismatched_hooks() {
+        let err = __dispatch_v1(&before_request_input(), HOOK_ON_TICK, pass).unwrap_err();
         assert!(err.contains("unregistered"), "{err}");
         let err =
-            __dispatch_v2(&before_request_input(), HOOK_BEFORE_REQUEST, wrong_action).unwrap_err();
+            __dispatch_v1(&before_request_input(), HOOK_BEFORE_REQUEST, wrong_action).unwrap_err();
         assert!(err.contains("does not match"), "{err}");
     }
 
     #[test]
-    fn v2_host_call_result_keeps_empty_success_distinct_from_refusal() {
+    fn v1_host_call_result_keeps_empty_success_distinct_from_refusal() {
         use prost::Message;
-        let success = pbv2::HostCallResult {
-            result: Some(pbv2::host_call_result::Result::Value(Vec::new())),
+        let success = pbv1::HostCallResult {
+            result: Some(pbv1::host_call_result::Result::Value(Vec::new())),
         };
         assert_eq!(
             decode_host_call_result(&success.encode_to_vec()).unwrap(),
             Vec::<u8>::new()
         );
 
-        let refusal = pbv2::HostCallResult {
-            result: Some(pbv2::host_call_result::Result::Error(pbv2::HostError {
-                code: pbv2::ErrorCode::PermissionDenied as i32,
+        let refusal = pbv1::HostCallResult {
+            result: Some(pbv1::host_call_result::Result::Error(pbv1::HostError {
+                code: pbv1::ErrorCode::PermissionDenied as i32,
                 message: "diagnostic only".to_owned(),
             })),
         };
         assert_eq!(
             decode_host_call_result(&refusal.encode_to_vec()),
-            Err(HostCallError::Refused(pbv2::HostError {
-                code: pbv2::ErrorCode::PermissionDenied as i32,
+            Err(HostCallError::Refused(pbv1::HostError {
+                code: pbv1::ErrorCode::PermissionDenied as i32,
                 message: "diagnostic only".to_owned(),
             }))
         );
     }
 
     #[test]
-    fn v2_host_call_result_rejects_empty_and_unclassified_frames() {
+    fn v1_host_call_result_rejects_empty_and_unclassified_frames() {
         use prost::Message;
         let err = decode_host_call_result(&[]).unwrap_err();
         assert!(matches!(err, HostCallError::Protocol(_)));
 
-        for code in [pbv2::ErrorCode::Unspecified as i32, 99] {
-            let frame = pbv2::HostCallResult {
-                result: Some(pbv2::host_call_result::Result::Error(pbv2::HostError {
+        for code in [pbv1::ErrorCode::Unspecified as i32, 99] {
+            let frame = pbv1::HostCallResult {
+                result: Some(pbv1::host_call_result::Result::Error(pbv1::HostError {
                     code,
                     message: String::new(),
                 })),
@@ -660,7 +742,7 @@ mod tests {
         }
 
         // Unknown top-level field 3, length-delimited empty payload. Prost
-        // normally discards it, but the v2 contract treats it as a future
+        // normally discards it, but the v1 contract treats it as a future
         // result arm this build cannot classify.
         assert!(matches!(
             decode_host_call_result(&[0x1a, 0x00]),

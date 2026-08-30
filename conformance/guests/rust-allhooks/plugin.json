@@ -3,10 +3,10 @@
   "id": "conformance/rust-allhooks",
   "name": "rust-allhooks",
   "version": "0.1.0",
-  "abi_version": "v2",
+  "abi_version": "v1",
   "failure_mode": "pass",
   "repository": "https://github.com/torana-edge/torana-plugin-sdk",
-  "description": "Rust ABI-v2 conformance guest",
+  "description": "Rust ABI-v1 conformance guest",
   "hooks": [
     {"name": "run_before_request"},
     {"name": "run_after_response"},

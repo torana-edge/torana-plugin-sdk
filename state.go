@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strconv"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 // Durable plugin state
@@ -46,9 +46,8 @@ var ErrStateUnavailable = errors.New("torana: durable plugin state is not availa
 // A key that was never written returns a NOT_FOUND HostError; a key holding an
 // empty string returns "" with no HostError. Branch with IsNotFound rather than
 // testing the value — the same rule as MetaGet and CacheGet.
-//
-func StateGet(key string) (string, *pbv2.HostError, error) {
-	raw, herr, err := HostCall("env.state_get", &pbv2.StateGetArgs{Key: key})
+func StateGet(key string) (string, *pbv1.HostError, error) {
+	raw, herr, err := HostCall("env.state_get", &pbv1.StateGetArgs{Key: key})
 	if err != nil || herr != nil {
 		return "", herr, err
 	}
@@ -59,8 +58,8 @@ func StateGet(key string) (string, *pbv2.HostError, error) {
 //
 // An empty value stores an empty value. It does not delete; use StateDelete to
 // release a key.
-func StateSet(key, value string) (*pbv2.HostError, error) {
-	_, herr, err := HostCall("env.state_set", &pbv2.StateSetArgs{Key: key, Value: value})
+func StateSet(key, value string) (*pbv1.HostError, error) {
+	_, herr, err := HostCall("env.state_set", &pbv1.StateSetArgs{Key: key, Value: value})
 	return herr, err
 }
 
@@ -74,17 +73,17 @@ func StateSet(key, value string) (*pbv2.HostError, error) {
 // magic value. It is authorised by the EXISTING env.state_set grant — deletion
 // mutates a namespace the plugin can already overwrite, so a fourth durable-
 // state capability would add approval ceremony without drawing a new line.
-// The host maps the command to pbv2.StateDeletePermission; deriving the
+// The host maps the command to pbv1.StateDeletePermission; deriving the
 // permission from the command string would look for a capability that does not
 // exist.
-func StateDelete(key string) (*pbv2.HostError, error) {
-	_, herr, err := HostCall(pbv2.StateDeleteCommand, &pbv2.StateDeleteArgs{Key: key})
+func StateDelete(key string) (*pbv1.HostError, error) {
+	_, herr, err := HostCall(pbv1.StateDeleteCommand, &pbv1.StateDeleteArgs{Key: key})
 	return herr, err
 }
 
 // StateKeys lists this plugin's durable keys, sorted. Useful when a plugin
 // stores one key per conversation and must enumerate them on a tick.
-func StateKeys() ([]string, *pbv2.HostError, error) {
+func StateKeys() ([]string, *pbv1.HostError, error) {
 	raw, herr, err := HostCall("env.state_keys", nil)
 	if err != nil || herr != nil {
 		return nil, herr, err
@@ -143,13 +142,13 @@ func StateGetJSON(key string, v any) (found bool, err error) {
 //
 // A malformed or empty host reply is a protocol defect and deliberately does
 // NOT produce a refusal: nothing was classified, so errors.As must not match.
-func stateError(key string, herr *pbv2.HostError) error {
+func stateError(key string, herr *pbv1.HostError) error {
 	if herr == nil {
 		return nil
 	}
 	refusal := classifiedRefusal(herr)
 	wrapped := fmt.Errorf("torana: state %q: %w", key, refusal)
-	if herr.Code == pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED {
+	if herr.Code == pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED {
 		// Join both so errors.Is(ErrStateUnavailable) and errors.As(refusal)
 		// hold simultaneously — one contract must not replace the other.
 		return errors.Join(wrapped, ErrStateUnavailable)

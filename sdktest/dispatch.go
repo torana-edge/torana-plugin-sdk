@@ -8,27 +8,27 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	sdk "github.com/torana-edge/torana-plugin-sdk"
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 // RequestResult is the outcome of a before-request dispatch.
 type RequestResult struct {
-	Request       *pbv2.ChatRequest
+	Request       *pbv1.ChatRequest
 	PassedThrough bool
 	Err           error
-	Raw           *pbv2.HookResult
+	Raw           *pbv1.HookResult
 }
 
-// BeforeRequest dispatches run_before_request via the v2 trampoline path.
-func (h *Harness) BeforeRequest(req *pbv2.ChatRequest) RequestResult {
+// BeforeRequest dispatches run_before_request via the v1 trampoline path.
+func (h *Harness) BeforeRequest(req *pbv1.ChatRequest) RequestResult {
 	h.t.Helper()
 	if sdk.RegisteredBeforeRequest() == nil {
 		h.t.Fatal("sdktest: no run_before_request handler registered — " +
 			"registration must happen in init(), not main()")
 	}
-	in := &pbv2.HookInput{
+	in := &pbv1.HookInput{
 		RequestId: 1,
-		Payload:   &pbv2.HookInput_ChatRequest{ChatRequest: req},
+		Payload:   &pbv1.HookInput_ChatRequest{ChatRequest: req},
 	}
 	var raw []byte
 	var err error
@@ -37,7 +37,7 @@ func (h *Harness) BeforeRequest(req *pbv2.ChatRequest) RequestResult {
 	if err != nil || len(raw) == 0 {
 		return res
 	}
-	var hr pbv2.HookResult
+	var hr pbv1.HookResult
 	if uerr := proto.Unmarshal(raw, &hr); uerr != nil {
 		res.Err = uerr
 		res.PassedThrough = false
@@ -55,23 +55,23 @@ func (h *Harness) BeforeRequest(req *pbv2.ChatRequest) RequestResult {
 // (mutable=false) dispatches, so tests must not treat Replacement as applied
 // output in that case.
 type ResponseResult struct {
-	Replacement   *pbv2.ChatResponse
-	Applied       *pbv2.ChatResponse
+	Replacement   *pbv1.ChatResponse
+	Applied       *pbv1.ChatResponse
 	Mutable       bool
 	PassedThrough bool
 	Err           error
-	Raw           *pbv2.HookResult
+	Raw           *pbv1.HookResult
 }
 
 // AfterResponse dispatches run_after_response.
-func (h *Harness) AfterResponse(resp *pbv2.ChatResponse, mutable bool) ResponseResult {
+func (h *Harness) AfterResponse(resp *pbv1.ChatResponse, mutable bool) ResponseResult {
 	h.t.Helper()
 	if sdk.RegisteredAfterResponse() == nil {
 		h.t.Fatal("sdktest: no run_after_response handler registered")
 	}
-	in := &pbv2.HookInput{
+	in := &pbv1.HookInput{
 		RequestId: 1,
-		Payload: &pbv2.HookInput_AfterResponse{AfterResponse: &pbv2.AfterResponse{
+		Payload: &pbv1.HookInput_AfterResponse{AfterResponse: &pbv1.AfterResponse{
 			Response: resp,
 			Mutable:  mutable,
 		}},
@@ -83,7 +83,7 @@ func (h *Harness) AfterResponse(resp *pbv2.ChatResponse, mutable bool) ResponseR
 	if err != nil || len(raw) == 0 {
 		return res
 	}
-	var hr pbv2.HookResult
+	var hr pbv1.HookResult
 	if uerr := proto.Unmarshal(raw, &hr); uerr != nil {
 		res.Err = uerr
 		res.PassedThrough = false
@@ -99,22 +99,22 @@ func (h *Harness) AfterResponse(resp *pbv2.ChatResponse, mutable bool) ResponseR
 
 // StreamResult is the outcome of a stream-chunk dispatch.
 type StreamResult struct {
-	Events        []*pbv2.StreamEvent
+	Events        []*pbv1.StreamEvent
 	PassedThrough bool
 	Suppressed    bool
 	Err           error
-	Raw           *pbv2.HookResult
+	Raw           *pbv1.HookResult
 }
 
 // StreamChunk dispatches run_on_stream_chunk.
-func (h *Harness) StreamChunk(ev *pbv2.StreamEvent) StreamResult {
+func (h *Harness) StreamChunk(ev *pbv1.StreamEvent) StreamResult {
 	h.t.Helper()
 	if sdk.RegisteredStreamChunk() == nil {
 		h.t.Fatal("sdktest: no run_on_stream_chunk handler registered")
 	}
-	in := &pbv2.HookInput{
+	in := &pbv1.HookInput{
 		RequestId: 1,
-		Payload:   &pbv2.HookInput_StreamEvent{StreamEvent: ev},
+		Payload:   &pbv1.HookInput_StreamEvent{StreamEvent: ev},
 	}
 	var raw []byte
 	var err error
@@ -123,7 +123,7 @@ func (h *Harness) StreamChunk(ev *pbv2.StreamEvent) StreamResult {
 	if err != nil || len(raw) == 0 {
 		return res
 	}
-	var hr pbv2.HookResult
+	var hr pbv1.HookResult
 	if uerr := proto.Unmarshal(raw, &hr); uerr != nil {
 		res.Err = uerr
 		res.PassedThrough = false
@@ -142,20 +142,20 @@ func (h *Harness) StreamChunk(ev *pbv2.StreamEvent) StreamResult {
 
 // HTTPResult is the outcome of an HTTP-request dispatch.
 type HTTPResult struct {
-	Response      *pbv2.HttpResponse
+	Response      *pbv1.HttpResponse
 	PassedThrough bool
 	Err           error
 }
 
 // HTTPRequest dispatches run_on_http_request.
-func (h *Harness) HTTPRequest(req *pbv2.HttpRequest) HTTPResult {
+func (h *Harness) HTTPRequest(req *pbv1.HttpRequest) HTTPResult {
 	h.t.Helper()
 	if sdk.RegisteredHTTPRequest() == nil {
 		h.t.Fatal("sdktest: no run_on_http_request handler registered")
 	}
-	in := &pbv2.HookInput{
+	in := &pbv1.HookInput{
 		RequestId: 1,
-		Payload:   &pbv2.HookInput_HttpRequest{HttpRequest: req},
+		Payload:   &pbv1.HookInput_HttpRequest{HttpRequest: req},
 	}
 	var raw []byte
 	var err error
@@ -164,7 +164,7 @@ func (h *Harness) HTTPRequest(req *pbv2.HttpRequest) HTTPResult {
 	if err != nil || len(raw) == 0 {
 		return res
 	}
-	var hr pbv2.HookResult
+	var hr pbv1.HookResult
 	if uerr := proto.Unmarshal(raw, &hr); uerr != nil {
 		res.Err = uerr
 		res.PassedThrough = false
@@ -176,20 +176,20 @@ func (h *Harness) HTTPRequest(req *pbv2.HttpRequest) HTTPResult {
 
 // TickResult is the outcome of a tick dispatch.
 type TickResult struct {
-	Outcome       *pbv2.TickOutcome
+	Outcome       *pbv1.TickOutcome
 	PassedThrough bool
 	Err           error
 }
 
 // Tick dispatches run_on_tick.
-func (h *Harness) Tick(req *pbv2.TickRequest) TickResult {
+func (h *Harness) Tick(req *pbv1.TickRequest) TickResult {
 	h.t.Helper()
 	if sdk.RegisteredTick() == nil {
 		h.t.Fatal("sdktest: no run_on_tick handler registered")
 	}
-	in := &pbv2.HookInput{
+	in := &pbv1.HookInput{
 		RequestId: 1,
-		Payload:   &pbv2.HookInput_TickRequest{TickRequest: req},
+		Payload:   &pbv1.HookInput_TickRequest{TickRequest: req},
 	}
 	var raw []byte
 	var err error
@@ -198,7 +198,7 @@ func (h *Harness) Tick(req *pbv2.TickRequest) TickResult {
 	if err != nil || len(raw) == 0 {
 		return res
 	}
-	var hr pbv2.HookResult
+	var hr pbv1.HookResult
 	if uerr := proto.Unmarshal(raw, &hr); uerr != nil {
 		res.Err = uerr
 		res.PassedThrough = false
@@ -220,9 +220,9 @@ func (h *Harness) BlockCalls() []HostCallEntry {
 }
 
 // DecodeBlockArgs unmarshals BlockRequestArgs from a recorded call.
-func DecodeBlockArgs(t testing.TB, args string) *pbv2.BlockRequestArgs {
+func DecodeBlockArgs(t testing.TB, args string) *pbv1.BlockRequestArgs {
 	t.Helper()
-	var a pbv2.BlockRequestArgs
+	var a pbv1.BlockRequestArgs
 	if err := proto.Unmarshal([]byte(args), &a); err != nil {
 		t.Fatal(err)
 	}

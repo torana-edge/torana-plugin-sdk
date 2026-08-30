@@ -36,13 +36,6 @@ jobs:
       - if: github.event_name == 'pull_request'
         name: ABI compatibility
         run: ./scripts/check-abi-breaking.sh
-      # The release preflight for v0.3+ lives in release.yml (and
-      # scripts/assert-v2-cut-for-release.sh). A tag-only guard here would run
-      # too late: release.yml is triggered by the tag itself.
-      - name: Release cut preflight covers allowed and forbidden layouts
-        run: ./scripts/assert-v2-cut-for-release_test.sh
-      - name: Current v0.3 release cut is complete
-        run: ./scripts/assert-v2-cut-for-release.sh 0.3.0
       - run: go test ./...
       - name: Race detector
         run: go test -race ./...
@@ -86,17 +79,17 @@ jobs:
           # files outside its archive, so both copies are checked. Comparing
           # descriptor sets rather than text means comments may differ while any
           # field, type or number change fails.
-          test -f proto/torana/v2/torana.proto || {
-            echo "::error::canonical ABI proto is missing or moved: proto/torana/v2/torana.proto" >&2
+          test -f proto/torana/v1/torana.proto || {
+            echo "::error::canonical ABI proto is missing or moved: proto/torana/v1/torana.proto" >&2
             exit 1
           }
-          test -f rust/torana-plugin-sdk/proto/torana/v2/torana.proto || {
-            echo "::error::Rust crate is missing the v2 ABI proto" >&2
+          test -f rust/torana-plugin-sdk/proto/torana/v1/torana.proto || {
+            echo "::error::Rust crate is missing the ABI proto" >&2
             exit 1
           }
-          protoc -I proto --descriptor_set_out=/tmp/canonical-v2.pb proto/torana/v2/torana.proto
-          protoc -I rust/torana-plugin-sdk/proto --descriptor_set_out=/tmp/crate-v2.pb rust/torana-plugin-sdk/proto/torana/v2/torana.proto
-          cmp /tmp/canonical-v2.pb /tmp/crate-v2.pb
+          protoc -I proto --descriptor_set_out=/tmp/canonical-v1.pb proto/torana/v1/torana.proto
+          protoc -I rust/torana-plugin-sdk/proto --descriptor_set_out=/tmp/crate-v1.pb rust/torana-plugin-sdk/proto/torana/v1/torana.proto
+          cmp /tmp/canonical-v1.pb /tmp/crate-v1.pb
       - run: cargo fmt --manifest-path rust/torana-plugin-sdk/Cargo.toml --check
       - run: cargo clippy --manifest-path rust/torana-plugin-sdk/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path rust/torana-plugin-sdk/Cargo.toml
@@ -114,7 +107,7 @@ jobs:
       # anything — which makes them useless for testing decode behaviour, since
       # "ignored the codec error" and "no handler" look identical from outside.
       #
-      # Exercise both language SDKs against the same ABI-v2 host harness.
+      # Exercise both language SDKs against the same ABI-v1 host harness.
       - run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -buildvcs=false -o /tmp/go-allhooks.wasm ./conformance/guests/go-allhooks
       - run: cargo build --target wasm32-wasip1 --target-dir /tmp/rust-allhooks-target --manifest-path conformance/guests/rust-allhooks/Cargo.toml
       - run: go test ./conformance/host

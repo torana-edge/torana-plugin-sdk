@@ -1,6 +1,11 @@
-package v2
+package v1
 
-import "fmt"
+import (
+	"fmt"
+	"net/url"
+	"strings"
+	"unicode/utf8"
+)
 
 // Validation for host-call envelopes and their normative argument schemas.
 //
@@ -222,4 +227,149 @@ func (x *StateDeleteArgs) Validate() error {
 		return fmt.Errorf("state delete args have no key")
 	}
 	return nil
+}
+
+func validateSlot(kind, slot string) error {
+	if slot == "" || len(slot) > 64 {
+		return fmt.Errorf("%s must be 1–64 ASCII characters", kind)
+	}
+	for i := range len(slot) {
+		c := slot[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') || (i > 0 && (c == '.' || c == '_' || c == '-')) {
+			continue
+		}
+		return fmt.Errorf("%s contains an invalid character", kind)
+	}
+	return nil
+}
+
+func validateLogicalPath(kind, value string, emptyOK bool) error {
+	if value == "" && emptyOK {
+		return nil
+	}
+	if value == "" || len(value) > 240 || !utf8.ValidString(value) {
+		return fmt.Errorf("%s must be a non-empty UTF-8 path of at most 240 bytes", kind)
+	}
+	if strings.HasPrefix(value, "/") || strings.Contains(value, "\\") {
+		return fmt.Errorf("%s must be a relative slash-separated path", kind)
+	}
+	for _, part := range strings.Split(value, "/") {
+		if part == "" || part == "." || part == ".." {
+			return fmt.Errorf("%s contains an invalid path segment", kind)
+		}
+	}
+	return nil
+}
+
+func (x *CredentialGetArgs) Validate() error {
+	if x == nil {
+		return fmt.Errorf("credential get args are nil")
+	}
+	return validateSlot("credential slot", x.Slot)
+}
+
+func (x *FileAppendArgs) Validate() error {
+	if x == nil {
+		return fmt.Errorf("file append args are nil")
+	}
+	return validateLogicalPath("file path", x.Path, false)
+}
+
+func (x *FileReadArgs) Validate() error {
+	if x == nil {
+		return fmt.Errorf("file read args are nil")
+	}
+	return validateLogicalPath("file path", x.Path, false)
+}
+
+func (x *FileWriteArgs) Validate() error {
+	if x == nil {
+		return fmt.Errorf("file write args are nil")
+	}
+	return validateLogicalPath("file path", x.Path, false)
+}
+
+func (x *FileListArgs) Validate() error {
+	if x == nil {
+		return fmt.Errorf("file list args are nil")
+	}
+	return validateLogicalPath("file prefix", x.Prefix, true)
+}
+
+func (x *FileDeleteArgs) Validate() error {
+	if x == nil {
+		return fmt.Errorf("file delete args are nil")
+	}
+	return validateLogicalPath("file path", x.Path, false)
+}
+
+func validHeaderName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := range len(name) {
+		c := name[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') || strings.ContainsRune("!#$%&'*+-.^_`|~", rune(c)) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validateHTTPHeaders(headers []*HTTPHeader) error {
+	seen := make(map[string]struct{}, len(headers))
+	for i, header := range headers {
+		if header == nil || !validHeaderName(header.Name) {
+			return fmt.Errorf("http header %d has an invalid name", i)
+		}
+		name := strings.ToLower(header.Name)
+		if _, ok := seen[name]; ok {
+			return fmt.Errorf("http header %q is duplicated", header.Name)
+		}
+		seen[name] = struct{}{}
+		for _, value := range header.Values {
+			if strings.ContainsAny(value, "\r\n") {
+				return fmt.Errorf("http header %q contains a line break", header.Name)
+			}
+		}
+	}
+	return nil
+}
+
+func (x *OutboundHTTPRequestArgs) Validate() error {
+	if x == nil {
+		return fmt.Errorf("outbound http request args are nil")
+	}
+	if err := validateSlot("http endpoint", x.Endpoint); err != nil {
+		return err
+	}
+	if x.Method == "" {
+		return fmt.Errorf("http method is required")
+	}
+	for i := range len(x.Method) {
+		if c := x.Method[i]; c < 'A' || c > 'Z' {
+			return fmt.Errorf("http method must be uppercase ASCII")
+		}
+	}
+	if !strings.HasPrefix(x.Path, "/") || strings.HasPrefix(x.Path, "//") || strings.Contains(x.Path, "#") {
+		return fmt.Errorf("http path must be an absolute path without an authority or fragment")
+	}
+	u, err := url.ParseRequestURI(x.Path)
+	if err != nil || u.IsAbs() || u.Host != "" {
+		return fmt.Errorf("http path is invalid")
+	}
+	return validateHTTPHeaders(x.Headers)
+}
+
+func (x *OutboundHTTPResponse) Validate() error {
+	if x == nil {
+		return fmt.Errorf("outbound http response is nil")
+	}
+	if x.Status < 100 || x.Status > 599 {
+		return fmt.Errorf("outbound http response status %d is invalid", x.Status)
+	}
+	return validateHTTPHeaders(x.Headers)
 }

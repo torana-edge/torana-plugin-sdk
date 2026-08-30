@@ -1,7 +1,7 @@
 package outboundpolicy
 
 import (
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 // Executable before/after fixtures for the bound-signature rule.
@@ -29,9 +29,9 @@ type StreamFixture struct {
 	// Name identifies the case in failures.
 	Name string
 	// Accepted is the event sequence the host handed the plugin.
-	Accepted []*pbv2.StreamEvent
+	Accepted []*pbv1.StreamEvent
 	// Returned is the sequence the plugin produced.
-	Returned []*pbv2.StreamEvent
+	Returned []*pbv1.StreamEvent
 	// Index is the content block the expectation is about. Fixtures with more
 	// than one block exist precisely to catch verifiers that correlate wrongly.
 	//
@@ -199,33 +199,33 @@ func SignatureStreamFixtures() []StreamFixture {
 }
 
 // toolBlock renders one signed tool block with a single arguments delta.
-func toolBlock(index int32, id, name, signature, args string) []*pbv2.StreamEvent {
+func toolBlock(index int32, id, name, signature, args string) []*pbv1.StreamEvent {
 	return toolBlockDeltas(index, id, name, signature, args)
 }
 
 // toolBlockDeltas renders one signed tool block whose arguments arrive as the
 // given fragments, so fixtures can vary framing independently of content.
-func toolBlockDeltas(index int32, id, name, signature string, args ...string) []*pbv2.StreamEvent {
-	out := []*pbv2.StreamEvent{
-		{Event: &pbv2.StreamEvent_ContentBlockStart{
-			ContentBlockStart: &pbv2.ContentBlockStart{
+func toolBlockDeltas(index int32, id, name, signature string, args ...string) []*pbv1.StreamEvent {
+	out := []*pbv1.StreamEvent{
+		{Event: &pbv1.StreamEvent_ContentBlockStart{
+			ContentBlockStart: &pbv1.ContentBlockStart{
 				Index: index,
-				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{
+				Block: &pbv1.ContentBlockStart_ToolCall{ToolCall: &pbv1.ToolCallRef{
 					Id: id, Name: name, Signature: signature,
 				}},
 			},
 		}},
 	}
 	for _, a := range args {
-		out = append(out, &pbv2.StreamEvent{
-			Event: &pbv2.StreamEvent_ToolCallDelta{
-				ToolCallDelta: &pbv2.ToolCallDelta{Index: index, ArgumentsDelta: a},
+		out = append(out, &pbv1.StreamEvent{
+			Event: &pbv1.StreamEvent_ToolCallDelta{
+				ToolCallDelta: &pbv1.ToolCallDelta{Index: index, ArgumentsDelta: a},
 			},
 		})
 	}
-	return append(out, &pbv2.StreamEvent{
-		Event: &pbv2.StreamEvent_ContentBlockStop{
-			ContentBlockStop: &pbv2.ContentBlockStop{Index: index},
+	return append(out, &pbv1.StreamEvent{
+		Event: &pbv1.StreamEvent_ContentBlockStop{
+			ContentBlockStop: &pbv1.ContentBlockStop{Index: index},
 		},
 	})
 }
@@ -234,41 +234,41 @@ func toolBlockDeltas(index int32, id, name, signature string, args ...string) []
 // CONCURRENTLY, with their arguments deltas interleaved by index — the OpenAI
 // Chat parallel-tool shape. Block 1 starts before block 0 stops, so only an
 // index-keyed assembler/verifier can keep the two argument buffers apart.
-func interleavedToolBlocks() []*pbv2.StreamEvent {
-	return []*pbv2.StreamEvent{
-		{Event: &pbv2.StreamEvent_ContentBlockStart{
-			ContentBlockStart: &pbv2.ContentBlockStart{
+func interleavedToolBlocks() []*pbv1.StreamEvent {
+	return []*pbv1.StreamEvent{
+		{Event: &pbv1.StreamEvent_ContentBlockStart{
+			ContentBlockStart: &pbv1.ContentBlockStart{
 				Index: 0,
-				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{
+				Block: &pbv1.ContentBlockStart_ToolCall{ToolCall: &pbv1.ToolCallRef{
 					Id: "call_1", Name: "read_file", Signature: sigA,
 				}},
 			},
 		}},
-		{Event: &pbv2.StreamEvent_ToolCallDelta{
-			ToolCallDelta: &pbv2.ToolCallDelta{Index: 0, ArgumentsDelta: `{"path":`},
+		{Event: &pbv1.StreamEvent_ToolCallDelta{
+			ToolCallDelta: &pbv1.ToolCallDelta{Index: 0, ArgumentsDelta: `{"path":`},
 		}},
-		{Event: &pbv2.StreamEvent_ContentBlockStart{
-			ContentBlockStart: &pbv2.ContentBlockStart{
+		{Event: &pbv1.StreamEvent_ContentBlockStart{
+			ContentBlockStart: &pbv1.ContentBlockStart{
 				Index: 1,
-				Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{
+				Block: &pbv1.ContentBlockStart_ToolCall{ToolCall: &pbv1.ToolCallRef{
 					Id: "call_2", Name: "write_file", Signature: sigB,
 				}},
 			},
 		}},
-		{Event: &pbv2.StreamEvent_ToolCallDelta{
-			ToolCallDelta: &pbv2.ToolCallDelta{Index: 1, ArgumentsDelta: `{"path":`},
+		{Event: &pbv1.StreamEvent_ToolCallDelta{
+			ToolCallDelta: &pbv1.ToolCallDelta{Index: 1, ArgumentsDelta: `{"path":`},
 		}},
-		{Event: &pbv2.StreamEvent_ToolCallDelta{
-			ToolCallDelta: &pbv2.ToolCallDelta{Index: 0, ArgumentsDelta: `"/a"}`},
+		{Event: &pbv1.StreamEvent_ToolCallDelta{
+			ToolCallDelta: &pbv1.ToolCallDelta{Index: 0, ArgumentsDelta: `"/a"}`},
 		}},
-		{Event: &pbv2.StreamEvent_ToolCallDelta{
-			ToolCallDelta: &pbv2.ToolCallDelta{Index: 1, ArgumentsDelta: `"/b"}`},
+		{Event: &pbv1.StreamEvent_ToolCallDelta{
+			ToolCallDelta: &pbv1.ToolCallDelta{Index: 1, ArgumentsDelta: `"/b"}`},
 		}},
-		{Event: &pbv2.StreamEvent_ContentBlockStop{
-			ContentBlockStop: &pbv2.ContentBlockStop{Index: 0},
+		{Event: &pbv1.StreamEvent_ContentBlockStop{
+			ContentBlockStop: &pbv1.ContentBlockStop{Index: 0},
 		}},
-		{Event: &pbv2.StreamEvent_ContentBlockStop{
-			ContentBlockStop: &pbv2.ContentBlockStop{Index: 1},
+		{Event: &pbv1.StreamEvent_ContentBlockStop{
+			ContentBlockStop: &pbv1.ContentBlockStop{Index: 1},
 		}},
 	}
 }

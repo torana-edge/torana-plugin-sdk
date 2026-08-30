@@ -5,33 +5,33 @@ import (
 	"strings"
 	"testing"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 func TestDuplicateRegistrationPanics(t *testing.T) {
 	register := map[string]func(){
 		HookBeforeRequest: func() {
-			OnBeforeRequest(func(context.Context, *pbv2.ChatRequest) (RequestResult, error) {
+			OnBeforeRequest(func(context.Context, *pbv1.ChatRequest) (RequestResult, error) {
 				return PassRequest(), nil
 			})
 		},
 		HookAfterResponse: func() {
-			OnAfterResponse(func(context.Context, *pbv2.ChatResponse, bool) (ResponseResult, error) {
+			OnAfterResponse(func(context.Context, *pbv1.ChatResponse, bool) (ResponseResult, error) {
 				return PassResponse(), nil
 			})
 		},
 		HookStreamChunk: func() {
-			OnStreamChunk(func(context.Context, *pbv2.StreamEvent) (StreamResult, error) {
+			OnStreamChunk(func(context.Context, *pbv1.StreamEvent) (StreamResult, error) {
 				return PassEvent(), nil
 			})
 		},
 		HookHTTPRequest: func() {
-			OnHTTPRequest(func(context.Context, *pbv2.HttpRequest) (HTTPResult, error) {
+			OnHTTPRequest(func(context.Context, *pbv1.HttpRequest) (HTTPResult, error) {
 				return PassHTTP(), nil
 			})
 		},
 		HookTick: func() {
-			OnTick(func(context.Context, *pbv2.TickRequest) (TickResult, error) {
+			OnTick(func(context.Context, *pbv1.TickRequest) (TickResult, error) {
 				return TickIdle(), nil
 			})
 		},
@@ -66,19 +66,19 @@ func TestSingleRegistrationSucceeds(t *testing.T) {
 	resetRegistrations()
 	t.Cleanup(resetRegistrations)
 
-	OnBeforeRequest(func(context.Context, *pbv2.ChatRequest) (RequestResult, error) {
+	OnBeforeRequest(func(context.Context, *pbv1.ChatRequest) (RequestResult, error) {
 		return PassRequest(), nil
 	})
-	OnAfterResponse(func(context.Context, *pbv2.ChatResponse, bool) (ResponseResult, error) {
+	OnAfterResponse(func(context.Context, *pbv1.ChatResponse, bool) (ResponseResult, error) {
 		return PassResponse(), nil
 	})
-	OnStreamChunk(func(context.Context, *pbv2.StreamEvent) (StreamResult, error) {
+	OnStreamChunk(func(context.Context, *pbv1.StreamEvent) (StreamResult, error) {
 		return PassEvent(), nil
 	})
-	OnHTTPRequest(func(context.Context, *pbv2.HttpRequest) (HTTPResult, error) {
+	OnHTTPRequest(func(context.Context, *pbv1.HttpRequest) (HTTPResult, error) {
 		return PassHTTP(), nil
 	})
-	OnTick(func(context.Context, *pbv2.TickRequest) (TickResult, error) {
+	OnTick(func(context.Context, *pbv1.TickRequest) (TickResult, error) {
 		return TickIdle(), nil
 	})
 

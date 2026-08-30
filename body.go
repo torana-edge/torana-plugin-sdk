@@ -2,7 +2,7 @@ package plugin_sdk
 
 // Request message-body helpers: the sanctioned mutation surface for plugins.
 //
-// The request message body is the ordered RequestBlock sequence (pb/v2
+// The request message body is the ordered RequestBlock sequence (pb/v1
 // Message.blocks) — the SOLE authority for every content fact. Plugins do
 // not parse provider-shaped raw arrays and do not manipulate oneof internals
 // for their ordinary tasks; these helpers read and mutate blocks with
@@ -27,8 +27,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
-	"github.com/torana-edge/torana-plugin-sdk/pb/v2/jsontext"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
+	"github.com/torana-edge/torana-plugin-sdk/pb/v1/jsontext"
 )
 
 // TextSegment is a copied view of one text block's text.
@@ -40,7 +40,7 @@ type TextSegment struct {
 
 // TextSegments returns the text blocks' texts in wire order (copied views).
 // A nil message or nil blocks list yields nil.
-func TextSegments(msg *pbv2.Message) []TextSegment {
+func TextSegments(msg *pbv1.Message) []TextSegment {
 	if msg == nil {
 		return nil
 	}
@@ -55,7 +55,7 @@ func TextSegments(msg *pbv2.Message) []TextSegment {
 
 // Text returns the concatenation of every text block's text in wire order.
 // Documented as a plain concatenation: no separators, no semantic inference.
-func Text(msg *pbv2.Message) string {
+func Text(msg *pbv1.Message) string {
 	var out bytes.Buffer
 	for _, seg := range TextSegments(msg) {
 		out.WriteString(seg.Text)
@@ -68,7 +68,7 @@ func Text(msg *pbv2.Message) string {
 // block's signature token is cleared when the text actually changes (the
 // token is provenance-governed), and a trailing-signature block whose
 // covered content changed is cleared too.
-func SetTextAt(msg *pbv2.Message, block int, text string) error {
+func SetTextAt(msg *pbv1.Message, block int, text string) error {
 	if msg == nil {
 		return fmt.Errorf("set text: nil message")
 	}
@@ -78,7 +78,7 @@ func SetTextAt(msg *pbv2.Message, block int, text string) error {
 	if msg.Blocks[block] == nil {
 		return fmt.Errorf("set text: block %d is nil", block)
 	}
-	tb, ok := msg.Blocks[block].Kind.(*pbv2.RequestBlock_Text)
+	tb, ok := msg.Blocks[block].Kind.(*pbv1.RequestBlock_Text)
 	if !ok || tb.Text == nil {
 		return fmt.Errorf("set text: block %d is not a text block", block)
 	}
@@ -101,7 +101,7 @@ func SetTextAt(msg *pbv2.Message, block int, text string) error {
 //     collapse) leaves every provenance token byte-for-byte untouched;
 //   - a real change clears the signature token on every touched text block
 //     and removes a trailing-signature block whose scope was invalidated.
-func ReplaceAllText(msg *pbv2.Message, text string) error {
+func ReplaceAllText(msg *pbv1.Message, text string) error {
 	if msg == nil {
 		return fmt.Errorf("replace all text: nil message")
 	}
@@ -130,8 +130,8 @@ func ReplaceAllText(msg *pbv2.Message, text string) error {
 		// appended after it; the appended text is also outside the provider
 		// token's covered scope, so the token is stale and removed first.
 		clearTrailingSignature(msg)
-		msg.Blocks = append(msg.Blocks, &pbv2.RequestBlock{
-			Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: text}},
+		msg.Blocks = append(msg.Blocks, &pbv1.RequestBlock{
+			Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: text}},
 		})
 		return nil
 	}
@@ -159,7 +159,7 @@ func ReplaceAllText(msg *pbv2.Message, text string) error {
 // checkInsertBeforeTrailing refuses an insertion position after a final
 // trailing-signature block: the token is assistant-only and FINAL, so
 // nothing may be inserted after it.
-func checkInsertBeforeTrailing(msg *pbv2.Message, at int) error {
+func checkInsertBeforeTrailing(msg *pbv1.Message, at int) error {
 	if len(msg.Blocks) == 0 {
 		return nil
 	}
@@ -175,7 +175,7 @@ func checkInsertBeforeTrailing(msg *pbv2.Message, at int) error {
 
 // clearTrailingSignature removes a final trailing-signature block whose
 // TrailingStandalone scope covered the changed content.
-func clearTrailingSignature(msg *pbv2.Message) {
+func clearTrailingSignature(msg *pbv1.Message) {
 	if len(msg.Blocks) == 0 {
 		return
 	}
@@ -238,7 +238,7 @@ func ToolResultScalarText(v ToolResultView) (string, bool) {
 //     provenance token whose covered scope changed: the tool-result
 //     signature (its scope is the result content) and a final
 //     trailing-signature block (its covered scope is the message body).
-func ReplaceToolResultText(msg *pbv2.Message, block int, text string) (bool, error) {
+func ReplaceToolResultText(msg *pbv1.Message, block int, text string) (bool, error) {
 	if msg == nil {
 		return false, fmt.Errorf("replace tool result text: nil message")
 	}
@@ -261,7 +261,7 @@ func ReplaceToolResultText(msg *pbv2.Message, block int, text string) (bool, err
 			return false, fmt.Errorf("replace tool result text: block %d content[%d] is nil", block, i)
 		}
 		switch k := c.Kind.(type) {
-		case *pbv2.ToolResultContentBlock_Text:
+		case *pbv1.ToolResultContentBlock_Text:
 			if k.Text == nil {
 				return false, fmt.Errorf("replace tool result text: block %d content[%d] is a typed-nil text arm", block, i)
 			}
@@ -269,12 +269,12 @@ func ReplaceToolResultText(msg *pbv2.Message, block int, text string) (bool, err
 				return false, fmt.Errorf("replace tool result text: block %d has multiple text arms", block)
 			}
 			textIdx = i
-		case *pbv2.ToolResultContentBlock_Unknown:
+		case *pbv1.ToolResultContentBlock_Unknown:
 			if k.Unknown == nil {
 				return false, fmt.Errorf("replace tool result text: block %d content[%d] is a typed-nil unknown arm", block, i)
 			}
 			return false, fmt.Errorf("replace tool result text: block %d has an unknown content arm", block)
-		case *pbv2.ToolResultContentBlock_CacheBreakpoint:
+		case *pbv1.ToolResultContentBlock_CacheBreakpoint:
 			if k.CacheBreakpoint == nil {
 				return false, fmt.Errorf("replace tool result text: block %d content[%d] is a typed-nil cache arm", block, i)
 			}
@@ -312,7 +312,7 @@ type ToolCallView struct {
 }
 
 // ToolCalls returns the tool-use blocks' views in wire order.
-func ToolCalls(msg *pbv2.Message) []ToolCallView {
+func ToolCalls(msg *pbv1.Message) []ToolCallView {
 	if msg == nil {
 		return nil
 	}
@@ -350,7 +350,7 @@ type ToolResultContentView struct {
 }
 
 // ToolResults returns the tool-result blocks' views in wire order.
-func ToolResults(msg *pbv2.Message) []ToolResultView {
+func ToolResults(msg *pbv1.Message) []ToolResultView {
 	if msg == nil {
 		return nil
 	}
@@ -367,19 +367,19 @@ func ToolResults(msg *pbv2.Message) []ToolResultView {
 	return out
 }
 
-func toolResultContentView(c *pbv2.ToolResultContentBlock) ToolResultContentView {
+func toolResultContentView(c *pbv1.ToolResultContentBlock) ToolResultContentView {
 	var v ToolResultContentView
 	switch k := c.Kind.(type) {
-	case *pbv2.ToolResultContentBlock_Text:
+	case *pbv1.ToolResultContentBlock_Text:
 		if k.Text != nil {
 			v.Text = k.Text.Text
 		}
-	case *pbv2.ToolResultContentBlock_Unknown:
+	case *pbv1.ToolResultContentBlock_Unknown:
 		if k.Unknown != nil {
 			v.UnknownKind = k.Unknown.Kind
 			v.UnknownData = append([]byte(nil), k.Unknown.PayloadJson...)
 		}
-	case *pbv2.ToolResultContentBlock_CacheBreakpoint:
+	case *pbv1.ToolResultContentBlock_CacheBreakpoint:
 		if k.CacheBreakpoint != nil {
 			v.CacheMarker = append([]byte(nil), k.CacheBreakpoint.MarkerJson...)
 		}
@@ -412,7 +412,7 @@ func validateCallInput(call ToolCallInput) error {
 // AddToolCall inserts a tool-use block at position at (0..len(blocks)).
 // Out-of-range positions and insertion AFTER a final trailing-signature
 // block are errors (the signature must stay final).
-func AddToolCall(msg *pbv2.Message, at int, call ToolCallInput) error {
+func AddToolCall(msg *pbv1.Message, at int, call ToolCallInput) error {
 	if msg == nil {
 		return fmt.Errorf("add tool call: nil message")
 	}
@@ -425,8 +425,8 @@ func AddToolCall(msg *pbv2.Message, at int, call ToolCallInput) error {
 	if err := validateCallInput(call); err != nil {
 		return err
 	}
-	block := &pbv2.RequestBlock{
-		Kind: &pbv2.RequestBlock_ToolUse{ToolUse: &pbv2.RequestToolUseBlock{
+	block := &pbv1.RequestBlock{
+		Kind: &pbv1.RequestBlock_ToolUse{ToolUse: &pbv1.RequestToolUseBlock{
 			Id:            call.Id,
 			Name:          call.Name,
 			ArgumentsJson: append([]byte(nil), call.Arguments...),
@@ -441,7 +441,7 @@ func AddToolCall(msg *pbv2.Message, at int, call ToolCallInput) error {
 // ReplaceToolCall replaces the tool-use block at block with call (identity,
 // arguments). The block must be a tool-use block; its call-bound signature
 // token is cleared (its covered content changed).
-func ReplaceToolCall(msg *pbv2.Message, block int, call ToolCallInput) error {
+func ReplaceToolCall(msg *pbv1.Message, block int, call ToolCallInput) error {
 	if msg == nil {
 		return fmt.Errorf("replace tool call: nil message")
 	}
@@ -451,7 +451,7 @@ func ReplaceToolCall(msg *pbv2.Message, block int, call ToolCallInput) error {
 	if msg.Blocks[block] == nil {
 		return fmt.Errorf("replace tool call: block %d is nil", block)
 	}
-	tu, ok := msg.Blocks[block].Kind.(*pbv2.RequestBlock_ToolUse)
+	tu, ok := msg.Blocks[block].Kind.(*pbv1.RequestBlock_ToolUse)
 	if !ok || tu.ToolUse == nil {
 		return fmt.Errorf("replace tool call: block %d is not a tool-use block", block)
 	}
@@ -482,7 +482,7 @@ type CacheBreakpointView struct {
 // CacheBreakpoints returns the cache-breakpoint blocks' views in wire
 // order. A breakpoint CLOSES the cached prefix at its position; multiple
 // markers per message are naturally representable.
-func CacheBreakpoints(msg *pbv2.Message) []CacheBreakpointView {
+func CacheBreakpoints(msg *pbv1.Message) []CacheBreakpointView {
 	if msg == nil {
 		return nil
 	}
@@ -499,7 +499,7 @@ func CacheBreakpoints(msg *pbv2.Message) []CacheBreakpointView {
 // message — the prefix-closing boundary — or nil when the message carries no
 // breakpoint. The marker bytes are decoded for the caller's convenience; the
 // raw bytes remain available via CacheBreakpoints.
-func CacheControl(msg *pbv2.Message) map[string]any {
+func CacheControl(msg *pbv1.Message) map[string]any {
 	if msg == nil {
 		return nil
 	}
@@ -525,7 +525,7 @@ func CacheControl(msg *pbv2.Message) map[string]any {
 // SetCacheBreakpoint replaces the marker of the cache-breakpoint block at
 // block. The block must be a cache-breakpoint block and marker a valid JSON
 // object (raw bytes preserved verbatim).
-func SetCacheBreakpoint(msg *pbv2.Message, block int, marker []byte) error {
+func SetCacheBreakpoint(msg *pbv1.Message, block int, marker []byte) error {
 	if msg == nil {
 		return fmt.Errorf("set cache breakpoint: nil message")
 	}
@@ -535,7 +535,7 @@ func SetCacheBreakpoint(msg *pbv2.Message, block int, marker []byte) error {
 	if msg.Blocks[block] == nil {
 		return fmt.Errorf("set cache breakpoint: block %d is nil", block)
 	}
-	cb, ok := msg.Blocks[block].Kind.(*pbv2.RequestBlock_CacheBreakpoint)
+	cb, ok := msg.Blocks[block].Kind.(*pbv1.RequestBlock_CacheBreakpoint)
 	if !ok || cb.CacheBreakpoint == nil {
 		return fmt.Errorf("set cache breakpoint: block %d is not a cache-breakpoint block", block)
 	}
@@ -549,7 +549,7 @@ func SetCacheBreakpoint(msg *pbv2.Message, block int, marker []byte) error {
 // AddCacheBreakpoint inserts a cache-breakpoint block at position at
 // (0..len(blocks)), closing the cached prefix at that position. Insertion
 // AFTER a final trailing-signature block is an error.
-func AddCacheBreakpoint(msg *pbv2.Message, at int, marker []byte) error {
+func AddCacheBreakpoint(msg *pbv1.Message, at int, marker []byte) error {
 	if msg == nil {
 		return fmt.Errorf("add cache breakpoint: nil message")
 	}
@@ -562,8 +562,8 @@ func AddCacheBreakpoint(msg *pbv2.Message, at int, marker []byte) error {
 	if err := validJSONObject(marker); err != nil {
 		return fmt.Errorf("add cache breakpoint: %w", err)
 	}
-	block := &pbv2.RequestBlock{
-		Kind: &pbv2.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv2.RequestCacheBreakpoint{
+	block := &pbv1.RequestBlock{
+		Kind: &pbv1.RequestBlock_CacheBreakpoint{CacheBreakpoint: &pbv1.RequestCacheBreakpoint{
 			MarkerJson: append([]byte(nil), marker...),
 		}},
 	}
@@ -574,7 +574,7 @@ func AddCacheBreakpoint(msg *pbv2.Message, at int, marker []byte) error {
 }
 
 // DeleteCacheBreakpoint removes the cache-breakpoint block at block.
-func DeleteCacheBreakpoint(msg *pbv2.Message, block int) error {
+func DeleteCacheBreakpoint(msg *pbv1.Message, block int) error {
 	if msg == nil {
 		return fmt.Errorf("delete cache breakpoint: nil message")
 	}
@@ -584,7 +584,7 @@ func DeleteCacheBreakpoint(msg *pbv2.Message, block int) error {
 	if msg.Blocks[block] == nil {
 		return fmt.Errorf("delete cache breakpoint: block %d is nil", block)
 	}
-	if _, ok := msg.Blocks[block].Kind.(*pbv2.RequestBlock_CacheBreakpoint); !ok {
+	if _, ok := msg.Blocks[block].Kind.(*pbv1.RequestBlock_CacheBreakpoint); !ok {
 		return fmt.Errorf("delete cache breakpoint: block %d is not a cache-breakpoint block", block)
 	}
 	msg.Blocks = append(msg.Blocks[:block], msg.Blocks[block+1:]...)

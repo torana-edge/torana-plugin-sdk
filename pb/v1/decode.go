@@ -1,4 +1,4 @@
-package v2
+package v1
 
 import (
 	"fmt"
@@ -40,11 +40,11 @@ func actionFieldNumbers(md protoreflect.MessageDescriptor) map[protowire.Number]
 			out[fs.Get(j).Number()] = struct{}{}
 		}
 		if len(out) == 0 {
-			panic("torana pb/v2: HookResult.action oneof has no fields")
+			panic("torana pb/v1: HookResult.action oneof has no fields")
 		}
 		return out
 	}
-	panic("torana pb/v2: HookResult has no action oneof")
+	panic("torana pb/v1: HookResult has no action oneof")
 }
 
 // DecodeHookResult unmarshals a guest-produced HookResult and refuses a wire

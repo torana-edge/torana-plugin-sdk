@@ -33,32 +33,26 @@ advertised `0.1.0`.
 
 ## Cutting a release
 
-Go, Rust, and the Edge host now implement ABI v2. Before release, keep both
-compiled conformance guests in the host test: the language-support claim is an
-executable contract, not merely two crates that happen to compile. Historical
-v1 protocol copies are not an active authoring surface.
+Go, Rust, and the Edge host implement ABI v1. Keep both compiled conformance
+guests in the host test: the language-support claim is an executable contract,
+not merely two crates that happen to compile.
 
 1. **Bump `rust/torana-plugin-sdk/Cargo.toml`** to the version you are about to
    tag, without the `v`. Commit it to `main`.
-2. **For `v0.3.0` and later**, the coordinated v1 deletion must already be on
-   `main` (canonical and Rust `proto/torana/v1` gone; CI protecting v2). The
-   release workflow runs `scripts/assert-v2-cut-for-release.sh` before any
-   package or publish step and fails closed otherwise — do not tag first and
-   hope.
-3. **Verify** — `go test ./...`, `cargo test --manifest-path rust/torana-plugin-sdk/Cargo.toml`,
+2. **Verify** — `go test ./...`, `cargo test --manifest-path rust/torana-plugin-sdk/Cargo.toml`,
    and a `GOOS=wasip1 GOARCH=wasm go build ./...` (a compile check of the SDK
    library — no `-buildmode=c-shared`, because nothing here is a plugin).
-4. **Tag and push.**
+3. **Tag and push.**
    ```bash
    git tag -a vX.Y.Z -m "…"
    git push origin vX.Y.Z
    ```
    Write a real annotation: new hooks, new host calls, behaviour changes, and
    anything a plugin author has to change. It becomes the release notes.
-5. **Ensure the repository has a `CARGO_REGISTRY_TOKEN` secret** authorized to
+4. **Ensure the repository has a `CARGO_REGISTRY_TOKEN` secret** authorized to
    publish `torana-plugin-sdk`.
-6. **Watch the release workflow.** It runs the v2-cut preflight (for `v0.3+`),
-   both test suites, asserts the version match, publishes the Rust crate, builds
+5. **Watch the release workflow.** It runs both test suites, asserts the version
+   match, publishes the Rust crate, builds
    the example plugins, publishes a GitHub Release with checksums, and attests
    build provenance. A failure here means the release train is incomplete.
 

@@ -1,7 +1,7 @@
 package plugin_sdk
 
 import (
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -12,7 +12,7 @@ import (
 //
 // Requires the env.original_request permission grant. Returns ok=false when
 // the grant is missing, the call runs outside a request, or decoding fails.
-func OriginalRequest() (*pbv2.ChatRequest, bool) {
+func OriginalRequest() (*pbv1.ChatRequest, bool) {
 	// ok=false covers every unavailable case deliberately: the caller's only
 	// sensible response to "no original" is to skip whatever needed it, so a
 	// classified error would be ceremony. The framed path still matters — the
@@ -28,7 +28,7 @@ func OriginalRequest() (*pbv2.ChatRequest, bool) {
 	if err != nil || herr != nil {
 		return nil, false
 	}
-	var req pbv2.ChatRequest
+	var req pbv1.ChatRequest
 	if proto.Unmarshal(raw, &req) != nil {
 		return nil, false
 	}

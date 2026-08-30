@@ -8,7 +8,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 // Non-WASM build: registrations and host calls are driven by sdktest.
@@ -67,7 +67,7 @@ func PluginConfig() string {
 
 // DispatchHook runs the registered handler for in and returns the framed
 // result bytes (nil for pass-through). Used by sdktest; mirrors run_hook.
-func DispatchHook(in *pbv2.HookInput) ([]byte, error) {
+func DispatchHook(in *pbv1.HookInput) ([]byte, error) {
 	if in == nil {
 		return nil, fmt.Errorf("hook input is nil")
 	}
@@ -78,11 +78,11 @@ func DispatchHook(in *pbv2.HookInput) ([]byte, error) {
 	ctx := withRequestID(context.Background(), in.RequestId)
 
 	var (
-		hr  *pbv2.HookResult
+		hr  *pbv1.HookResult
 		err error
 	)
 	switch hook {
-	case pbv2.Hook_HOOK_BEFORE_REQUEST:
+	case pbv1.Hook_HOOK_BEFORE_REQUEST:
 		if beforeRequestHandler == nil {
 			return nil, nil
 		}
@@ -91,7 +91,7 @@ func DispatchHook(in *pbv2.HookInput) ([]byte, error) {
 			return nil, herr
 		}
 		hr, err = res.hookResult()
-	case pbv2.Hook_HOOK_AFTER_RESPONSE:
+	case pbv1.Hook_HOOK_AFTER_RESPONSE:
 		if afterResponseHandler == nil {
 			return nil, nil
 		}
@@ -101,7 +101,7 @@ func DispatchHook(in *pbv2.HookInput) ([]byte, error) {
 			return nil, herr
 		}
 		hr, err = res.hookResult()
-	case pbv2.Hook_HOOK_ON_STREAM_CHUNK:
+	case pbv1.Hook_HOOK_ON_STREAM_CHUNK:
 		if streamChunkHandler == nil {
 			return nil, nil
 		}
@@ -110,7 +110,7 @@ func DispatchHook(in *pbv2.HookInput) ([]byte, error) {
 			return nil, herr
 		}
 		hr, err = res.hookResult()
-	case pbv2.Hook_HOOK_ON_HTTP_REQUEST:
+	case pbv1.Hook_HOOK_ON_HTTP_REQUEST:
 		if httpRequestHandler == nil {
 			return nil, nil
 		}
@@ -119,7 +119,7 @@ func DispatchHook(in *pbv2.HookInput) ([]byte, error) {
 			return nil, herr
 		}
 		hr, err = res.hookResult()
-	case pbv2.Hook_HOOK_ON_TICK:
+	case pbv1.Hook_HOOK_ON_TICK:
 		if tickHandler == nil {
 			return nil, nil
 		}

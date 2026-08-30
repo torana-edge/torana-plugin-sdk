@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	sdk "github.com/torana-edge/torana-plugin-sdk"
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 	"github.com/torana-edge/torana-plugin-sdk/sdktest"
 )
 
@@ -79,7 +79,7 @@ func TestUnconfiguredStateIsDistinctFromAbsence(t *testing.T) {
 		if err != nil {
 			t.Fatalf("transport error: %v", err)
 		}
-		if herr == nil || herr.Code != pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED {
+		if herr == nil || herr.Code != pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED {
 			t.Fatalf("got %v, want NOT_CONFIGURED", herr)
 		}
 		if sdk.IsNotFound(herr) {
@@ -96,7 +96,7 @@ func TestUnconfiguredStateIsDistinctFromAbsence(t *testing.T) {
 		if setHerr == nil {
 			t.Fatal("a write to an unconfigured store reported success")
 		}
-		if setHerr.Code != pbv2.ErrorCode_ERROR_CODE_NOT_CONFIGURED {
+		if setHerr.Code != pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED {
 			t.Fatalf("write refused with %v, want NOT_CONFIGURED", setHerr.Code)
 		}
 	})
@@ -251,7 +251,7 @@ func TestOriginalsAbsentReportNotOK(t *testing.T) {
 // confusion the envelope exists to prevent.
 func TestCapturedEmptyOriginalsArePresent(t *testing.T) {
 	h := sdktest.New(t)
-	h.SetOriginalRequest(&pbv2.ChatRequest{})
+	h.SetOriginalRequest(&pbv1.ChatRequest{})
 	h.SetOriginalResponse(nil)
 	h.Run(func() {
 		req, ok := sdk.OriginalRequest()
@@ -273,7 +273,7 @@ func TestCapturedEmptyOriginalsArePresent(t *testing.T) {
 
 func TestNonEmptyOriginalsRoundTrip(t *testing.T) {
 	h := sdktest.New(t)
-	h.SetOriginalRequest(&pbv2.ChatRequest{Model: "claude-opus-5"})
+	h.SetOriginalRequest(&pbv1.ChatRequest{Model: "claude-opus-5"})
 	h.SetOriginalResponse([]byte("pristine-upstream"))
 	h.Run(func() {
 		req, ok := sdk.OriginalRequest()
@@ -360,17 +360,17 @@ func TestStateHelpersRejectAnEmptyKeyLocally(t *testing.T) {
 // constants exist so the host and the linter special-map it rather than
 // deriving a permission that does not exist.
 func TestStateDeleteUsesTheStateSetPermission(t *testing.T) {
-	if pbv2.StateDeleteCommand != "env.state_delete" {
-		t.Fatalf("command = %q", pbv2.StateDeleteCommand)
+	if pbv1.StateDeleteCommand != "env.state_delete" {
+		t.Fatalf("command = %q", pbv1.StateDeleteCommand)
 	}
-	if pbv2.StateDeletePermission != "env.state_set" {
-		t.Fatalf("permission = %q, want env.state_set", pbv2.StateDeletePermission)
+	if pbv1.StateDeletePermission != "env.state_set" {
+		t.Fatalf("permission = %q, want env.state_set", pbv1.StateDeletePermission)
 	}
-	if sdk.IsPermission(pbv2.StateDeleteCommand) {
+	if sdk.IsPermission(pbv1.StateDeleteCommand) {
 		t.Fatal("env.state_delete is in the operator capability vocabulary; " +
 			"it must not be — it is a command governed by env.state_set")
 	}
-	if !sdk.IsPermission(pbv2.StateDeletePermission) {
+	if !sdk.IsPermission(pbv1.StateDeletePermission) {
 		t.Fatal("env.state_set is not a known permission")
 	}
 }

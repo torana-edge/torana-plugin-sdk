@@ -66,29 +66,29 @@ const (
 // deliberately unusable.
 var schemaCarrierDecisions = map[string]string{
 	// Part data arms.
-	"part.arm.text":                "torana.v2.RequestTextBlock.text",
-	"part.arm.inlineData":          "torana.v2.RequestUnknownBlock.payload_json",
-	"part.arm.fileData":            "torana.v2.RequestUnknownBlock.payload_json",
-	"part.arm.functionCall":        "torana.v2.RequestToolUseBlock",
-	"part.arm.functionResponse":    "torana.v2.RequestToolResultBlock",
-	"part.arm.executableCode":      "torana.v2.RequestUnknownBlock.payload_json",
-	"part.arm.codeExecutionResult": "torana.v2.RequestUnknownBlock.payload_json",
+	"part.arm.text":                "torana.v1.RequestTextBlock.text",
+	"part.arm.inlineData":          "torana.v1.RequestUnknownBlock.payload_json",
+	"part.arm.fileData":            "torana.v1.RequestUnknownBlock.payload_json",
+	"part.arm.functionCall":        "torana.v1.RequestToolUseBlock",
+	"part.arm.functionResponse":    "torana.v1.RequestToolResultBlock",
+	"part.arm.executableCode":      "torana.v1.RequestUnknownBlock.payload_json",
+	"part.arm.codeExecutionResult": "torana.v1.RequestUnknownBlock.payload_json",
 	// Part ancillaries.
-	"part.ancillary.thought":          "torana.v2.RequestThinkingBlock",
+	"part.ancillary.thought":          "torana.v1.RequestThinkingBlock",
 	"part.ancillary.thoughtSignature": CarrierSignatureToken,
 	"part.ancillary.videoMetadata":    CarrierPreservedMediaPayload,
 	"part.ancillary.mediaResolution":  CarrierPreservedMediaPayload,
 	"part.ancillary.partMetadata":     CarrierPartMetadata,
 	// FunctionResponse members.
-	"function-response.member.id":           "torana.v2.RequestToolResultBlock.tool_call_id",
-	"function-response.member.name":         "torana.v2.RequestToolResultBlock.tool_name",
+	"function-response.member.id":           "torana.v1.RequestToolResultBlock.tool_call_id",
+	"function-response.member.name":         "torana.v1.RequestToolResultBlock.tool_name",
 	"function-response.member.response":     CarrierResponseTextElement,
 	"function-response.member.parts":        CarrierNestedMediaElements,
-	"function-response.member.willContinue": "torana.v2.RequestToolResultBlock.will_continue",
-	"function-response.member.scheduling":   "torana.v2.RequestToolResultBlock.scheduling",
+	"function-response.member.willContinue": "torana.v1.RequestToolResultBlock.will_continue",
+	"function-response.member.scheduling":   "torana.v1.RequestToolResultBlock.scheduling",
 	// FunctionResponsePart union arms (nested media elements).
-	"function-response-part.arm.inlineData": "torana.v2.ToolResultUnknownBlock.payload_json",
-	"function-response-part.arm.fileData":   "torana.v2.ToolResultUnknownBlock.payload_json",
+	"function-response-part.arm.inlineData": "torana.v1.ToolResultUnknownBlock.payload_json",
+	"function-response-part.arm.fileData":   "torana.v1.ToolResultUnknownBlock.payload_json",
 	// Nested media member objects (preserved verbatim in the nested
 	// unknown payload; never narrowed).
 	"function-response-blob.member.mimeType":         CarrierPreservedMediaPayload,
@@ -101,17 +101,17 @@ var schemaCarrierDecisions = map[string]string{
 	// the media payload; the usable vocabulary excludes the UNSPECIFIED
 	// value (unknown-value handling at the adapter boundary).
 	"media-resolution.member.level":                            CarrierPreservedMediaPayload,
-	"media-resolution.level.enum.MEDIA_RESOLUTION_LOW":         "torana.v2.RequestUnknownBlock.payload_json",
-	"media-resolution.level.enum.MEDIA_RESOLUTION_MEDIUM":      "torana.v2.RequestUnknownBlock.payload_json",
-	"media-resolution.level.enum.MEDIA_RESOLUTION_HIGH":        "torana.v2.RequestUnknownBlock.payload_json",
-	"media-resolution.level.enum.MEDIA_RESOLUTION_ULTRA_HIGH":  "torana.v2.RequestUnknownBlock.payload_json",
+	"media-resolution.level.enum.MEDIA_RESOLUTION_LOW":         "torana.v1.RequestUnknownBlock.payload_json",
+	"media-resolution.level.enum.MEDIA_RESOLUTION_MEDIUM":      "torana.v1.RequestUnknownBlock.payload_json",
+	"media-resolution.level.enum.MEDIA_RESOLUTION_HIGH":        "torana.v1.RequestUnknownBlock.payload_json",
+	"media-resolution.level.enum.MEDIA_RESOLUTION_ULTRA_HIGH":  "torana.v1.RequestUnknownBlock.payload_json",
 	"media-resolution.level.enum.MEDIA_RESOLUTION_UNSPECIFIED": DecisionExcludedValue,
 	// scheduling vocabulary: UNSPECIFIED is documented unused by the
 	// provider and receives the same value-free 400 as any unknown value;
 	// absence remains the provider default WHEN_IDLE and is distinct.
-	"scheduling.enum.SILENT":                 "torana.v2.RequestToolResultBlock.scheduling",
-	"scheduling.enum.WHEN_IDLE":              "torana.v2.RequestToolResultBlock.scheduling",
-	"scheduling.enum.INTERRUPT":              "torana.v2.RequestToolResultBlock.scheduling",
+	"scheduling.enum.SILENT":                 "torana.v1.RequestToolResultBlock.scheduling",
+	"scheduling.enum.WHEN_IDLE":              "torana.v1.RequestToolResultBlock.scheduling",
+	"scheduling.enum.INTERRUPT":              "torana.v1.RequestToolResultBlock.scheduling",
 	"scheduling.enum.SCHEDULING_UNSPECIFIED": DecisionExcludedValue,
 }
 
@@ -133,8 +133,8 @@ var agentPlatformArms = []SchemaNode{
 // bidirectional inventory over the generated nodes can never claim
 // descriptor provenance for them.
 var agentPlatformCarrierDecisions = map[string]string{
-	"part.arm.toolCall":     "torana.v2.RequestUnknownBlock.payload_json",
-	"part.arm.toolResponse": "torana.v2.RequestUnknownBlock.payload_json",
+	"part.arm.toolCall":     "torana.v1.RequestUnknownBlock.payload_json",
+	"part.arm.toolResponse": "torana.v1.RequestUnknownBlock.payload_json",
 }
 
 // SchemaNodes returns a DEEP CLONE of the complete surface union: the

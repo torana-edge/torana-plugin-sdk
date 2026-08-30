@@ -1,4 +1,4 @@
-package v2
+package v1
 
 // Normative request-replacement validation (the approved marshal-failure
 // prerequisite, SDK unit).
@@ -84,7 +84,7 @@ import (
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/torana-edge/torana-plugin-sdk/pb/v2/jsontext"
+	"github.com/torana-edge/torana-plugin-sdk/pb/v1/jsontext"
 )
 
 // jsonFieldRule is one entry of the executable field table.
@@ -99,30 +99,30 @@ type jsonFieldRule struct {
 // requestJSONFields is the executable JSON-field table: every JSON byte
 // field of a request replacement mapped to its shape and absence capability.
 // TestReplacementFieldInventory walks the descriptors against the same
-// names, so an additive v2 field fails until a rule is decided here.
+// names, so an additive v1 field fails until a rule is decided here.
 var requestJSONFields = map[string]jsonFieldRule{
-	"torana.v2.ChatRequest.torana_meta_json":          {shape: "object"},
-	"torana.v2.ChatRequest.provider_extensions_json":  {shape: "object"},
-	"torana.v2.ChatRequest.safety_settings_json":      {shape: "array"},
-	"torana.v2.RequestToolUseBlock.arguments_json":    {shape: "object", required: true},
-	"torana.v2.RequestUnknownBlock.payload_json":      {shape: "object", required: true},
-	"torana.v2.RequestCacheBreakpoint.marker_json":    {shape: "object", required: true},
-	"torana.v2.ToolResultUnknownBlock.payload_json":   {shape: "object", required: true},
-	"torana.v2.ToolResultCacheBreakpoint.marker_json": {shape: "object", required: true},
+	"torana.v1.ChatRequest.torana_meta_json":          {shape: "object"},
+	"torana.v1.ChatRequest.provider_extensions_json":  {shape: "object"},
+	"torana.v1.ChatRequest.safety_settings_json":      {shape: "array"},
+	"torana.v1.RequestToolUseBlock.arguments_json":    {shape: "object", required: true},
+	"torana.v1.RequestUnknownBlock.payload_json":      {shape: "object", required: true},
+	"torana.v1.RequestCacheBreakpoint.marker_json":    {shape: "object", required: true},
+	"torana.v1.ToolResultUnknownBlock.payload_json":   {shape: "object", required: true},
+	"torana.v1.ToolResultCacheBreakpoint.marker_json": {shape: "object", required: true},
 	// Response-side ToolCall (ResponseMessage.tool_calls): declared for
 	// inventory totality; the request validator never walks it — the
 	// response validator governs its shape.
-	"torana.v2.ToolCall.arguments_json":    {shape: "object", required: true},
-	"torana.v2.ToolDef.parameters_json":    {shape: "object", required: true},
-	"torana.v2.ToolDef.cache_control_json": {shape: "object"},
+	"torana.v1.ToolCall.arguments_json":    {shape: "object", required: true},
+	"torana.v1.ToolDef.parameters_json":    {shape: "object", required: true},
+	"torana.v1.ToolDef.cache_control_json": {shape: "object"},
 	// Provider Part-level custom metadata (Gemini partMetadata): absent or a
 	// strict JSON object, on every Part-mapped block.
-	"torana.v2.RequestTextBlock.part_metadata_json":              {shape: "object"},
-	"torana.v2.RequestThinkingBlock.part_metadata_json":          {shape: "object"},
-	"torana.v2.RequestToolUseBlock.part_metadata_json":           {shape: "object"},
-	"torana.v2.RequestToolResultBlock.part_metadata_json":        {shape: "object"},
-	"torana.v2.RequestUnknownBlock.part_metadata_json":           {shape: "object"},
-	"torana.v2.RequestTrailingSignatureBlock.part_metadata_json": {shape: "object"},
+	"torana.v1.RequestTextBlock.part_metadata_json":              {shape: "object"},
+	"torana.v1.RequestThinkingBlock.part_metadata_json":          {shape: "object"},
+	"torana.v1.RequestToolUseBlock.part_metadata_json":           {shape: "object"},
+	"torana.v1.RequestToolResultBlock.part_metadata_json":        {shape: "object"},
+	"torana.v1.RequestUnknownBlock.part_metadata_json":           {shape: "object"},
+	"torana.v1.RequestTrailingSignatureBlock.part_metadata_json": {shape: "object"},
 }
 
 // requestScalarRules declares a rule class for every non-JSON field of the
@@ -143,14 +143,14 @@ var requestJSONFields = map[string]jsonFieldRule{
 //     constraint.
 var requestScalarRules = map[string]string{
 	// ChatRequest
-	"torana.v2.ChatRequest.model":          "text-utf8",
-	"torana.v2.ChatRequest.messages":       "repeated-message-nonnil",
-	"torana.v2.ChatRequest.tools":          "repeated-message-nonnil",
-	"torana.v2.ChatRequest.stream":         "bool",
-	"torana.v2.ChatRequest.max_tokens":     "int32-positive-optional",
-	"torana.v2.ChatRequest.temperature":    "float-finite-optional",
-	"torana.v2.ChatRequest.top_p":          "float-finite-optional",
-	"torana.v2.ChatRequest.stop_sequences": "repeated-text-utf8",
+	"torana.v1.ChatRequest.model":          "text-utf8",
+	"torana.v1.ChatRequest.messages":       "repeated-message-nonnil",
+	"torana.v1.ChatRequest.tools":          "repeated-message-nonnil",
+	"torana.v1.ChatRequest.stream":         "bool",
+	"torana.v1.ChatRequest.max_tokens":     "int32-positive-optional",
+	"torana.v1.ChatRequest.temperature":    "float-finite-optional",
+	"torana.v1.ChatRequest.top_p":          "float-finite-optional",
+	"torana.v1.ChatRequest.stop_sequences": "repeated-text-utf8",
 	// Message
 	// role is non-empty UTF-8 in the request domain: an empty role is not
 	// a meaningful request message, and a nil Message element survives
@@ -159,60 +159,60 @@ var requestScalarRules = map[string]string{
 	// stays open — there is deliberately no closed enum. blocks must be
 	// non-empty (an explicit empty provider message is ONE text block with
 	// text == ""; an empty list is not a second spelling).
-	"torana.v2.Message.role":   "text-required-utf8",
-	"torana.v2.Message.blocks": "repeated-message-nonnil",
+	"torana.v1.Message.role":   "text-required-utf8",
+	"torana.v1.Message.blocks": "repeated-message-nonnil",
 	// RequestBlock oneof member fields (kind arms; typed-nil refused by the
 	// structural block walk).
-	"torana.v2.RequestBlock.text":               "oneof-message-member",
-	"torana.v2.RequestBlock.thinking":           "oneof-message-member",
-	"torana.v2.RequestBlock.redacted_thinking":  "oneof-message-member",
-	"torana.v2.RequestBlock.tool_use":           "oneof-message-member",
-	"torana.v2.RequestBlock.tool_result":        "oneof-message-member",
-	"torana.v2.RequestBlock.cache_breakpoint":   "oneof-message-member",
-	"torana.v2.RequestBlock.unknown":            "oneof-message-member",
-	"torana.v2.RequestBlock.trailing_signature": "oneof-message-member",
+	"torana.v1.RequestBlock.text":               "oneof-message-member",
+	"torana.v1.RequestBlock.thinking":           "oneof-message-member",
+	"torana.v1.RequestBlock.redacted_thinking":  "oneof-message-member",
+	"torana.v1.RequestBlock.tool_use":           "oneof-message-member",
+	"torana.v1.RequestBlock.tool_result":        "oneof-message-member",
+	"torana.v1.RequestBlock.cache_breakpoint":   "oneof-message-member",
+	"torana.v1.RequestBlock.unknown":            "oneof-message-member",
+	"torana.v1.RequestBlock.trailing_signature": "oneof-message-member",
 	// RequestTextBlock
-	"torana.v2.RequestTextBlock.text":      "text-utf8",
-	"torana.v2.RequestTextBlock.signature": "text-utf8",
+	"torana.v1.RequestTextBlock.text":      "text-utf8",
+	"torana.v1.RequestTextBlock.signature": "text-utf8",
 	// RequestThinkingBlock
-	"torana.v2.RequestThinkingBlock.text":      "text-utf8",
-	"torana.v2.RequestThinkingBlock.signature": "text-utf8",
+	"torana.v1.RequestThinkingBlock.text":      "text-utf8",
+	"torana.v1.RequestThinkingBlock.signature": "text-utf8",
 	// RequestRedactedThinkingBlock
-	"torana.v2.RequestRedactedThinkingBlock.data": "text-utf8",
+	"torana.v1.RequestRedactedThinkingBlock.data": "text-utf8",
 	// RequestToolUseBlock
-	"torana.v2.RequestToolUseBlock.id":        "text-required-utf8",
-	"torana.v2.RequestToolUseBlock.name":      "text-required-utf8",
-	"torana.v2.RequestToolUseBlock.signature": "text-utf8",
+	"torana.v1.RequestToolUseBlock.id":        "text-required-utf8",
+	"torana.v1.RequestToolUseBlock.name":      "text-required-utf8",
+	"torana.v1.RequestToolUseBlock.signature": "text-utf8",
 	// RequestToolResultBlock
-	"torana.v2.RequestToolResultBlock.tool_call_id":  "text-required-utf8",
-	"torana.v2.RequestToolResultBlock.tool_name":     "text-utf8",
-	"torana.v2.RequestToolResultBlock.content":       "repeated-message-nonnil",
-	"torana.v2.RequestToolResultBlock.will_continue": "bool-optional",
-	"torana.v2.RequestToolResultBlock.scheduling":    "text-utf8-optional",
-	"torana.v2.RequestToolResultBlock.signature":     "text-utf8",
+	"torana.v1.RequestToolResultBlock.tool_call_id":  "text-required-utf8",
+	"torana.v1.RequestToolResultBlock.tool_name":     "text-utf8",
+	"torana.v1.RequestToolResultBlock.content":       "repeated-message-nonnil",
+	"torana.v1.RequestToolResultBlock.will_continue": "bool-optional",
+	"torana.v1.RequestToolResultBlock.scheduling":    "text-utf8-optional",
+	"torana.v1.RequestToolResultBlock.signature":     "text-utf8",
 	// ToolResultContentBlock oneof member fields
-	"torana.v2.ToolResultContentBlock.text":             "oneof-message-member",
-	"torana.v2.ToolResultContentBlock.unknown":          "oneof-message-member",
-	"torana.v2.ToolResultContentBlock.cache_breakpoint": "oneof-message-member",
+	"torana.v1.ToolResultContentBlock.text":             "oneof-message-member",
+	"torana.v1.ToolResultContentBlock.unknown":          "oneof-message-member",
+	"torana.v1.ToolResultContentBlock.cache_breakpoint": "oneof-message-member",
 	// ToolResultTextBlock
-	"torana.v2.ToolResultTextBlock.text": "text-utf8",
+	"torana.v1.ToolResultTextBlock.text": "text-utf8",
 	// ToolResultUnknownBlock
-	"torana.v2.ToolResultUnknownBlock.kind": "text-required-utf8",
+	"torana.v1.ToolResultUnknownBlock.kind": "text-required-utf8",
 	// RequestUnknownBlock
-	"torana.v2.RequestUnknownBlock.kind":      "text-required-utf8",
-	"torana.v2.RequestUnknownBlock.signature": "text-utf8",
+	"torana.v1.RequestUnknownBlock.kind":      "text-required-utf8",
+	"torana.v1.RequestUnknownBlock.signature": "text-utf8",
 	// RequestTrailingSignatureBlock
-	"torana.v2.RequestTrailingSignatureBlock.signature": "text-required-utf8",
+	"torana.v1.RequestTrailingSignatureBlock.signature": "text-required-utf8",
 	// ToolCall — RESPONSE-side only now (ResponseMessage.tool_calls). ID is
 	// host-owned and may legitimately be absent for anonymous response
 	// calls; requiredness is the response validator's job.
-	"torana.v2.ToolCall.id":        "text-utf8",
-	"torana.v2.ToolCall.name":      "text-required-utf8",
-	"torana.v2.ToolCall.signature": "text-utf8",
+	"torana.v1.ToolCall.id":        "text-utf8",
+	"torana.v1.ToolCall.name":      "text-required-utf8",
+	"torana.v1.ToolCall.signature": "text-utf8",
 	// ToolDef
-	"torana.v2.ToolDef.name":        "text-required-utf8",
-	"torana.v2.ToolDef.description": "text-utf8",
-	"torana.v2.ToolDef.strict":      "bool",
+	"torana.v1.ToolDef.name":        "text-required-utf8",
+	"torana.v1.ToolDef.description": "text-utf8",
+	"torana.v1.ToolDef.strict":      "bool",
 }
 
 // checkStringsUTF8 enforces UTF-8 validity on every protobuf string field
@@ -352,7 +352,7 @@ func (x *ChatRequest) ValidateReplacement() error {
 		{"safety_settings_json", x.SafetySettingsJson},
 		{"torana_meta_json", x.ToranaMetaJson},
 	} {
-		if err := validateJSONField(f.raw, f.field, requestJSONFields["torana.v2.ChatRequest."+f.field]); err != nil {
+		if err := validateJSONField(f.raw, f.field, requestJSONFields["torana.v1.ChatRequest."+f.field]); err != nil {
 			return err
 		}
 	}
@@ -433,7 +433,7 @@ func validateRequestBlock(b *RequestBlock, mi string, bi, blockCount int, role s
 			return err
 		}
 		return validateJSONField(k.Text.PartMetadataJson, what+".text.part_metadata_json",
-			requestJSONFields["torana.v2.RequestTextBlock.part_metadata_json"])
+			requestJSONFields["torana.v1.RequestTextBlock.part_metadata_json"])
 	case *RequestBlock_Thinking:
 		if k.Thinking == nil {
 			return fmt.Errorf("%s thinking arm is a typed nil", what)
@@ -442,7 +442,7 @@ func validateRequestBlock(b *RequestBlock, mi string, bi, blockCount int, role s
 			return err
 		}
 		return validateJSONField(k.Thinking.PartMetadataJson, what+".thinking.part_metadata_json",
-			requestJSONFields["torana.v2.RequestThinkingBlock.part_metadata_json"])
+			requestJSONFields["torana.v1.RequestThinkingBlock.part_metadata_json"])
 	case *RequestBlock_RedactedThinking:
 		if k.RedactedThinking == nil {
 			return fmt.Errorf("%s redacted_thinking arm is a typed nil", what)
@@ -463,11 +463,11 @@ func validateRequestBlock(b *RequestBlock, mi string, bi, blockCount int, role s
 			return fmt.Errorf("%s.tool_use.name must be non-empty", what)
 		}
 		if err := validateJSONField(tu.ArgumentsJson, what+".tool_use.arguments_json",
-			requestJSONFields["torana.v2.RequestToolUseBlock.arguments_json"]); err != nil {
+			requestJSONFields["torana.v1.RequestToolUseBlock.arguments_json"]); err != nil {
 			return err
 		}
 		return validateJSONField(tu.PartMetadataJson, what+".tool_use.part_metadata_json",
-			requestJSONFields["torana.v2.RequestToolUseBlock.part_metadata_json"])
+			requestJSONFields["torana.v1.RequestToolUseBlock.part_metadata_json"])
 	case *RequestBlock_ToolResult:
 		if k.ToolResult == nil {
 			return fmt.Errorf("%s tool_result arm is a typed nil", what)
@@ -480,7 +480,7 @@ func validateRequestBlock(b *RequestBlock, mi string, bi, blockCount int, role s
 			return fmt.Errorf("%s.tool_result.tool_call_id must be non-empty", what)
 		}
 		if err := validateJSONField(tr.PartMetadataJson, what+".tool_result.part_metadata_json",
-			requestJSONFields["torana.v2.RequestToolResultBlock.part_metadata_json"]); err != nil {
+			requestJSONFields["torana.v1.RequestToolResultBlock.part_metadata_json"]); err != nil {
 			return err
 		}
 		if len(tr.Content) == 0 {
@@ -508,7 +508,7 @@ func validateRequestBlock(b *RequestBlock, mi string, bi, blockCount int, role s
 			return err
 		}
 		return validateJSONField(cb.MarkerJson, what+".cache_breakpoint.marker_json",
-			requestJSONFields["torana.v2.RequestCacheBreakpoint.marker_json"])
+			requestJSONFields["torana.v1.RequestCacheBreakpoint.marker_json"])
 	case *RequestBlock_Unknown:
 		if k.Unknown == nil {
 			return fmt.Errorf("%s unknown arm is a typed nil", what)
@@ -521,11 +521,11 @@ func validateRequestBlock(b *RequestBlock, mi string, bi, blockCount int, role s
 			return fmt.Errorf("%s.unknown.kind must be non-empty", what)
 		}
 		if err := validateJSONField(u.PayloadJson, what+".unknown.payload_json",
-			requestJSONFields["torana.v2.RequestUnknownBlock.payload_json"]); err != nil {
+			requestJSONFields["torana.v1.RequestUnknownBlock.payload_json"]); err != nil {
 			return err
 		}
 		return validateJSONField(u.PartMetadataJson, what+".unknown.part_metadata_json",
-			requestJSONFields["torana.v2.RequestUnknownBlock.part_metadata_json"])
+			requestJSONFields["torana.v1.RequestUnknownBlock.part_metadata_json"])
 	case *RequestBlock_TrailingSignature:
 		if k.TrailingSignature == nil {
 			return fmt.Errorf("%s trailing_signature arm is a typed nil", what)
@@ -552,7 +552,7 @@ func validateRequestBlock(b *RequestBlock, mi string, bi, blockCount int, role s
 			return fmt.Errorf("%s.trailing_signature requires at least one preceding text or thinking block", what)
 		}
 		return validateJSONField(ts.PartMetadataJson, what+".trailing_signature.part_metadata_json",
-			requestJSONFields["torana.v2.RequestTrailingSignatureBlock.part_metadata_json"])
+			requestJSONFields["torana.v1.RequestTrailingSignatureBlock.part_metadata_json"])
 	default:
 		return fmt.Errorf("%s has no kind arm", what)
 	}
@@ -583,7 +583,7 @@ func validateToolResultContentBlock(cb *ToolResultContentBlock, what string) err
 			return fmt.Errorf("%s.unknown.kind must be non-empty", what)
 		}
 		return validateJSONField(u.PayloadJson, what+".unknown.payload_json",
-			requestJSONFields["torana.v2.ToolResultUnknownBlock.payload_json"])
+			requestJSONFields["torana.v1.ToolResultUnknownBlock.payload_json"])
 	case *ToolResultContentBlock_CacheBreakpoint:
 		if k.CacheBreakpoint == nil {
 			return fmt.Errorf("%s cache_breakpoint arm is a typed nil", what)
@@ -593,7 +593,7 @@ func validateToolResultContentBlock(cb *ToolResultContentBlock, what string) err
 			return err
 		}
 		return validateJSONField(cbp.MarkerJson, what+".cache_breakpoint.marker_json",
-			requestJSONFields["torana.v2.ToolResultCacheBreakpoint.marker_json"])
+			requestJSONFields["torana.v1.ToolResultCacheBreakpoint.marker_json"])
 	default:
 		return fmt.Errorf("%s has no kind arm", what)
 	}
@@ -608,11 +608,11 @@ func validateToolDefReplacement(td *ToolDef, i int) error {
 		return fmt.Errorf("%s.name must be non-empty", what)
 	}
 	if err := validateJSONField(td.ParametersJson, what+".parameters_json",
-		requestJSONFields["torana.v2.ToolDef.parameters_json"]); err != nil {
+		requestJSONFields["torana.v1.ToolDef.parameters_json"]); err != nil {
 		return err
 	}
 	return validateJSONField(td.CacheControlJson, what+".cache_control_json",
-		requestJSONFields["torana.v2.ToolDef.cache_control_json"])
+		requestJSONFields["torana.v1.ToolDef.cache_control_json"])
 }
 
 func finiteFloat(v float64) bool {

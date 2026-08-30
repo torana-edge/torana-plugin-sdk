@@ -9,7 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	sdk "github.com/torana-edge/torana-plugin-sdk"
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 	"github.com/torana-edge/torana-plugin-sdk/sdktest"
 )
 
@@ -17,11 +17,11 @@ func TestBeforeRequestReplaceAndPass(t *testing.T) {
 	sdktest.Reset()
 	t.Cleanup(sdktest.Reset)
 
-	sdk.OnBeforeRequest(func(_ context.Context, req *pbv2.ChatRequest) (sdk.RequestResult, error) {
+	sdk.OnBeforeRequest(func(_ context.Context, req *pbv1.ChatRequest) (sdk.RequestResult, error) {
 		req.Model = "rewritten"
 		return sdk.ReplaceRequest(req), nil
 	})
-	res := sdktest.New(t).BeforeRequest(&pbv2.ChatRequest{Model: "original"})
+	res := sdktest.New(t).BeforeRequest(&pbv1.ChatRequest{Model: "original"})
 	if res.Err != nil {
 		t.Fatal(res.Err)
 	}
@@ -30,10 +30,10 @@ func TestBeforeRequestReplaceAndPass(t *testing.T) {
 	}
 
 	sdktest.Reset()
-	sdk.OnBeforeRequest(func(context.Context, *pbv2.ChatRequest) (sdk.RequestResult, error) {
+	sdk.OnBeforeRequest(func(context.Context, *pbv1.ChatRequest) (sdk.RequestResult, error) {
 		return sdk.PassRequest(), nil
 	})
-	res = sdktest.New(t).BeforeRequest(&pbv2.ChatRequest{Model: "m"})
+	res = sdktest.New(t).BeforeRequest(&pbv1.ChatRequest{Model: "m"})
 	if !res.PassedThrough {
 		t.Fatal("expected pass-through")
 	}
@@ -43,10 +43,10 @@ func TestHandlerErrorPropagates(t *testing.T) {
 	sdktest.Reset()
 	t.Cleanup(sdktest.Reset)
 
-	sdk.OnBeforeRequest(func(context.Context, *pbv2.ChatRequest) (sdk.RequestResult, error) {
+	sdk.OnBeforeRequest(func(context.Context, *pbv1.ChatRequest) (sdk.RequestResult, error) {
 		return sdk.PassRequest(), context.Canceled
 	})
-	res := sdktest.New(t).BeforeRequest(&pbv2.ChatRequest{})
+	res := sdktest.New(t).BeforeRequest(&pbv1.ChatRequest{})
 	if res.Err == nil {
 		t.Fatal("expected handler error")
 	}
@@ -59,11 +59,11 @@ func TestAfterResponseReplace(t *testing.T) {
 	sdktest.Reset()
 	t.Cleanup(sdktest.Reset)
 
-	sdk.OnAfterResponse(func(_ context.Context, resp *pbv2.ChatResponse, _ bool) (sdk.ResponseResult, error) {
+	sdk.OnAfterResponse(func(_ context.Context, resp *pbv1.ChatResponse, _ bool) (sdk.ResponseResult, error) {
 		resp.Id = "rewritten"
 		return sdk.ReplaceResponse(resp), nil
 	})
-	res := sdktest.New(t).AfterResponse(&pbv2.ChatResponse{Id: "orig"}, true)
+	res := sdktest.New(t).AfterResponse(&pbv1.ChatResponse{Id: "orig"}, true)
 	if res.Err != nil {
 		t.Fatal(res.Err)
 	}
@@ -74,7 +74,7 @@ func TestAfterResponseReplace(t *testing.T) {
 		t.Fatalf("replacement %+v", res.Replacement)
 	}
 
-	obs := sdktest.New(t).AfterResponse(&pbv2.ChatResponse{Id: "orig"}, false)
+	obs := sdktest.New(t).AfterResponse(&pbv1.ChatResponse{Id: "orig"}, false)
 	if obs.Err != nil {
 		t.Fatal(obs.Err)
 	}
@@ -90,12 +90,12 @@ func TestBlockRequestIsHostCall(t *testing.T) {
 	sdktest.Reset()
 	t.Cleanup(sdktest.Reset)
 
-	sdk.OnBeforeRequest(func(context.Context, *pbv2.ChatRequest) (sdk.RequestResult, error) {
+	sdk.OnBeforeRequest(func(context.Context, *pbv1.ChatRequest) (sdk.RequestResult, error) {
 		sdk.BlockRequest(422, "pii", "redacted")
 		return sdk.PassRequest(), nil
 	})
 	h := sdktest.New(t)
-	h.BeforeRequest(&pbv2.ChatRequest{})
+	h.BeforeRequest(&pbv1.ChatRequest{})
 	calls := h.BlockCalls()
 	if len(calls) != 1 {
 		t.Fatalf("want 1 block call, got %d", len(calls))
@@ -110,7 +110,7 @@ func TestInvalidBlockPanics(t *testing.T) {
 	sdktest.Reset()
 	t.Cleanup(sdktest.Reset)
 
-	sdk.OnBeforeRequest(func(context.Context, *pbv2.ChatRequest) (sdk.RequestResult, error) {
+	sdk.OnBeforeRequest(func(context.Context, *pbv1.ChatRequest) (sdk.RequestResult, error) {
 		sdk.BlockRequest(200, "bad", "must not succeed")
 		return sdk.PassRequest(), nil
 	})
@@ -123,14 +123,14 @@ func TestInvalidBlockPanics(t *testing.T) {
 			t.Fatalf("panic %v", r)
 		}
 	}()
-	sdktest.New(t).BeforeRequest(&pbv2.ChatRequest{})
+	sdktest.New(t).BeforeRequest(&pbv1.ChatRequest{})
 }
 
 func TestEmptyBlockReplyPanics(t *testing.T) {
 	sdktest.Reset()
 	t.Cleanup(sdktest.Reset)
 
-	sdk.OnBeforeRequest(func(context.Context, *pbv2.ChatRequest) (sdk.RequestResult, error) {
+	sdk.OnBeforeRequest(func(context.Context, *pbv1.ChatRequest) (sdk.RequestResult, error) {
 		sdk.BlockRequest(403, "denied", "no")
 		return sdk.PassRequest(), nil
 	})
@@ -143,14 +143,14 @@ func TestEmptyBlockReplyPanics(t *testing.T) {
 			t.Fatal("empty host reply must panic")
 		}
 	}()
-	h.BeforeRequest(&pbv2.ChatRequest{})
+	h.BeforeRequest(&pbv1.ChatRequest{})
 }
 
 func TestMalformedBlockReplyPanics(t *testing.T) {
 	sdktest.Reset()
 	t.Cleanup(sdktest.Reset)
 
-	sdk.OnBeforeRequest(func(context.Context, *pbv2.ChatRequest) (sdk.RequestResult, error) {
+	sdk.OnBeforeRequest(func(context.Context, *pbv1.ChatRequest) (sdk.RequestResult, error) {
 		sdk.BlockRequest(403, "denied", "no")
 		return sdk.PassRequest(), nil
 	})
@@ -163,16 +163,16 @@ func TestMalformedBlockReplyPanics(t *testing.T) {
 			t.Fatal("malformed host reply must panic")
 		}
 	}()
-	h.BeforeRequest(&pbv2.ChatRequest{})
+	h.BeforeRequest(&pbv1.ChatRequest{})
 }
 
 func TestTypedPermissionDeniedIsQuiet(t *testing.T) {
 	sdktest.Reset()
 	t.Cleanup(sdktest.Reset)
 
-	var hostErr *pbv2.HostError
-	sdk.OnBeforeRequest(func(context.Context, *pbv2.ChatRequest) (sdk.RequestResult, error) {
-		_, hostErr, _ = sdk.HostCall("env.block_request", &pbv2.BlockRequestArgs{
+	var hostErr *pbv1.HostError
+	sdk.OnBeforeRequest(func(context.Context, *pbv1.ChatRequest) (sdk.RequestResult, error) {
+		_, hostErr, _ = sdk.HostCall("env.block_request", &pbv1.BlockRequestArgs{
 			Status: 403, Code: "x", Message: "y",
 		})
 		sdk.BlockRequest(403, "x", "y") // classified refusal must not panic
@@ -180,8 +180,8 @@ func TestTypedPermissionDeniedIsQuiet(t *testing.T) {
 	})
 	h := sdktest.New(t)
 	h.DenyPermission("env.block_request")
-	h.BeforeRequest(&pbv2.ChatRequest{})
-	if hostErr == nil || hostErr.Code != pbv2.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
+	h.BeforeRequest(&pbv1.ChatRequest{})
+	if hostErr == nil || hostErr.Code != pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
 		t.Fatalf("want typed permission denied, got %+v", hostErr)
 	}
 }
@@ -191,11 +191,11 @@ func TestPluginConfigAndDeny(t *testing.T) {
 	t.Cleanup(sdktest.Reset)
 
 	var got string
-	sdk.OnBeforeRequest(func(context.Context, *pbv2.ChatRequest) (sdk.RequestResult, error) {
+	sdk.OnBeforeRequest(func(context.Context, *pbv1.ChatRequest) (sdk.RequestResult, error) {
 		got = sdk.PluginConfig()
 		return sdk.PassRequest(), nil
 	})
-	sdktest.New(t).SetConfig(`{"threshold":42}`).BeforeRequest(&pbv2.ChatRequest{})
+	sdktest.New(t).SetConfig(`{"threshold":42}`).BeforeRequest(&pbv1.ChatRequest{})
 	if got != `{"threshold":42}` {
 		t.Fatalf("config %q", got)
 	}
@@ -205,7 +205,7 @@ func TestStateRoundTripsThroughTheFramedPath(t *testing.T) {
 	sdktest.Reset()
 	t.Cleanup(sdktest.Reset)
 
-	sdk.OnBeforeRequest(func(context.Context, *pbv2.ChatRequest) (sdk.RequestResult, error) {
+	sdk.OnBeforeRequest(func(context.Context, *pbv1.ChatRequest) (sdk.RequestResult, error) {
 		if herr, err := sdk.StateSet("k", "v"); err != nil || herr != nil {
 			t.Errorf("state set: err=%v herr=%v", err, herr)
 		}
@@ -218,7 +218,7 @@ func TestStateRoundTripsThroughTheFramedPath(t *testing.T) {
 		}
 		return sdk.PassRequest(), nil
 	})
-	sdktest.New(t).BeforeRequest(&pbv2.ChatRequest{})
+	sdktest.New(t).BeforeRequest(&pbv1.ChatRequest{})
 }
 
 func TestStreamHandlerAssemblesToolCall(t *testing.T) {
@@ -235,19 +235,19 @@ func TestStreamHandlerAssemblesToolCall(t *testing.T) {
 	})
 	stream.Register()
 
-	start := &pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStart{
-		ContentBlockStart: &pbv2.ContentBlockStart{
+	start := &pbv1.StreamEvent{Event: &pbv1.StreamEvent_ContentBlockStart{
+		ContentBlockStart: &pbv1.ContentBlockStart{
 			Index: 0,
-			Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{
+			Block: &pbv1.ContentBlockStart_ToolCall{ToolCall: &pbv1.ToolCallRef{
 				Id: "1", Name: "write",
 			}},
 		},
 	}}
-	delta := &pbv2.StreamEvent{Event: &pbv2.StreamEvent_ToolCallDelta{
-		ToolCallDelta: &pbv2.ToolCallDelta{Index: 0, ArgumentsDelta: `{"a":1}`},
+	delta := &pbv1.StreamEvent{Event: &pbv1.StreamEvent_ToolCallDelta{
+		ToolCallDelta: &pbv1.ToolCallDelta{Index: 0, ArgumentsDelta: `{"a":1}`},
 	}}
-	stop := &pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStop{
-		ContentBlockStop: &pbv2.ContentBlockStop{Index: 0},
+	stop := &pbv1.StreamEvent{Event: &pbv1.StreamEvent_ContentBlockStop{
+		ContentBlockStop: &pbv1.ContentBlockStop{Index: 0},
 	}}
 
 	if r := h.StreamChunk(start); !r.Suppressed {
@@ -323,8 +323,8 @@ func TestStreamHandlerPassSuppressFailOpen(t *testing.T) {
 			})
 			s.Register()
 			feedToolCall(t, h, 0, `{"x":1}`)
-			r := h.StreamChunk(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStop{
-				ContentBlockStop: &pbv2.ContentBlockStop{Index: 0},
+			r := h.StreamChunk(&pbv1.StreamEvent{Event: &pbv1.StreamEvent_ContentBlockStop{
+				ContentBlockStop: &pbv1.ContentBlockStop{Index: 0},
 			}})
 			tc.check(t, r)
 		})
@@ -342,7 +342,7 @@ func TestStreamHandlerTextAndNoMetaWhenTextOnly(t *testing.T) {
 	})
 	s.Register()
 
-	r := h.StreamChunk(&pbv2.StreamEvent{Event: &pbv2.StreamEvent_TextDelta{TextDelta: "hi"}})
+	r := h.StreamChunk(&pbv1.StreamEvent{Event: &pbv1.StreamEvent_TextDelta{TextDelta: "hi"}})
 	if r.Err != nil || len(r.Events) != 1 || r.Events[0].GetTextDelta() != "HI" {
 		t.Fatalf("%+v", r)
 	}
@@ -388,7 +388,7 @@ func TestStreamMetaAppendDeniedFailsClosed(t *testing.T) {
 		return sdk.PassToolCall(), nil
 	})
 	s.Register()
-	h.DenyPermission(pbv2.MetaAppendCommand)
+	h.DenyPermission(pbv1.MetaAppendCommand)
 
 	r := h.StreamChunk(toolStart(0, "t"))
 	if r.Err == nil {
@@ -411,23 +411,23 @@ func TestStreamCorruptStopDoesNotPassFragmentAlone(t *testing.T) {
 	h := sdktest.New(t)
 	// After a successful start, force the stop read to return garbage.
 	started := false
-	h.StubHostCall(pbv2.MetaAppendCommand, func(args string) (string, error) {
-		var a pbv2.MetaAppendArgs
+	h.StubHostCall(pbv1.MetaAppendCommand, func(args string) (string, error) {
+		var a pbv1.MetaAppendArgs
 		if err := proto.Unmarshal([]byte(args), &a); err != nil {
 			t.Fatal(err)
 		}
 		if len(a.Fragment) != 0 {
 			started = true
-			raw, _ := proto.Marshal(&pbv2.HostCallResult{
-				Result: &pbv2.HostCallResult_Value{Value: nil},
+			raw, _ := proto.Marshal(&pbv1.HostCallResult{
+				Result: &pbv1.HostCallResult_Value{Value: nil},
 			})
 			return string(raw), nil
 		}
 		if !started {
 			t.Fatal("expected start before stop read")
 		}
-		raw, _ := proto.Marshal(&pbv2.HostCallResult{
-			Result: &pbv2.HostCallResult_Value{Value: []byte("!!!")},
+		raw, _ := proto.Marshal(&pbv1.HostCallResult{
+			Result: &pbv1.HostCallResult_Value{Value: []byte("!!!")},
 		})
 		return string(raw), nil
 	})
@@ -483,10 +483,10 @@ func TestSignedToolCallContract(t *testing.T) {
 				return tc.act(call)
 			})
 			s.Register()
-			start := &pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStart{
-				ContentBlockStart: &pbv2.ContentBlockStart{
+			start := &pbv1.StreamEvent{Event: &pbv1.StreamEvent_ContentBlockStart{
+				ContentBlockStart: &pbv1.ContentBlockStart{
 					Index: 0,
-					Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{
+					Block: &pbv1.ContentBlockStart_ToolCall{ToolCall: &pbv1.ToolCallRef{
 						Id: "1", Name: "tool", Signature: "provider-sig",
 					}},
 				},
@@ -513,7 +513,7 @@ func TestParallelDispatchSerializes(t *testing.T) {
 	sdktest.Reset()
 	t.Cleanup(sdktest.Reset)
 
-	sdk.OnBeforeRequest(func(_ context.Context, req *pbv2.ChatRequest) (sdk.RequestResult, error) {
+	sdk.OnBeforeRequest(func(_ context.Context, req *pbv1.ChatRequest) (sdk.RequestResult, error) {
 		_ = req.Model
 		return sdk.PassRequest(), nil
 	})
@@ -523,7 +523,7 @@ func TestParallelDispatchSerializes(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			sdktest.New(t).BeforeRequest(&pbv2.ChatRequest{})
+			sdktest.New(t).BeforeRequest(&pbv1.ChatRequest{})
 		}()
 	}
 	wg.Wait()
@@ -533,18 +533,18 @@ func TestHTTPAndTick(t *testing.T) {
 	sdktest.Reset()
 	t.Cleanup(sdktest.Reset)
 
-	sdk.OnHTTPRequest(func(context.Context, *pbv2.HttpRequest) (sdk.HTTPResult, error) {
-		return sdk.ServeHTTP(&pbv2.HttpResponse{Status: 204}), nil
+	sdk.OnHTTPRequest(func(context.Context, *pbv1.HttpRequest) (sdk.HTTPResult, error) {
+		return sdk.ServeHTTP(&pbv1.HttpResponse{Status: 204}), nil
 	})
-	sdk.OnTick(func(context.Context, *pbv2.TickRequest) (sdk.TickResult, error) {
+	sdk.OnTick(func(context.Context, *pbv1.TickRequest) (sdk.TickResult, error) {
 		return sdk.TickDid(1, "ok"), nil
 	})
 	h := sdktest.New(t)
-	hr := h.HTTPRequest(&pbv2.HttpRequest{Method: "GET", Path: "/"})
+	hr := h.HTTPRequest(&pbv1.HttpRequest{Method: "GET", Path: "/"})
 	if hr.Response == nil || hr.Response.Status != 204 {
 		t.Fatalf("%+v", hr)
 	}
-	tr := h.Tick(&pbv2.TickRequest{TickId: 1})
+	tr := h.Tick(&pbv1.TickRequest{TickId: 1})
 	if tr.Outcome == nil || tr.Outcome.Actions != 1 {
 		t.Fatalf("%+v", tr)
 	}
@@ -560,26 +560,26 @@ func feedToolCall(t *testing.T, h *sdktest.Harness, index int32, args string) {
 	}
 }
 
-func toolStart(index int32, name string) *pbv2.StreamEvent {
-	return &pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStart{
-		ContentBlockStart: &pbv2.ContentBlockStart{
+func toolStart(index int32, name string) *pbv1.StreamEvent {
+	return &pbv1.StreamEvent{Event: &pbv1.StreamEvent_ContentBlockStart{
+		ContentBlockStart: &pbv1.ContentBlockStart{
 			Index: index,
-			Block: &pbv2.ContentBlockStart_ToolCall{ToolCall: &pbv2.ToolCallRef{
+			Block: &pbv1.ContentBlockStart_ToolCall{ToolCall: &pbv1.ToolCallRef{
 				Id: "1", Name: name,
 			}},
 		},
 	}}
 }
 
-func toolDelta(index int32, args string) *pbv2.StreamEvent {
-	return &pbv2.StreamEvent{Event: &pbv2.StreamEvent_ToolCallDelta{
-		ToolCallDelta: &pbv2.ToolCallDelta{Index: index, ArgumentsDelta: args},
+func toolDelta(index int32, args string) *pbv1.StreamEvent {
+	return &pbv1.StreamEvent{Event: &pbv1.StreamEvent_ToolCallDelta{
+		ToolCallDelta: &pbv1.ToolCallDelta{Index: index, ArgumentsDelta: args},
 	}}
 }
 
-func toolStop(index int32) *pbv2.StreamEvent {
-	return &pbv2.StreamEvent{Event: &pbv2.StreamEvent_ContentBlockStop{
-		ContentBlockStop: &pbv2.ContentBlockStop{Index: index},
+func toolStop(index int32) *pbv1.StreamEvent {
+	return &pbv1.StreamEvent{Event: &pbv1.StreamEvent_ContentBlockStop{
+		ContentBlockStop: &pbv1.ContentBlockStop{Index: index},
 	}}
 }
 
@@ -587,15 +587,15 @@ func toolStop(index int32) *pbv2.StreamEvent {
 // documentation snippet: a plugin test drives the hook in-process with the
 // ordered message body.
 func ExampleHarness_BeforeRequest() {
-	req := &pbv2.ChatRequest{Messages: []*pbv2.Message{
-		{Role: "user", Blocks: []*pbv2.RequestBlock{{
-			Kind: &pbv2.RequestBlock_Text{Text: &pbv2.RequestTextBlock{Text: "hi"}},
+	req := &pbv1.ChatRequest{Messages: []*pbv1.Message{
+		{Role: "user", Blocks: []*pbv1.RequestBlock{{
+			Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: "hi"}},
 		}}},
-		{Role: "tool", Blocks: []*pbv2.RequestBlock{{
-			Kind: &pbv2.RequestBlock_ToolResult{ToolResult: &pbv2.RequestToolResultBlock{
+		{Role: "tool", Blocks: []*pbv1.RequestBlock{{
+			Kind: &pbv1.RequestBlock_ToolResult{ToolResult: &pbv1.RequestToolResultBlock{
 				ToolCallId: "t1",
-				Content: []*pbv2.ToolResultContentBlock{{
-					Kind: &pbv2.ToolResultContentBlock_Text{Text: &pbv2.ToolResultTextBlock{Text: "contact: someone@example.com"}},
+				Content: []*pbv1.ToolResultContentBlock{{
+					Kind: &pbv1.ToolResultContentBlock_Text{Text: &pbv1.ToolResultTextBlock{Text: "contact: someone@example.com"}},
 				}},
 			}},
 		}}},

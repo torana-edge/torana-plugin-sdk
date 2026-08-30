@@ -28,7 +28,7 @@ var EgressPathCases = []struct {
 	{"/v1/messages:generateContent", true},
 	{"/a/b/c", true},
 	{"/%2F%2Fattacker.example/x", false}, // encoded network-path: the DECODED path starts with "//" and is rejected
-	{"/@attacker.example/v1", true},     // '@' inside a path segment is literal
+	{"/@attacker.example/v1", true},      // '@' inside a path segment is literal
 
 	// Caller bugs and attack shapes.
 	{"", false},                      // missing

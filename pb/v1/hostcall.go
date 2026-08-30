@@ -1,4 +1,4 @@
-package v2
+package v1
 
 // Normative host-call command / permission strings and reply semantics shared
 // by the host and StreamHandler. Argument message schemas live in torana.proto;

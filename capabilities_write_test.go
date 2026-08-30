@@ -7,7 +7,7 @@ import (
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 // Every message role Torana models must have a write grant, and every write
@@ -149,9 +149,9 @@ func TestWritePermissionsAreSorted(t *testing.T) {
 // proving no OTHER field maps to this grant — is Edge's reflection-backed
 // verifier inventory, authoritative at the host.
 func TestCacheControlWriteFieldInventory(t *testing.T) {
-	blkFields := (&pbv2.RequestCacheBreakpoint{}).ProtoReflect().Descriptor().Fields()
-	nestedFields := (&pbv2.ToolResultCacheBreakpoint{}).ProtoReflect().Descriptor().Fields()
-	toolFields := (&pbv2.ToolDef{}).ProtoReflect().Descriptor().Fields()
+	blkFields := (&pbv1.RequestCacheBreakpoint{}).ProtoReflect().Descriptor().Fields()
+	nestedFields := (&pbv1.ToolResultCacheBreakpoint{}).ProtoReflect().Descriptor().Fields()
+	toolFields := (&pbv1.ToolDef{}).ProtoReflect().Descriptor().Fields()
 
 	marker := blkFields.ByName("marker_json")
 	if marker == nil || marker.Kind() != protoreflect.BytesKind {

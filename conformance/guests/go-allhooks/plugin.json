@@ -3,10 +3,10 @@
   "id": "conformance/go-allhooks",
   "name": "go-allhooks",
   "version": "0.1.0",
-  "abi_version": "v2",
+  "abi_version": "v1",
   "failure_mode": "pass",
   "repository": "https://github.com/torana-edge/torana-plugin-sdk",
-  "description": "Conformance guest registering every v2 hook; the manifest the exported supported_hooks bitmap is compared against",
+  "description": "Conformance guest registering every v1 hook; the manifest the exported supported_hooks bitmap is compared against",
   "hooks": [
     {"name": "run_before_request"},
     {"name": "run_after_response"},

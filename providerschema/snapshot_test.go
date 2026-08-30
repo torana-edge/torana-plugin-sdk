@@ -246,7 +246,7 @@ func TestSnapshotInventoryAdversarial(t *testing.T) {
 	// A stale decision naming no node fails.
 	{
 		d := cloneDec()
-		d["part.arm.removed_member"] = "torana.v2.RequestUnknownBlock.payload_json"
+		d["part.arm.removed_member"] = "torana.v1.RequestUnknownBlock.payload_json"
 		check("stale decision part.arm.removed_member", clone(schemaNodes), d, true)
 	}
 }
@@ -371,7 +371,7 @@ func TestAgentPlatformArmsHonest(t *testing.T) {
 	seen := map[string]bool{}
 	for _, a := range agentPlatformArms {
 		seen[a.ID] = true
-		if got := agentPlatformCarrierDecisions[a.ID]; got != "torana.v2.RequestUnknownBlock.payload_json" {
+		if got := agentPlatformCarrierDecisions[a.ID]; got != "torana.v1.RequestUnknownBlock.payload_json" {
 			t.Errorf("agent-platform arm %s decision = %q, want the unknown-payload carrier", a.ID, got)
 		}
 	}

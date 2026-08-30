@@ -1,13 +1,13 @@
 # Implementing a Torana plugin: the WASM contract
 
-This is the low-level ABI-v2 reference for humans or language-SDK authors. Go
+This is the low-level ABI-v1 reference for humans or language-SDK authors. Go
 and Rust plugin authors should normally start with
 [`WRITING_A_PLUGIN.md`](WRITING_A_PLUGIN.md) and use the maintained SDK rather
 than implementing this boundary themselves.
 
-Torana accepts **ABI v2 only**. A plugin declares `"abi_version": "v2"` and
+Torana accepts **ABI v1 only**. A plugin declares `"abi_version": "v1"` and
 uses the protobuf contract in
-[`proto/torana/v2/torana.proto`](../proto/torana/v2/torana.proto). Go and Rust
+[`proto/torana/v1/torana.proto`](../proto/torana/v1/torana.proto). Go and Rust
 are the supported authoring paths because both have maintained examples and
 compiled guests exercised through the real host conformance harness. Merely
 being able to target WASI does not make another language supported.
@@ -41,12 +41,12 @@ Without `-buildmode=c-shared`, `main` exits at instantiation and every later
 hook call sees a closed module. The Go SDK owns the allocator and exports; do
 not copy them into normal plugins.
 
-The Rust crate similarly owns the allocator and v2 exports. Its
-`export_plugin_v2!` macro is the supported entry point.
+The Rust crate similarly owns the allocator and v1 exports. Its
+`export_plugin_v1!` macro is the supported entry point.
 
 ## 2. Exports, hook bitmap, and result framing
 
-ABI v2 has one dispatcher and one declaration bitmap:
+ABI v1 has one dispatcher and one declaration bitmap:
 
 ```text
 supported_hooks() -> u32
@@ -77,16 +77,16 @@ result, because empty output means “continue unchanged.”
 Minimal Rust shape:
 
 ```rust
-use torana_plugin_sdk::{export_plugin_v2, pbv2, HOOK_BEFORE_REQUEST};
+use torana_plugin_sdk::{export_plugin_v1, pbv1, HOOK_BEFORE_REQUEST};
 
-fn dispatch(input: pbv2::HookInput) -> Result<Option<pbv2::HookResult>, String> {
-    let Some(pbv2::hook_input::Payload::ChatRequest(_request)) = input.payload else {
+fn dispatch(input: pbv1::HookInput) -> Result<Option<pbv1::HookResult>, String> {
+    let Some(pbv1::hook_input::Payload::ChatRequest(_request)) = input.payload else {
         return Err("received an undeclared hook".into());
     };
     Ok(None) // pass through
 }
 
-export_plugin_v2!(HOOK_BEFORE_REQUEST, dispatch);
+export_plugin_v1!(HOOK_BEFORE_REQUEST, dispatch);
 ```
 
 ## 3. Host imports and refusal framing
@@ -174,7 +174,7 @@ or explicitly budgeted provider egress. Return pass-through when idle and a
 
 ## 6. Checklist
 
-1. Is the manifest ABI exactly `v2`?
+1. Is the manifest ABI exactly `v1`?
 2. Does the guest use a real allocator and matching deallocator?
 3. Does it export `supported_hooks` and `run_hook` with the exact signatures?
 4. Does zero output mean only intentional pass-through?

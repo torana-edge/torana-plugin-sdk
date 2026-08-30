@@ -12,7 +12,7 @@ import (
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 	plugin_sdk "github.com/torana-edge/torana-plugin-sdk"
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -35,7 +35,7 @@ func TestCompiledRustGuestImplementsRunHook(t *testing.T) {
 }
 
 // TestCompiledRustLoggerCallsHost proves the shipped Rust example does more
-// than compile and export the right bitmap: its ABI-v2 dispatcher decodes the
+// than compile and export the right bitmap: its ABI-v1 dispatcher decodes the
 // request and reaches the real env.log import with the expected bytes.
 func TestCompiledRustLoggerCallsHost(t *testing.T) {
 	path := os.Getenv("TORANA_RUST_LOGGER")
@@ -58,7 +58,7 @@ func TestCompiledRustLoggerCallsHost(t *testing.T) {
 // expectation from the guest's own registrations, or from a helper that also
 // produced the bitmap, tests that two pieces of code agree with each other and
 // says nothing about whether the shipped manifest matches the shipped wasm.
-func manifestHooks(t *testing.T, path string) []pbv2.Hook {
+func manifestHooks(t *testing.T, path string) []pbv1.Hook {
 	t.Helper()
 	raw, err := os.ReadFile(resolveFromModuleRoot(t, path))
 	if err != nil {
@@ -75,7 +75,7 @@ func manifestHooks(t *testing.T, path string) []pbv2.Hook {
 	if len(m.Hooks) == 0 {
 		t.Fatalf("%s declares no hooks", path)
 	}
-	var hooks []pbv2.Hook
+	var hooks []pbv1.Hook
 	for _, h := range m.Hooks {
 		hk, ok := plugin_sdk.ManifestHookName(h.Name)
 		if !ok {
@@ -169,15 +169,15 @@ func assertGuestBitmapMatchesManifest(t *testing.T, guest, manifest string) {
 	}
 	supported := module.ExportedFunction("supported_hooks")
 	if supported == nil {
-		t.Fatal("v2 guest is missing supported_hooks")
+		t.Fatal("v1 guest is missing supported_hooks")
 	}
 	bits, err := supported.Call(ctx)
 	if err != nil || len(bits) != 1 {
 		t.Fatalf("supported_hooks: %v %v", bits, err)
 	}
-	got := pbv2.HookBitmap(bits[0])
+	got := pbv1.HookBitmap(bits[0])
 
-	want, err := pbv2.ExpectedBitmap(declared)
+	want, err := pbv1.ExpectedBitmap(declared)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func assertGuestBitmapMatchesManifest(t *testing.T, guest, manifest string) {
 	}
 	// ValidateManifestHooks rejects reserved and unassigned bits; run it on the
 	// value that came out of the wasm, not on one derived from the manifest.
-	if err := pbv2.ValidateManifestHooks(got, declared); err != nil {
+	if err := pbv1.ValidateManifestHooks(got, declared); err != nil {
 		t.Fatalf("exported bitmap is not a valid hook set: %v", err)
 	}
 }
@@ -226,9 +226,9 @@ func exerciseRunHook(t *testing.T, path string) []loggedMessage {
 			t.Fatalf("initialize guest: %v", err)
 		}
 	}
-	payload, err := proto.Marshal(&pbv2.HookInput{
+	payload, err := proto.Marshal(&pbv1.HookInput{
 		RequestId: 1,
-		Payload:   &pbv2.HookInput_ChatRequest{ChatRequest: &pbv2.ChatRequest{Model: "conformance"}},
+		Payload:   &pbv1.HookInput_ChatRequest{ChatRequest: &pbv1.ChatRequest{Model: "conformance"}},
 	})
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
@@ -241,7 +241,7 @@ func exerciseRunHook(t *testing.T, path string) []loggedMessage {
 		t.Fatal("guest is missing alloc, dealloc, or run_hook")
 	}
 	if supported == nil {
-		t.Fatal("v2 guest is missing supported_hooks")
+		t.Fatal("v1 guest is missing supported_hooks")
 	}
 	if module.ExportedFunction("run_before_request") != nil {
 		t.Fatal("per-hook run_before_request export must not remain in the single-dispatch ABI")

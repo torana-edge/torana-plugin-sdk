@@ -289,8 +289,8 @@ func TestValidateRandomizedDifferential(t *testing.T) {
 				// was the permissive number token.
 				fixed := append([]byte(nil), doc...)
 				fixed[i] = '0'
-				var v2 any
-				if err := json.Unmarshal(fixed, &v2); err != nil {
+				var decoded any
+				if err := json.Unmarshal(fixed, &decoded); err != nil {
 					t.Fatalf("Validate accepted but encoding/json rejected (non-number) at byte %d -> %q: %s", i, m, doc)
 				}
 			}

@@ -3,7 +3,7 @@ package plugin_sdk
 import (
 	"reflect"
 
-	pbv2 "github.com/torana-edge/torana-plugin-sdk/pb/v2"
+	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
 // Hook registration is static configuration, so registering one twice is a
@@ -78,40 +78,40 @@ const (
 
 // registeredHookBitmap is the supported_hooks() export value derived from
 // which handlers are installed. Bit N ↔ Hook enum value N.
-func registeredHookBitmap() pbv2.HookBitmap {
-	var hooks []pbv2.Hook
+func registeredHookBitmap() pbv1.HookBitmap {
+	var hooks []pbv1.Hook
 	if beforeRequestHandler != nil {
-		hooks = append(hooks, pbv2.Hook_HOOK_BEFORE_REQUEST)
+		hooks = append(hooks, pbv1.Hook_HOOK_BEFORE_REQUEST)
 	}
 	if afterResponseHandler != nil {
-		hooks = append(hooks, pbv2.Hook_HOOK_AFTER_RESPONSE)
+		hooks = append(hooks, pbv1.Hook_HOOK_AFTER_RESPONSE)
 	}
 	if streamChunkHandler != nil {
-		hooks = append(hooks, pbv2.Hook_HOOK_ON_STREAM_CHUNK)
+		hooks = append(hooks, pbv1.Hook_HOOK_ON_STREAM_CHUNK)
 	}
 	if httpRequestHandler != nil {
-		hooks = append(hooks, pbv2.Hook_HOOK_ON_HTTP_REQUEST)
+		hooks = append(hooks, pbv1.Hook_HOOK_ON_HTTP_REQUEST)
 	}
 	if tickHandler != nil {
-		hooks = append(hooks, pbv2.Hook_HOOK_ON_TICK)
+		hooks = append(hooks, pbv1.Hook_HOOK_ON_TICK)
 	}
-	return pbv2.BitmapOf(hooks...)
+	return pbv1.BitmapOf(hooks...)
 }
 
-// ManifestHookName maps a plugin.json hook name to the v2 Hook enum.
-func ManifestHookName(name string) (pbv2.Hook, bool) {
+// ManifestHookName maps a plugin.json hook name to the v1 Hook enum.
+func ManifestHookName(name string) (pbv1.Hook, bool) {
 	switch name {
 	case HookBeforeRequest:
-		return pbv2.Hook_HOOK_BEFORE_REQUEST, true
+		return pbv1.Hook_HOOK_BEFORE_REQUEST, true
 	case HookAfterResponse:
-		return pbv2.Hook_HOOK_AFTER_RESPONSE, true
+		return pbv1.Hook_HOOK_AFTER_RESPONSE, true
 	case HookStreamChunk:
-		return pbv2.Hook_HOOK_ON_STREAM_CHUNK, true
+		return pbv1.Hook_HOOK_ON_STREAM_CHUNK, true
 	case HookHTTPRequest:
-		return pbv2.Hook_HOOK_ON_HTTP_REQUEST, true
+		return pbv1.Hook_HOOK_ON_HTTP_REQUEST, true
 	case HookTick:
-		return pbv2.Hook_HOOK_ON_TICK, true
+		return pbv1.Hook_HOOK_ON_TICK, true
 	default:
-		return pbv2.Hook_HOOK_UNSPECIFIED, false
+		return pbv1.Hook_HOOK_UNSPECIFIED, false
 	}
 }
