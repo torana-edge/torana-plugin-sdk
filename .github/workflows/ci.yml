@@ -47,10 +47,7 @@ jobs:
       # The release workflow asserts the Rust crate version matches the tag, but
       # it only runs once the tag exists — and a module proxy caches a tag's
       # content immutably, so by then it is too late to correct cheaply. Both
-      # v0.1.1 and v0.1.2 shipped with the crate still advertising 0.1.0 and
-      # produced no release artifacts at all.
-      #
-      # This catches the same drift while it is still a commit. See RELEASING.md.
+      # This catches version drift while it is still a commit. See RELEASING.md.
       - name: Crate version is not behind the latest tag
         run: |
           crate=$(grep -m1 '^version = ' rust/torana-plugin-sdk/Cargo.toml | cut -d'"' -f2)
