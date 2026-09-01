@@ -1,12 +1,11 @@
 # Releasing the SDK
 
-Read this before creating a tag. Tags here are effectively permanent, and two
-releases have already been cut wrong.
+Read this before creating a tag. Tags here are effectively permanent.
 
 ## Why a tag cannot be taken back
 
 Go module proxies cache a tag's content **immutably**. The moment anything runs
-`go get …@v0.1.2`, `proxy.golang.org` stores those bytes and serves them forever,
+`go get …@vX.Y.Z`, `proxy.golang.org` stores those bytes and serves them forever,
 regardless of what the tag later points at. Moving the tag in git changes
 nothing for anyone downloading through the proxy — and leaves the repository and
 the proxy disagreeing about what that version *is*, which is worse than either
@@ -27,9 +26,8 @@ has to be bumped by hand in the same change.
 
 The release workflow asserts they match, but **it only runs once the tag
 exists** — by which point the tag is already immutable. That check is a
-backstop, not a guardrail. `v0.1.1` and `v0.1.2` both tripped it: their releases
-produced no artifacts and no provenance attestation, and the Rust crate still
-advertised `0.1.0`.
+backstop, not a guardrail. Before tagging, the pull-request gate must prove the
+crate version is not behind the repository's latest tag.
 
 ## Cutting a release
 
@@ -38,7 +36,9 @@ guests in the host test: the language-support claim is an executable contract,
 not merely two crates that happen to compile.
 
 1. **Bump `rust/torana-plugin-sdk/Cargo.toml`** to the version you are about to
-   tag, without the `v`. Commit it to `main`.
+   tag, without the `v`. Public Go tags already run through `v0.2.0`, so the
+   next coordinated Go/Rust release is `v0.3.0`. ABI and package versions are
+   independent: ABI v1 does not imply SDK v0.1. Commit the version to `main`.
 2. **Verify** — `go test ./...`, `cargo test --manifest-path rust/torana-plugin-sdk/Cargo.toml`,
    and a `GOOS=wasip1 GOARCH=wasm go build ./...` (a compile check of the SDK
    library — no `-buildmode=c-shared`, because nothing here is a plugin).
