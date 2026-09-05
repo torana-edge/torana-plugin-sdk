@@ -53,7 +53,6 @@ var Permissions = append([]string{
 	"env.host_call.torana_db_query",
 	"env.host_call.torana_evaluate_compaction",
 	"env.host_call.torana_kms_decrypt",
-	"env.host_call.torana_offload_completion",
 	"env.host_call.torana_plugin_counter",
 	"env.host_call.torana_record_savings",
 	"env.host_call.torana_send_request",

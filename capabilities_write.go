@@ -25,7 +25,7 @@ package plugin_sdk
 // It would be wrong to claim a plugin cannot disclose what it reads. Several
 // granted capabilities carry data out: env.emit_metric puts arbitrary strings in
 // metric labels, env.log writes to the proxy's output,
-// env.host_call.torana_offload_completion sends content to a model by design,
+// env.model_complete sends content to an operator-bound model by design,
 // and env.state_set and env.cache_set persist it. A plugin that reads and a
 // plugin that tells are not cleanly separated today.
 //
