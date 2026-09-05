@@ -2,6 +2,7 @@ package v1
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"strings"
 	"unicode/utf8"
@@ -362,6 +363,96 @@ func (x *OutboundHTTPRequestArgs) Validate() error {
 		return fmt.Errorf("http path is invalid")
 	}
 	return validateHTTPHeaders(x.Headers)
+}
+
+func (x *ModelCompleteArgs) Validate() error {
+	if x == nil {
+		return fmt.Errorf("model complete args are nil")
+	}
+	if len(x.ProtoReflect().GetUnknown()) != 0 {
+		return fmt.Errorf("model complete args contain unknown fields")
+	}
+	if err := validateSlot("model service", x.Service); err != nil {
+		return err
+	}
+	if len(x.Messages) == 0 {
+		return fmt.Errorf("model completion requires at least one message")
+	}
+	for i, message := range x.Messages {
+		if message == nil {
+			return fmt.Errorf("model message %d is nil", i)
+		}
+		if len(message.ProtoReflect().GetUnknown()) != 0 {
+			return fmt.Errorf("model message %d contains unknown fields", i)
+		}
+		if message.Role == "" || !utf8.ValidString(message.Role) {
+			return fmt.Errorf("model message %d role must be non-empty UTF-8", i)
+		}
+		if !utf8.ValidString(message.Content) {
+			return fmt.Errorf("model message %d content must be UTF-8", i)
+		}
+	}
+	if x.MaxTokens != nil && *x.MaxTokens == 0 {
+		return fmt.Errorf("model completion max_tokens must be positive when present")
+	}
+	if x.Temperature != nil && (math.IsNaN(*x.Temperature) || math.IsInf(*x.Temperature, 0)) {
+		return fmt.Errorf("model completion temperature must be finite when present")
+	}
+	return nil
+}
+
+func (x *ModelCompleteResult) Validate() error {
+	if x == nil {
+		return fmt.Errorf("model completion result is nil")
+	}
+	if len(x.ProtoReflect().GetUnknown()) != 0 {
+		return fmt.Errorf("model completion result contains unknown fields")
+	}
+	if !utf8.ValidString(x.Content) || !utf8.ValidString(x.ReportedModel) || !utf8.ValidString(x.FinishReason) {
+		return fmt.Errorf("model completion result strings must be UTF-8")
+	}
+	if x.Usage != nil && (x.Usage.InputTokens < 0 || x.Usage.OutputTokens < 0 ||
+		x.Usage.CacheReadTokens < 0 || x.Usage.CacheWriteTokens < 0) {
+		return fmt.Errorf("model completion usage counts must be non-negative")
+	}
+	if x.Usage != nil && len(x.Usage.ProtoReflect().GetUnknown()) != 0 {
+		return fmt.Errorf("model completion usage contains unknown fields")
+	}
+	return nil
+}
+
+func (x *ModelPricingGetArgs) Validate() error {
+	if x == nil {
+		return fmt.Errorf("model pricing args are nil")
+	}
+	if len(x.ProtoReflect().GetUnknown()) != 0 {
+		return fmt.Errorf("model pricing args contain unknown fields")
+	}
+	return validateSlot("model pricing resource", x.Resource)
+}
+
+func (x *ModelPricing) Validate() error {
+	if x == nil {
+		return fmt.Errorf("model pricing is nil")
+	}
+	if len(x.ProtoReflect().GetUnknown()) != 0 {
+		return fmt.Errorf("model pricing contains unknown fields")
+	}
+	rates := []struct {
+		name  string
+		value *float64
+	}{
+		{"input_usd_per_mtok", x.InputUsdPerMtok},
+		{"output_usd_per_mtok", x.OutputUsdPerMtok},
+		{"cache_read_usd_per_mtok", x.CacheReadUsdPerMtok},
+		{"cache_write_usd_per_mtok", x.CacheWriteUsdPerMtok},
+	}
+	for _, rate := range rates {
+		if rate.value != nil && (math.IsNaN(*rate.value) || math.IsInf(*rate.value, 0) || *rate.value < 0) {
+			return fmt.Errorf("model pricing %s must be finite and non-negative", rate.name)
+		}
+	}
+	return nil
 }
 
 func (x *OutboundHTTPResponse) Validate() error {

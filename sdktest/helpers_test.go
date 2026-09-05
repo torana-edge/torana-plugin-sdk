@@ -12,6 +12,33 @@ import (
 	"github.com/torana-edge/torana-plugin-sdk/sdktest"
 )
 
+func TestTypedModelResourceStubsOwnFraming(t *testing.T) {
+	h := sdktest.New(t)
+	h.StubModelComplete(func(args *pbv1.ModelCompleteArgs) (*pbv1.ModelCompleteResult, *pbv1.HostError, error) {
+		if args.Service != "judge" || len(args.Messages) != 1 {
+			t.Fatalf("args = %+v", args)
+		}
+		return &pbv1.ModelCompleteResult{Content: "yes"}, nil, nil
+	})
+	h.StubModelPricing(func(args *pbv1.ModelPricingGetArgs) (*pbv1.ModelPricing, *pbv1.HostError, error) {
+		if args.Resource != "request" {
+			t.Fatalf("args = %+v", args)
+		}
+		free := 0.0
+		return &pbv1.ModelPricing{InputUsdPerMtok: &free}, nil, nil
+	})
+	h.Run(func() {
+		result, refusal, err := sdk.ModelComplete(&pbv1.ModelCompleteArgs{Service: "judge", Messages: []*pbv1.ModelMessage{{Role: "user", Content: "question"}}})
+		if err != nil || refusal != nil || result.Content != "yes" {
+			t.Fatalf("completion = %+v, %+v, %v", result, refusal, err)
+		}
+		pricing, refusal, err := sdk.GetModelPricing("request")
+		if err != nil || refusal != nil || pricing.InputUsdPerMtok == nil || *pricing.InputUsdPerMtok != 0 {
+			t.Fatalf("pricing = %+v, %+v, %v", pricing, refusal, err)
+		}
+	})
+}
+
 // GetCachePricing and SendRequest changed transport AND error semantics when
 // they moved onto HostCallExtension: they used to pattern-match a
 // permission-denied JSON string, and now branch on a framed code. The direct

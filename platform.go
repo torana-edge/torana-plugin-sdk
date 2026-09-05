@@ -66,3 +66,38 @@ func HTTPRequest(request *pbv1.OutboundHTTPRequestArgs) (*pbv1.OutboundHTTPRespo
 	}
 	return &response, nil, nil
 }
+
+// ModelComplete invokes an operator-bound model-service slot. The plugin
+// supplies only a provider-neutral prompt and bounded generation preferences;
+// the binding owns provider, URL, model, credentials, and hard budgets.
+func ModelComplete(request *pbv1.ModelCompleteArgs) (*pbv1.ModelCompleteResult, *pbv1.HostError, error) {
+	value, herr, err := HostCall("env.model_complete", request)
+	if err != nil || herr != nil {
+		return nil, herr, err
+	}
+	var result pbv1.ModelCompleteResult
+	if err := proto.Unmarshal(value, &result); err != nil {
+		return nil, nil, fmt.Errorf("torana: decode model completion: %w", err)
+	}
+	if err := result.Validate(); err != nil {
+		return nil, nil, fmt.Errorf("torana: model completion: %w", err)
+	}
+	return &result, nil, nil
+}
+
+// GetModelPricing resolves one operator-bound pricing resource. Pointer fields
+// preserve absent (unknown) versus explicitly-zero rates.
+func GetModelPricing(resource string) (*pbv1.ModelPricing, *pbv1.HostError, error) {
+	value, herr, err := HostCall("env.model_pricing", &pbv1.ModelPricingGetArgs{Resource: resource})
+	if err != nil || herr != nil {
+		return nil, herr, err
+	}
+	var pricing pbv1.ModelPricing
+	if err := proto.Unmarshal(value, &pricing); err != nil {
+		return nil, nil, fmt.Errorf("torana: decode model pricing: %w", err)
+	}
+	if err := pricing.Validate(); err != nil {
+		return nil, nil, fmt.Errorf("torana: model pricing: %w", err)
+	}
+	return &pricing, nil, nil
+}

@@ -62,6 +62,8 @@ var Permissions = append([]string{
 	"env.log",
 	"env.meta_get",
 	"env.meta_set",
+	"env.model_complete",
+	"env.model_pricing",
 	"env.now",
 	"env.original_request",
 	"env.original_response",

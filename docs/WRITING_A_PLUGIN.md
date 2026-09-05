@@ -163,11 +163,24 @@ Every plugin directory must contain a `plugin.json` file describing its metadata
   plugin can resolve them. Each entry has a stable `name`, a value-free
   `description`, and `required`.
 - **`files`**: Plugin-private logical paths, their allowed operations
-  (`append`, `read`, `write`, `list`, `delete`), and optional rotation limits.
-  These are not operating-system paths.
+  (`append`, `read`, `write`, `list`, `delete`), `required`, and optional
+  rotation limits. These are not operating-system paths. A required binding
+  must be approved before the plugin can load.
 - **`http_endpoints`**: Named outbound endpoint slots. Each entry declares a
   description, optional HTTPS default origin, allowed methods, and whether a
   binding is required. The operator may narrow it during approval.
+- **`model_services`**: Named provider-neutral model slots. Each entry has a
+  stable `name`, value-free `description`, `required`, and explicit requested
+  ceilings for timeout, input bytes, output tokens, calls per minute, and
+  tokens per hour. During approval the operator binds the slot to a configured
+  provider and model and may only narrow those ceilings. Provider credentials
+  stay host-owned; a plugin never receives or selects the provider URL or
+  credential.
+- **`pricing_resources`**: Named pricing slots with a stable `name`,
+  value-free `description`, and `required`. The operator may bind one to the
+  routed request model or to a model-service slot. Rates preserve unknown
+  versus explicitly free values; plugins must decline rather than guess when
+  a rate they need is absent.
 
 Manifest permissions are an all-or-nothing set under v1: every declared
 permission must be approved against the exact bundle digest, or the plugin
@@ -222,6 +235,18 @@ surface permission denied — so a plugin should degrade rather than assume.
 | `env.file_list` | `sdk.ListFiles` | List declared files under a logical prefix. |
 | `env.file_delete` | `sdk.DeleteFile` | Delete one declared private file. |
 | `env.http_request` | `sdk.HTTPRequest` | Call an operator-bound endpoint slot using a relative path and the approved method and resource budgets. |
+
+**Bound model and pricing resources**
+
+| Capability | SDK | Description |
+| --- | --- | --- |
+| `env.model_complete` | `sdk.ModelComplete` | Run a provider-neutral prompt through one declared model-service slot. The operator binding owns provider, URL, model, credential, timeout, and hard budgets. |
+| `env.model_pricing` | `sdk.GetModelPricing` | Resolve one declared pricing slot without letting the plugin select arbitrary provider/model coordinates. Missing rates remain unknown rather than being guessed. |
+
+Model-service calls are attributed plugin egress and do not recursively run
+the caller-facing plugin pipeline. This prevents a scanner or compactor from
+calling itself, while retaining the same host-side provider adapters,
+credential isolation, limits, and observability as other model traffic.
 
 Credential and HTTP approval are deliberately separate. A plugin granted both
 can transmit that credential, which is sometimes the point and always part of

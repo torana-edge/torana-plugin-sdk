@@ -4823,6 +4823,322 @@ func (x *OutboundHTTPResponse) GetBody() []byte {
 	return nil
 }
 
+// ModelMessage is the provider-neutral prompt surface for a plugin-owned
+// model call. Provider routing, model selection, credentials, and URL are not
+// present: those belong to the operator binding for ModelCompleteArgs.service.
+type ModelMessage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Role          string                 `protobuf:"bytes,1,opt,name=role,proto3" json:"role,omitempty"`
+	Content       string                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelMessage) Reset() {
+	*x = ModelMessage{}
+	mi := &file_proto_torana_v1_torana_proto_msgTypes[64]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelMessage) ProtoMessage() {}
+
+func (x *ModelMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_torana_v1_torana_proto_msgTypes[64]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelMessage.ProtoReflect.Descriptor instead.
+func (*ModelMessage) Descriptor() ([]byte, []int) {
+	return file_proto_torana_v1_torana_proto_rawDescGZIP(), []int{64}
+}
+
+func (x *ModelMessage) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *ModelMessage) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+// ModelCompleteArgs invokes one operator-bound model-service slot. It is a
+// separate inference path, not a recursive trip through the user-facing
+// plugin pipeline. The host applies the binding's provider, model, credential,
+// timeout, and token budgets and may clamp the requested max_tokens.
+type ModelCompleteArgs struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Service       string                 `protobuf:"bytes,1,opt,name=service,proto3" json:"service,omitempty"`
+	Messages      []*ModelMessage        `protobuf:"bytes,2,rep,name=messages,proto3" json:"messages,omitempty"`
+	MaxTokens     *uint32                `protobuf:"varint,3,opt,name=max_tokens,json=maxTokens,proto3,oneof" json:"max_tokens,omitempty"`
+	Temperature   *float64               `protobuf:"fixed64,4,opt,name=temperature,proto3,oneof" json:"temperature,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelCompleteArgs) Reset() {
+	*x = ModelCompleteArgs{}
+	mi := &file_proto_torana_v1_torana_proto_msgTypes[65]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelCompleteArgs) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelCompleteArgs) ProtoMessage() {}
+
+func (x *ModelCompleteArgs) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_torana_v1_torana_proto_msgTypes[65]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelCompleteArgs.ProtoReflect.Descriptor instead.
+func (*ModelCompleteArgs) Descriptor() ([]byte, []int) {
+	return file_proto_torana_v1_torana_proto_rawDescGZIP(), []int{65}
+}
+
+func (x *ModelCompleteArgs) GetService() string {
+	if x != nil {
+		return x.Service
+	}
+	return ""
+}
+
+func (x *ModelCompleteArgs) GetMessages() []*ModelMessage {
+	if x != nil {
+		return x.Messages
+	}
+	return nil
+}
+
+func (x *ModelCompleteArgs) GetMaxTokens() uint32 {
+	if x != nil && x.MaxTokens != nil {
+		return *x.MaxTokens
+	}
+	return 0
+}
+
+func (x *ModelCompleteArgs) GetTemperature() float64 {
+	if x != nil && x.Temperature != nil {
+		return *x.Temperature
+	}
+	return 0
+}
+
+// ModelCompleteResult is the provider-neutral completion returned in the
+// HostCallResult value arm. reported_model is empty when the provider does not
+// identify the answering model; the host never guesses aliases.
+type ModelCompleteResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Content       string                 `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
+	ReportedModel string                 `protobuf:"bytes,2,opt,name=reported_model,json=reportedModel,proto3" json:"reported_model,omitempty"`
+	FinishReason  string                 `protobuf:"bytes,3,opt,name=finish_reason,json=finishReason,proto3" json:"finish_reason,omitempty"`
+	Usage         *Usage                 `protobuf:"bytes,4,opt,name=usage,proto3" json:"usage,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelCompleteResult) Reset() {
+	*x = ModelCompleteResult{}
+	mi := &file_proto_torana_v1_torana_proto_msgTypes[66]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelCompleteResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelCompleteResult) ProtoMessage() {}
+
+func (x *ModelCompleteResult) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_torana_v1_torana_proto_msgTypes[66]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelCompleteResult.ProtoReflect.Descriptor instead.
+func (*ModelCompleteResult) Descriptor() ([]byte, []int) {
+	return file_proto_torana_v1_torana_proto_rawDescGZIP(), []int{66}
+}
+
+func (x *ModelCompleteResult) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *ModelCompleteResult) GetReportedModel() string {
+	if x != nil {
+		return x.ReportedModel
+	}
+	return ""
+}
+
+func (x *ModelCompleteResult) GetFinishReason() string {
+	if x != nil {
+		return x.FinishReason
+	}
+	return ""
+}
+
+func (x *ModelCompleteResult) GetUsage() *Usage {
+	if x != nil {
+		return x.Usage
+	}
+	return nil
+}
+
+// ModelPricingGetArgs resolves one operator-bound pricing resource. The slot
+// may refer to the caller's routed model or to a separately bound model
+// service, but the plugin cannot choose arbitrary provider/model coordinates.
+type ModelPricingGetArgs struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Resource      string                 `protobuf:"bytes,1,opt,name=resource,proto3" json:"resource,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelPricingGetArgs) Reset() {
+	*x = ModelPricingGetArgs{}
+	mi := &file_proto_torana_v1_torana_proto_msgTypes[67]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelPricingGetArgs) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelPricingGetArgs) ProtoMessage() {}
+
+func (x *ModelPricingGetArgs) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_torana_v1_torana_proto_msgTypes[67]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelPricingGetArgs.ProtoReflect.Descriptor instead.
+func (*ModelPricingGetArgs) Descriptor() ([]byte, []int) {
+	return file_proto_torana_v1_torana_proto_rawDescGZIP(), []int{67}
+}
+
+func (x *ModelPricingGetArgs) GetResource() string {
+	if x != nil {
+		return x.Resource
+	}
+	return ""
+}
+
+// ModelPricing contains USD rates per million tokens. Presence is meaningful:
+// absent means unknown, while an explicitly present zero means free. Consumers
+// must decline any decision that needs an absent rate rather than guessing.
+type ModelPricing struct {
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	InputUsdPerMtok      *float64               `protobuf:"fixed64,1,opt,name=input_usd_per_mtok,json=inputUsdPerMtok,proto3,oneof" json:"input_usd_per_mtok,omitempty"`
+	OutputUsdPerMtok     *float64               `protobuf:"fixed64,2,opt,name=output_usd_per_mtok,json=outputUsdPerMtok,proto3,oneof" json:"output_usd_per_mtok,omitempty"`
+	CacheReadUsdPerMtok  *float64               `protobuf:"fixed64,3,opt,name=cache_read_usd_per_mtok,json=cacheReadUsdPerMtok,proto3,oneof" json:"cache_read_usd_per_mtok,omitempty"`
+	CacheWriteUsdPerMtok *float64               `protobuf:"fixed64,4,opt,name=cache_write_usd_per_mtok,json=cacheWriteUsdPerMtok,proto3,oneof" json:"cache_write_usd_per_mtok,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *ModelPricing) Reset() {
+	*x = ModelPricing{}
+	mi := &file_proto_torana_v1_torana_proto_msgTypes[68]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelPricing) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelPricing) ProtoMessage() {}
+
+func (x *ModelPricing) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_torana_v1_torana_proto_msgTypes[68]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelPricing.ProtoReflect.Descriptor instead.
+func (*ModelPricing) Descriptor() ([]byte, []int) {
+	return file_proto_torana_v1_torana_proto_rawDescGZIP(), []int{68}
+}
+
+func (x *ModelPricing) GetInputUsdPerMtok() float64 {
+	if x != nil && x.InputUsdPerMtok != nil {
+		return *x.InputUsdPerMtok
+	}
+	return 0
+}
+
+func (x *ModelPricing) GetOutputUsdPerMtok() float64 {
+	if x != nil && x.OutputUsdPerMtok != nil {
+		return *x.OutputUsdPerMtok
+	}
+	return 0
+}
+
+func (x *ModelPricing) GetCacheReadUsdPerMtok() float64 {
+	if x != nil && x.CacheReadUsdPerMtok != nil {
+		return *x.CacheReadUsdPerMtok
+	}
+	return 0
+}
+
+func (x *ModelPricing) GetCacheWriteUsdPerMtok() float64 {
+	if x != nil && x.CacheWriteUsdPerMtok != nil {
+		return *x.CacheWriteUsdPerMtok
+	}
+	return 0
+}
+
 var File_proto_torana_v1_torana_proto protoreflect.FileDescriptor
 
 const file_proto_torana_v1_torana_proto_rawDesc = "" +
@@ -5110,7 +5426,34 @@ const file_proto_torana_v1_torana_proto_rawDesc = "" +
 	"\x14OutboundHTTPResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\x05R\x06status\x12/\n" +
 	"\aheaders\x18\x02 \x03(\v2\x15.torana.v1.HTTPHeaderR\aheaders\x12\x12\n" +
-	"\x04body\x18\x03 \x01(\fR\x04body*\x94\x01\n" +
+	"\x04body\x18\x03 \x01(\fR\x04body\"<\n" +
+	"\fModelMessage\x12\x12\n" +
+	"\x04role\x18\x01 \x01(\tR\x04role\x12\x18\n" +
+	"\acontent\x18\x02 \x01(\tR\acontent\"\xcc\x01\n" +
+	"\x11ModelCompleteArgs\x12\x18\n" +
+	"\aservice\x18\x01 \x01(\tR\aservice\x123\n" +
+	"\bmessages\x18\x02 \x03(\v2\x17.torana.v1.ModelMessageR\bmessages\x12\"\n" +
+	"\n" +
+	"max_tokens\x18\x03 \x01(\rH\x00R\tmaxTokens\x88\x01\x01\x12%\n" +
+	"\vtemperature\x18\x04 \x01(\x01H\x01R\vtemperature\x88\x01\x01B\r\n" +
+	"\v_max_tokensB\x0e\n" +
+	"\f_temperature\"\xa3\x01\n" +
+	"\x13ModelCompleteResult\x12\x18\n" +
+	"\acontent\x18\x01 \x01(\tR\acontent\x12%\n" +
+	"\x0ereported_model\x18\x02 \x01(\tR\rreportedModel\x12#\n" +
+	"\rfinish_reason\x18\x03 \x01(\tR\ffinishReason\x12&\n" +
+	"\x05usage\x18\x04 \x01(\v2\x10.torana.v1.UsageR\x05usage\"1\n" +
+	"\x13ModelPricingGetArgs\x12\x1a\n" +
+	"\bresource\x18\x01 \x01(\tR\bresource\"\xd4\x02\n" +
+	"\fModelPricing\x120\n" +
+	"\x12input_usd_per_mtok\x18\x01 \x01(\x01H\x00R\x0finputUsdPerMtok\x88\x01\x01\x122\n" +
+	"\x13output_usd_per_mtok\x18\x02 \x01(\x01H\x01R\x10outputUsdPerMtok\x88\x01\x01\x129\n" +
+	"\x17cache_read_usd_per_mtok\x18\x03 \x01(\x01H\x02R\x13cacheReadUsdPerMtok\x88\x01\x01\x12;\n" +
+	"\x18cache_write_usd_per_mtok\x18\x04 \x01(\x01H\x03R\x14cacheWriteUsdPerMtok\x88\x01\x01B\x15\n" +
+	"\x13_input_usd_per_mtokB\x16\n" +
+	"\x14_output_usd_per_mtokB\x1a\n" +
+	"\x18_cache_read_usd_per_mtokB\x1b\n" +
+	"\x19_cache_write_usd_per_mtok*\x94\x01\n" +
 	"\x04Hook\x12\x14\n" +
 	"\x10HOOK_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13HOOK_BEFORE_REQUEST\x10\x01\x12\x17\n" +
@@ -5140,7 +5483,7 @@ func file_proto_torana_v1_torana_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_torana_v1_torana_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_proto_torana_v1_torana_proto_msgTypes = make([]protoimpl.MessageInfo, 64)
+var file_proto_torana_v1_torana_proto_msgTypes = make([]protoimpl.MessageInfo, 69)
 var file_proto_torana_v1_torana_proto_goTypes = []any{
 	(Hook)(0),                             // 0: torana.v1.Hook
 	(ErrorCode)(0),                        // 1: torana.v1.ErrorCode
@@ -5208,6 +5551,11 @@ var file_proto_torana_v1_torana_proto_goTypes = []any{
 	(*HTTPHeader)(nil),                    // 63: torana.v1.HTTPHeader
 	(*OutboundHTTPRequestArgs)(nil),       // 64: torana.v1.OutboundHTTPRequestArgs
 	(*OutboundHTTPResponse)(nil),          // 65: torana.v1.OutboundHTTPResponse
+	(*ModelMessage)(nil),                  // 66: torana.v1.ModelMessage
+	(*ModelCompleteArgs)(nil),             // 67: torana.v1.ModelCompleteArgs
+	(*ModelCompleteResult)(nil),           // 68: torana.v1.ModelCompleteResult
+	(*ModelPricingGetArgs)(nil),           // 69: torana.v1.ModelPricingGetArgs
+	(*ModelPricing)(nil),                  // 70: torana.v1.ModelPricing
 }
 var file_proto_torana_v1_torana_proto_depIdxs = []int32{
 	3,  // 0: torana.v1.Message.blocks:type_name -> torana.v1.RequestBlock
@@ -5256,11 +5604,13 @@ var file_proto_torana_v1_torana_proto_depIdxs = []int32{
 	42, // 43: torana.v1.HostCallResult.error:type_name -> torana.v1.HostError
 	63, // 44: torana.v1.OutboundHTTPRequestArgs.headers:type_name -> torana.v1.HTTPHeader
 	63, // 45: torana.v1.OutboundHTTPResponse.headers:type_name -> torana.v1.HTTPHeader
-	46, // [46:46] is the sub-list for method output_type
-	46, // [46:46] is the sub-list for method input_type
-	46, // [46:46] is the sub-list for extension type_name
-	46, // [46:46] is the sub-list for extension extendee
-	0,  // [0:46] is the sub-list for field type_name
+	66, // 46: torana.v1.ModelCompleteArgs.messages:type_name -> torana.v1.ModelMessage
+	18, // 47: torana.v1.ModelCompleteResult.usage:type_name -> torana.v1.Usage
+	48, // [48:48] is the sub-list for method output_type
+	48, // [48:48] is the sub-list for method input_type
+	48, // [48:48] is the sub-list for extension type_name
+	48, // [48:48] is the sub-list for extension extendee
+	0,  // [0:48] is the sub-list for field type_name
 }
 
 func init() { file_proto_torana_v1_torana_proto_init() }
@@ -5323,13 +5673,15 @@ func file_proto_torana_v1_torana_proto_init() {
 		(*HostCallResult_Value)(nil),
 		(*HostCallResult_Error)(nil),
 	}
+	file_proto_torana_v1_torana_proto_msgTypes[65].OneofWrappers = []any{}
+	file_proto_torana_v1_torana_proto_msgTypes[68].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_torana_v1_torana_proto_rawDesc), len(file_proto_torana_v1_torana_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   64,
+			NumMessages:   69,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

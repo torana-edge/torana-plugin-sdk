@@ -214,6 +214,58 @@ func (h *Harness) StubHostCall(cmd string, fn func(args string) (string, error))
 	return h
 }
 
+// StubModelComplete installs a typed model-service double. The callback sees
+// the exact provider-neutral request the plugin issued; sdktest owns protobuf
+// framing so plugin tests cannot accidentally return a legacy JSON envelope.
+func (h *Harness) StubModelComplete(fn func(*pbv1.ModelCompleteArgs) (*pbv1.ModelCompleteResult, *pbv1.HostError, error)) *Harness {
+	return h.StubHostCall("env.model_complete", func(args string) (string, error) {
+		var request pbv1.ModelCompleteArgs
+		if err := proto.Unmarshal([]byte(args), &request); err != nil {
+			return HostResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid ModelCompleteArgs"), nil
+		}
+		result, refusal, err := fn(&request)
+		if err != nil {
+			return "", err
+		}
+		if refusal != nil {
+			return HostResultError(refusal.Code, refusal.Message), nil
+		}
+		if result == nil {
+			return HostResultValue(nil), nil
+		}
+		raw, err := proto.Marshal(result)
+		if err != nil {
+			return "", err
+		}
+		return HostResultValue(raw), nil
+	})
+}
+
+// StubModelPricing installs a typed named-pricing double.
+func (h *Harness) StubModelPricing(fn func(*pbv1.ModelPricingGetArgs) (*pbv1.ModelPricing, *pbv1.HostError, error)) *Harness {
+	return h.StubHostCall("env.model_pricing", func(args string) (string, error) {
+		var request pbv1.ModelPricingGetArgs
+		if err := proto.Unmarshal([]byte(args), &request); err != nil {
+			return HostResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid ModelPricingGetArgs"), nil
+		}
+		result, refusal, err := fn(&request)
+		if err != nil {
+			return "", err
+		}
+		if refusal != nil {
+			return HostResultError(refusal.Code, refusal.Message), nil
+		}
+		if result == nil {
+			return HostResultValue(nil), nil
+		}
+		raw, err := proto.Marshal(result)
+		if err != nil {
+			return "", err
+		}
+		return HostResultValue(raw), nil
+	})
+}
+
 // DenyPermission makes cmd answer with the host's permission-denied envelope,
 // so a plugin's handling of a refused capability is testable. Typed v1 commands
 // get a HostCallResult error arm; transitional JSON commands keep the legacy
@@ -380,7 +432,8 @@ func typedHostReply(cmd string) bool {
 		"env.now", "env.plugin_config",
 		"env.original_request", "env.original_response",
 		"env.credential_get", "env.file_append", "env.file_read",
-		"env.file_write", "env.file_list", "env.file_delete", "env.http_request":
+		"env.file_write", "env.file_list", "env.file_delete", "env.http_request",
+		"env.model_complete", "env.model_pricing":
 		return true
 	default:
 		// Extension commands (torana_*, verify_virtual_key) also speak the v1

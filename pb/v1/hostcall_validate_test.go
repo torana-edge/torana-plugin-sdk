@@ -2,6 +2,7 @@ package v1_test
 
 import (
 	"bytes"
+	"math"
 	"strings"
 	"testing"
 
@@ -243,6 +244,8 @@ func TestHostCallArgRoundTrip(t *testing.T) {
 		&v1.RouteRequestArgs{Provider: "p", Model: "m"},
 		&v1.SetIdentityArgs{Identity: "id"},
 		&v1.MetaAppendArgs{BlockIndex: 2, Fragment: []byte("frag")},
+		&v1.ModelCompleteArgs{Service: "summarizer", Messages: []*v1.ModelMessage{{Role: "user", Content: "text"}}},
+		&v1.ModelPricingGetArgs{Resource: "request-model"},
 	}
 	for _, m := range msgs {
 		raw, err := proto.Marshal(m)
@@ -257,6 +260,73 @@ func TestHostCallArgRoundTrip(t *testing.T) {
 		if !proto.Equal(m, dst) {
 			t.Fatalf("round-trip mismatch for %T", m)
 		}
+	}
+}
+
+func TestModelResourceValidation(t *testing.T) {
+	one := uint32(1)
+	zero := uint32(0)
+	finite := 0.25
+	nan := math.NaN()
+	valid := &v1.ModelCompleteArgs{
+		Service:     "scanner",
+		Messages:    []*v1.ModelMessage{{Role: "system", Content: "classify"}, {Role: "user", Content: "text"}},
+		MaxTokens:   &one,
+		Temperature: &finite,
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid model request: %v", err)
+	}
+	for name, request := range map[string]*v1.ModelCompleteArgs{
+		"nil":             nil,
+		"invalid slot":    {Service: "../scanner", Messages: []*v1.ModelMessage{{Role: "user"}}},
+		"no messages":     {Service: "scanner"},
+		"nil message":     {Service: "scanner", Messages: []*v1.ModelMessage{nil}},
+		"empty role":      {Service: "scanner", Messages: []*v1.ModelMessage{{Content: "x"}}},
+		"zero tokens":     {Service: "scanner", Messages: []*v1.ModelMessage{{Role: "user"}}, MaxTokens: &zero},
+		"nan temperature": {Service: "scanner", Messages: []*v1.ModelMessage{{Role: "user"}}, Temperature: &nan},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := request.Validate(); err == nil {
+				t.Fatal("invalid request accepted")
+			}
+		})
+	}
+
+	negative := -0.1
+	inf := math.Inf(1)
+	for name, pricing := range map[string]*v1.ModelPricing{
+		"nil":      nil,
+		"negative": {InputUsdPerMtok: &negative},
+		"infinite": {CacheWriteUsdPerMtok: &inf},
+	} {
+		t.Run("pricing "+name, func(t *testing.T) {
+			if err := pricing.Validate(); err == nil {
+				t.Fatal("invalid pricing accepted")
+			}
+		})
+	}
+	free := 0.0
+	if err := (&v1.ModelPricing{InputUsdPerMtok: &free}).Validate(); err != nil {
+		t.Fatalf("explicit free rate rejected: %v", err)
+	}
+	if err := (&v1.ModelCompleteResult{Usage: &v1.Usage{InputTokens: -1}}).Validate(); err == nil {
+		t.Fatal("negative model usage accepted")
+	}
+	unknownArgs := proto.Clone(valid).(*v1.ModelCompleteArgs)
+	unknownArgs.ProtoReflect().SetUnknown([]byte{0xa0, 0x06, 0x01})
+	if err := unknownArgs.Validate(); err == nil {
+		t.Fatal("unknown model args field accepted")
+	}
+	unknownMessage := proto.Clone(valid).(*v1.ModelCompleteArgs)
+	unknownMessage.Messages[0].ProtoReflect().SetUnknown([]byte{0xa0, 0x06, 0x01})
+	if err := unknownMessage.Validate(); err == nil {
+		t.Fatal("unknown model message field accepted")
+	}
+	unknownUsage := &v1.ModelCompleteResult{Usage: &v1.Usage{}}
+	unknownUsage.Usage.ProtoReflect().SetUnknown([]byte{0xa0, 0x06, 0x01})
+	if err := unknownUsage.Validate(); err == nil {
+		t.Fatal("unknown usage field accepted")
 	}
 }
 
