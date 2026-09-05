@@ -15,8 +15,8 @@
 //	func TestBlocksOnDetectedPII(t *testing.T) {
 //		h := sdktest.New(t)
 //		h.SetConfig(`{"on_error":"block"}`)
-//		h.StubHostCall("torana_offload_completion", func(args string) (string, error) {
-//			return sdktest.HostResultValue([]byte(`{"completion":"EMAIL"}`)), nil
+//		h.StubModelComplete(func(args *pbv1.ModelCompleteArgs) (*pbv1.ModelCompleteResult, *pbv1.HostError, error) {
+//			return &pbv1.ModelCompleteResult{Content: "summary"}, nil, nil
 //		})
 //
 //		res := h.BeforeRequest(&pbv1.ChatRequest{Messages: []*pbv1.Message{
@@ -205,7 +205,7 @@ func (h *Harness) SetConfig(raw string) *Harness {
 }
 
 // StubHostCall overrides one command. Use it for the calls the harness cannot
-// emulate meaningfully — offload completions, egress, pricing — and for
+// emulate meaningfully — custom extensions and egress — and for
 // forcing error paths.
 func (h *Harness) StubHostCall(cmd string, fn func(args string) (string, error)) *Harness {
 	h.mu.Lock()

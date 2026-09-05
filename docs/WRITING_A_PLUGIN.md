@@ -470,7 +470,7 @@ instead of silently storing nothing.
 
 **Host feature calls (`env.host_call.*`)**
 
-`torana_offload_completion`, `torana_plugin_counter`, `torana_cache_pricing` and
+`torana_plugin_counter`, `torana_cache_pricing` and
 the rest are *host features*, not ABI operations. Their payloads are defined by
 the feature, so they take an opaque body:
 
@@ -508,7 +508,6 @@ the degrade paths for you.
 | `env.host_call.torana_cache_pricing` | `sdk.GetCachePricing` | Cache prices, lifetimes, and the break-even refresh count for a provider/model. |
 | `env.host_call.torana_evaluate_compaction` | `sdk.HostCallExtension` | Ask whether a proposed compaction pays for itself. |
 | `env.host_call.torana_record_savings` | `sdk.HostCallExtension` | Report bytes saved, attributed to your plugin. |
-| `env.host_call.torana_offload_completion` | `sdk.HostCallExtension` | Summarize via the configured cheap model. |
 
 **Observability**
 
@@ -728,8 +727,8 @@ import (
 func TestBlocksOnDetectedPII(t *testing.T) {
 	h := sdktest.New(t)
 	h.SetConfig(`{"on_error":"block"}`)
-	h.StubHostCall("torana_offload_completion", func(args string) (string, error) {
-		return sdktest.HostResultValue([]byte(`{"completion":"EMAIL"}`)), nil
+	h.StubModelComplete(func(args *pbv1.ModelCompleteArgs) (*pbv1.ModelCompleteResult, *pbv1.HostError, error) {
+		return &pbv1.ModelCompleteResult{Content: `{"pii":true,"findings":[{"type":"email","line":1}]}`}, nil, nil
 	})
 
 	res := h.BeforeRequest(&pbv1.ChatRequest{Messages: []*pbv1.Message{
@@ -763,7 +762,7 @@ runs, so there is nothing to wire up.
 | `CheckManifest` | cross-check `plugin.json` against the hooks you actually registered |
 
 Cache, state, meta, and the clock are emulated in memory. Everything else —
-offload completions, egress, pricing — answers exactly as an unconfigured host
+model services, egress, and pricing — answer exactly as an unconfigured host
 would, so stub the ones your plugin needs.
 
 ### Why the harness mirrors the host's rough edges

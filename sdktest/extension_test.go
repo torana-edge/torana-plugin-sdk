@@ -137,7 +137,7 @@ func TestCorePathRejectsExtensionCommands(t *testing.T) {
 	h := sdktest.New(t)
 	h.Run(func() {
 		for _, cmd := range []string{
-			"torana_plugin_counter", "torana_offload_completion", "verify_virtual_key",
+			"torana_plugin_counter", "verify_virtual_key",
 		} {
 			_, _, err := sdk.HostCall(cmd, &pbv1.MetaGetArgs{Key: "k"})
 			if err == nil {
