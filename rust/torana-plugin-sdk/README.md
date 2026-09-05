@@ -42,6 +42,10 @@ the action belonging to the dispatched hook. Use `host_call` for
 protobuf-framed host calls and branch on `HostCallError::Refused(error).code`,
 never the diagnostic text.
 
+The typed `model_complete` and `get_model_pricing` helpers address declared,
+operator-bound resource slots. They do not accept provider URLs, model names,
+or credentials from guest code.
+
 See the repository's
 [Rust authoring guide](https://github.com/torana-edge/torana-plugin-sdk/blob/main/docs/WRITING_A_PLUGIN.md#rust)
 for hooks, manifests, capabilities, and bundle installation.

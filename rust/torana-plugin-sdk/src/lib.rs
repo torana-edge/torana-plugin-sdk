@@ -512,6 +512,62 @@ pub fn http_request(
     Ok(response)
 }
 
+/// Invokes one operator-bound model-service slot. Provider, URL, model,
+/// credentials, and hard budgets are owned by the binding, not by the plugin.
+pub fn model_complete(
+    request: &pbv1::ModelCompleteArgs,
+) -> Result<pbv1::ModelCompleteResult, HostCallError> {
+    use prost::Message;
+    if request.service.is_empty()
+        || request.messages.is_empty()
+        || request
+            .messages
+            .iter()
+            .any(|message| message.role.is_empty())
+        || request.max_tokens == Some(0)
+        || request.temperature.is_some_and(|value| !value.is_finite())
+    {
+        return Err(HostCallError::Protocol(
+            "ModelCompleteArgs violates the SDK contract".to_owned(),
+        ));
+    }
+    let value = host_call("env.model_complete", request)?;
+    pbv1::ModelCompleteResult::decode(value.as_slice())
+        .map_err(|error| HostCallError::Protocol(format!("decode ModelCompleteResult: {error}")))
+}
+
+/// Resolves one operator-bound pricing resource. `None` means an unknown rate;
+/// `Some(0.0)` is an explicitly free rate.
+pub fn get_model_pricing(resource: &str) -> Result<pbv1::ModelPricing, HostCallError> {
+    use prost::Message;
+    if resource.is_empty() {
+        return Err(HostCallError::Protocol(
+            "model pricing resource is required".to_owned(),
+        ));
+    }
+    let value = host_call(
+        "env.model_pricing",
+        &pbv1::ModelPricingGetArgs {
+            resource: resource.to_owned(),
+        },
+    )?;
+    let pricing = pbv1::ModelPricing::decode(value.as_slice())
+        .map_err(|error| HostCallError::Protocol(format!("decode ModelPricing: {error}")))?;
+    for rate in [
+        pricing.input_usd_per_mtok,
+        pricing.output_usd_per_mtok,
+        pricing.cache_read_usd_per_mtok,
+        pricing.cache_write_usd_per_mtok,
+    ] {
+        if rate.is_some_and(|value| !value.is_finite() || value < 0.0) {
+            return Err(HostCallError::Protocol(
+                "ModelPricing rates must be finite and non-negative".to_owned(),
+            ));
+        }
+    }
+    Ok(pricing)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

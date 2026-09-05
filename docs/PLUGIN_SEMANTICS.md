@@ -149,8 +149,10 @@ means most of what a plugin normally relies on is simply absent.
 
 There is also **no caller credential**. Host calls that would normally fall back
 to the caller's own API key have nothing to fall back to, so anything a tick
-sends must be authenticated by provider-level configuration. A tick that assumes
-otherwise fails as a silent 401, not as an error you can see.
+sends must use an operator-bound resource with its own host-owned credential.
+In particular, `env.model_complete` addresses a declared model-service slot;
+the plugin cannot borrow a caller key or choose the provider, URL, model, or
+credential at runtime.
 
 The practical consequence: **anything a tick needs must already be in the
 plugin's own durable state**, written there during an earlier request hook, or

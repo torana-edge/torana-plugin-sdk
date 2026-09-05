@@ -34,9 +34,11 @@ After changing the ABI, regenerate the checked-in Go bindings with
 `./scripts/generate-go.sh`, then run the conformance suite.
 
 Plugins have no ambient filesystem or sockets. Capability-scoped helpers expose
-operator-bound credentials, plugin-private logical files, and exact-origin HTTP
-endpoints in both Go and Rust. A manifest must declare each resource and the
-operator must approve the exact bundle before the host call succeeds.
+operator-bound credentials, plugin-private logical files, exact-origin HTTP
+endpoints, model services, and pricing resources in both Go and Rust. A
+manifest must declare each resource and the operator must approve the exact
+bundle before the host call succeeds. Model-service bindings—not guest code—own
+provider URLs, models, credentials, and hard budgets.
 
 ## Documentation
 

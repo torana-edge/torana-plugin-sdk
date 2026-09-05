@@ -1039,3 +1039,49 @@ message OutboundHTTPResponse {
   repeated HTTPHeader headers = 2;
   bytes body = 3;
 }
+
+// ModelMessage is the provider-neutral prompt surface for a plugin-owned
+// model call. Provider routing, model selection, credentials, and URL are not
+// present: those belong to the operator binding for ModelCompleteArgs.service.
+message ModelMessage {
+  string role = 1;
+  string content = 2;
+}
+
+// ModelCompleteArgs invokes one operator-bound model-service slot. It is a
+// separate inference path, not a recursive trip through the user-facing
+// plugin pipeline. The host applies the binding's provider, model, credential,
+// timeout, and token budgets and may clamp the requested max_tokens.
+message ModelCompleteArgs {
+  string service = 1;
+  repeated ModelMessage messages = 2;
+  optional uint32 max_tokens = 3;
+  optional double temperature = 4;
+}
+
+// ModelCompleteResult is the provider-neutral completion returned in the
+// HostCallResult value arm. reported_model is empty when the provider does not
+// identify the answering model; the host never guesses aliases.
+message ModelCompleteResult {
+  string content = 1;
+  string reported_model = 2;
+  string finish_reason = 3;
+  Usage usage = 4;
+}
+
+// ModelPricingGetArgs resolves one operator-bound pricing resource. The slot
+// may refer to the caller's routed model or to a separately bound model
+// service, but the plugin cannot choose arbitrary provider/model coordinates.
+message ModelPricingGetArgs {
+  string resource = 1;
+}
+
+// ModelPricing contains USD rates per million tokens. Presence is meaningful:
+// absent means unknown, while an explicitly present zero means free. Consumers
+// must decline any decision that needs an absent rate rather than guessing.
+message ModelPricing {
+  optional double input_usd_per_mtok = 1;
+  optional double output_usd_per_mtok = 2;
+  optional double cache_read_usd_per_mtok = 3;
+  optional double cache_write_usd_per_mtok = 4;
+}
