@@ -27,6 +27,12 @@ func TestTypedModelResourceStubsOwnFraming(t *testing.T) {
 		free := 0.0
 		return &pbv1.ModelPricing{InputUsdPerMtok: &free}, nil, nil
 	})
+	h.StubPromptCachePolicy(func(args *pbv1.PromptCachePolicyGetArgs) (*pbv1.PromptCachePolicy, *pbv1.HostError, error) {
+		if args.Resource != "request-cache" {
+			t.Fatalf("args = %+v", args)
+		}
+		return &pbv1.PromptCachePolicy{Tiers: []*pbv1.PromptCacheTier{{TtlSeconds: 300, MarkerJson: []byte(`{}`)}}}, nil, nil
+	})
 	h.Run(func() {
 		result, refusal, err := sdk.ModelComplete(&pbv1.ModelCompleteArgs{Service: "judge", Messages: []*pbv1.ModelMessage{{Role: "user", Content: "question"}}})
 		if err != nil || refusal != nil || result.Content != "yes" {
@@ -36,89 +42,10 @@ func TestTypedModelResourceStubsOwnFraming(t *testing.T) {
 		if err != nil || refusal != nil || pricing.InputUsdPerMtok == nil || *pricing.InputUsdPerMtok != 0 {
 			t.Fatalf("pricing = %+v, %+v, %v", pricing, refusal, err)
 		}
-	})
-}
-
-// GetCachePricing and SendRequest changed transport AND error semantics when
-// they moved onto HostCallExtension: they used to pattern-match a
-// permission-denied JSON string, and now branch on a framed code. The direct
-// HostCallExtension tests do not cover them, so a regression in either would
-// have been invisible — these are the two helpers real plugins actually call.
-
-func TestGetCachePricingDecodesAFramedValue(t *testing.T) {
-	h := sdktest.New(t)
-	h.StubHostCall("torana_cache_pricing", func(string) (string, error) {
-		return sdktest.HostResultValue([]byte(`{"status":"ok","cache_read_multiplier":0.1}`)), nil
-	})
-	h.Run(func() {
-		got, err := sdk.GetCachePricing("anthropic", "claude-opus-5")
-		if err != nil {
-			t.Fatalf("err=%v", err)
+		policy, refusal, err := sdk.GetPromptCachePolicy("request-cache")
+		if err != nil || refusal != nil || len(policy.Tiers) != 1 || policy.Tiers[0].TtlSeconds != 300 {
+			t.Fatalf("cache policy = %+v, %+v, %v", policy, refusal, err)
 		}
-		if got.Status != "ok" {
-			t.Fatalf("status = %q, want ok", got.Status)
-		}
-	})
-}
-
-// Pricing is advisory, so a refusal must degrade rather than fail — but the
-// REASON has to survive, because a missing grant and an unconfigured backend
-// need different fixes and read identically otherwise.
-func TestGetCachePricingDegradesWithTheReason(t *testing.T) {
-	for _, tc := range []struct {
-		code       pbv1.ErrorCode
-		wantReason string
-	}{
-		{pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED, "not_configured"},
-		{pbv1.ErrorCode_ERROR_CODE_UNAVAILABLE, "unavailable"},
-	} {
-		t.Run(tc.wantReason, func(t *testing.T) {
-			h := sdktest.New(t)
-			h.StubHostCall("torana_cache_pricing", func(string) (string, error) {
-				return sdktest.HostResultError(tc.code, "refused"), nil
-			})
-			h.Run(func() {
-				got, err := sdk.GetCachePricing("anthropic", "m")
-				if err != nil {
-					t.Fatalf("a refusal became an error: %v", err)
-				}
-				if got.Status != "unavailable" {
-					t.Fatalf("status = %q, want unavailable", got.Status)
-				}
-				if got.Reason != tc.wantReason {
-					t.Fatalf("reason = %q, want %q", got.Reason, tc.wantReason)
-				}
-			})
-		})
-	}
-}
-
-func TestGetCachePricingHandlesEmptyAndMalformedValues(t *testing.T) {
-	t.Run("empty", func(t *testing.T) {
-		// torana_cache_pricing is a QUERY: the host must return either a
-		// pricing envelope or a refusal. An empty success value is a
-		// protocol/host defect, not "no pricing".
-		h := sdktest.New(t)
-		h.StubHostCall("torana_cache_pricing", func(string) (string, error) {
-			return sdktest.HostResultValue(nil), nil
-		})
-		h.Run(func() {
-			_, err := sdk.GetCachePricing("p", "m")
-			if err == nil {
-				t.Fatal("an empty pricing value was treated as advisory data")
-			}
-		})
-	})
-	t.Run("malformed", func(t *testing.T) {
-		h := sdktest.New(t)
-		h.StubHostCall("torana_cache_pricing", func(string) (string, error) {
-			return sdktest.HostResultValue([]byte("not json")), nil
-		})
-		h.Run(func() {
-			if _, err := sdk.GetCachePricing("p", "m"); err == nil {
-				t.Fatal("a malformed pricing body was accepted")
-			}
-		})
 	})
 }
 
@@ -178,33 +105,6 @@ func TestSendRequestDecodesAFramedValue(t *testing.T) {
 			t.Fatalf("body = %q, want hello", got.Body)
 		}
 	})
-}
-
-// The reason tokens are a stable contract for the DEGRADE path (advisory
-// pricing refusals): callers branch on them, so the message text cannot be the
-// thing they read. Every degrade-eligible code is pinned; the error-path codes
-// are pinned by TestGetCachePricingClassifiesRefusals.
-func TestHostErrorReasonCoversEveryDegradeCode(t *testing.T) {
-	for _, tc := range []struct {
-		code pbv1.ErrorCode
-		want string
-	}{
-		{pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED, "not_configured"},
-		{pbv1.ErrorCode_ERROR_CODE_UNAVAILABLE, "unavailable"},
-	} {
-		t.Run(tc.code.String(), func(t *testing.T) {
-			h2 := sdktest.New(t)
-			h2.StubHostCall("torana_cache_pricing", func(string) (string, error) {
-				return sdktest.HostResultError(tc.code, "x"), nil
-			})
-			h2.Run(func() {
-				got, _ := sdk.GetCachePricing("p", "m")
-				if got.Reason != tc.want {
-					t.Fatalf("reason = %q, want %q", got.Reason, tc.want)
-				}
-			})
-		})
-	}
 }
 
 // HostResultError exists to build a CLASSIFIED refusal. Producing a frame that
@@ -334,58 +234,6 @@ func pathCaseName(p string) string {
 		return "(empty)"
 	}
 	return n
-}
-
-// Pricing degrades for expected advisory refusals but surfaces caller and host
-// defects as errors — a plugin bug must not hide as an ordinary "unavailable".
-func TestGetCachePricingClassifiesRefusals(t *testing.T) {
-	// Only operator/transient states degrade: NOT_CONFIGURED (operator gap) and
-	// UNAVAILABLE (retry later). PERMISSION_DENIED is NOT advisory — approvals
-	// are all-or-nothing, so a permission refusal is an author or host defect.
-	degrade := []pbv1.ErrorCode{
-		pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
-		pbv1.ErrorCode_ERROR_CODE_UNAVAILABLE,
-	}
-	for _, code := range degrade {
-		t.Run("degrades/"+code.String(), func(t *testing.T) {
-			h := sdktest.New(t)
-			h.StubHostCall("torana_cache_pricing", func(string) (string, error) {
-				return sdktest.HostResultError(code, "x"), nil
-			})
-			h.Run(func() {
-				got, err := sdk.GetCachePricing("p", "m")
-				if err != nil {
-					t.Fatalf("an advisory refusal errored: %v", err)
-				}
-				if got.Status != "unavailable" || got.Reason == "" {
-					t.Fatalf("status=%q reason=%q, want unavailable with a reason", got.Status, got.Reason)
-				}
-			})
-		})
-	}
-	for _, code := range []pbv1.ErrorCode{
-		pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED,
-		pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
-		pbv1.ErrorCode_ERROR_CODE_NOT_FOUND,
-		pbv1.ErrorCode_ERROR_CODE_INTERNAL,
-	} {
-		t.Run("errors/"+code.String(), func(t *testing.T) {
-			h := sdktest.New(t)
-			h.StubHostCall("torana_cache_pricing", func(string) (string, error) {
-				return sdktest.HostResultError(code, "x"), nil
-			})
-			h.Run(func() {
-				_, err := sdk.GetCachePricing("p", "m")
-				if err == nil {
-					t.Fatalf("a %v refusal degraded instead of erroring", code)
-				}
-				var refusal *sdk.HostCallRefusalError
-				if !errors.As(err, &refusal) || refusal.Code != code {
-					t.Fatalf("err=%v, want a %v refusal", err, code)
-				}
-			})
-		})
-	}
 }
 
 func TestSendRequestMalformedValueIsADecodeError(t *testing.T) {

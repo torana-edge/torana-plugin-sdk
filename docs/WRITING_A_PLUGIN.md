@@ -181,6 +181,10 @@ Every plugin directory must contain a `plugin.json` file describing its metadata
   routed request model or to a model-service slot. Rates preserve unknown
   versus explicitly free values; plugins must decline rather than guess when
   a rate they need is absent.
+- **`prompt_cache_policies`**: Named prompt-cache policy slots. Each entry has
+  a stable `name`, value-free `description`, and `required`. The operator binds
+  the slot to cache economics and lifetime semantics for a route or model
+  service; the plugin never submits provider/model coordinates or credentials.
 
 Manifest permissions are an all-or-nothing set under v1: every declared
 permission must be approved against the exact bundle digest, or the plugin
@@ -470,7 +474,7 @@ instead of silently storing nothing.
 
 **Host feature calls (`env.host_call.*`)**
 
-`torana_plugin_counter`, `torana_cache_pricing` and
+`torana_plugin_counter` and
 the rest are *host features*, not ABI operations. Their payloads are defined by
 the feature, so they take an opaque body:
 
@@ -489,9 +493,10 @@ The result envelope is *not* opaque — a refusal is a framed `HostError`
 Go `error` means the call could not be made. A `status` field only appears where
 status is real data, such as a pricing decision.
 
-Where the SDK already has a typed helper — `sdk.SendRequest`,
-`sdk.GetCachePricing` — use it. They call this primitive internally and handle
-the degrade paths for you.
+Where the SDK already has a typed helper, use it instead of constructing a raw
+extension call. Platform resource helpers such as `sdk.ModelComplete`,
+`sdk.GetModelPricing`, and `sdk.GetPromptCachePolicy` use typed ABI commands;
+extension helpers such as `sdk.SendRequest` own their extension framing.
 
 **Acting outside a request**
 
@@ -505,7 +510,8 @@ the degrade paths for you.
 
 | Capability | SDK | Description |
 | --- | --- | --- |
-| `env.host_call.torana_cache_pricing` | `sdk.GetCachePricing` | Cache prices, lifetimes, and the break-even refresh count for a provider/model. |
+| `env.cache_policy` | `sdk.GetPromptCachePolicy` | Resolve one operator-bound prompt-cache policy without exposing or accepting provider/model coordinates. |
+| `env.model_pricing` | `sdk.GetModelPricing` | Resolve one operator-bound model-pricing resource. |
 | `env.host_call.torana_evaluate_compaction` | `sdk.HostCallExtension` | Ask whether a proposed compaction pays for itself. |
 | `env.host_call.torana_record_savings` | `sdk.HostCallExtension` | Report bytes saved, attributed to your plugin. |
 

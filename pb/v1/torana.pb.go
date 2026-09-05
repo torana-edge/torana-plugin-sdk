@@ -5139,6 +5139,198 @@ func (x *ModelPricing) GetCacheWriteUsdPerMtok() float64 {
 	return 0
 }
 
+// PromptCachePolicyGetArgs resolves one operator-bound prompt-cache policy.
+// The plugin names only its declared resource slot; provider, model, and
+// routing coordinates are owned by the binding and never cross this boundary.
+type PromptCachePolicyGetArgs struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Resource      string                 `protobuf:"bytes,1,opt,name=resource,proto3" json:"resource,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PromptCachePolicyGetArgs) Reset() {
+	*x = PromptCachePolicyGetArgs{}
+	mi := &file_proto_torana_v1_torana_proto_msgTypes[69]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PromptCachePolicyGetArgs) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PromptCachePolicyGetArgs) ProtoMessage() {}
+
+func (x *PromptCachePolicyGetArgs) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_torana_v1_torana_proto_msgTypes[69]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PromptCachePolicyGetArgs.ProtoReflect.Descriptor instead.
+func (*PromptCachePolicyGetArgs) Descriptor() ([]byte, []int) {
+	return file_proto_torana_v1_torana_proto_rawDescGZIP(), []int{69}
+}
+
+func (x *PromptCachePolicyGetArgs) GetResource() string {
+	if x != nil {
+		return x.Resource
+	}
+	return ""
+}
+
+// PromptCacheTier is one cache lifetime offered by the bound upstream. The
+// marker is an exact JSON object because it is provider-visible wire data; a
+// plugin may only copy it into an existing cache-breakpoint carrier.
+type PromptCacheTier struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	TtlSeconds      uint32                 `protobuf:"varint,1,opt,name=ttl_seconds,json=ttlSeconds,proto3" json:"ttl_seconds,omitempty"`
+	WriteMultiplier *float64               `protobuf:"fixed64,2,opt,name=write_multiplier,json=writeMultiplier,proto3,oneof" json:"write_multiplier,omitempty"`
+	MarkerJson      []byte                 `protobuf:"bytes,3,opt,name=marker_json,json=markerJson,proto3" json:"marker_json,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *PromptCacheTier) Reset() {
+	*x = PromptCacheTier{}
+	mi := &file_proto_torana_v1_torana_proto_msgTypes[70]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PromptCacheTier) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PromptCacheTier) ProtoMessage() {}
+
+func (x *PromptCacheTier) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_torana_v1_torana_proto_msgTypes[70]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PromptCacheTier.ProtoReflect.Descriptor instead.
+func (*PromptCacheTier) Descriptor() ([]byte, []int) {
+	return file_proto_torana_v1_torana_proto_rawDescGZIP(), []int{70}
+}
+
+func (x *PromptCacheTier) GetTtlSeconds() uint32 {
+	if x != nil {
+		return x.TtlSeconds
+	}
+	return 0
+}
+
+func (x *PromptCacheTier) GetWriteMultiplier() float64 {
+	if x != nil && x.WriteMultiplier != nil {
+		return *x.WriteMultiplier
+	}
+	return 0
+}
+
+func (x *PromptCacheTier) GetMarkerJson() []byte {
+	if x != nil {
+		return x.MarkerJson
+	}
+	return nil
+}
+
+// PromptCachePolicy contains the economics and lifetime semantics needed by
+// cache policy plugins. Presence is meaningful for prices: absent is unknown,
+// explicitly present zero is free. Consumers must decline decisions requiring
+// unknown values rather than inventing provider defaults.
+type PromptCachePolicy struct {
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	CacheReadUsdPerMtok  *float64               `protobuf:"fixed64,1,opt,name=cache_read_usd_per_mtok,json=cacheReadUsdPerMtok,proto3,oneof" json:"cache_read_usd_per_mtok,omitempty"`
+	CacheWriteUsdPerMtok *float64               `protobuf:"fixed64,2,opt,name=cache_write_usd_per_mtok,json=cacheWriteUsdPerMtok,proto3,oneof" json:"cache_write_usd_per_mtok,omitempty"`
+	RefreshOnRead        bool                   `protobuf:"varint,3,opt,name=refresh_on_read,json=refreshOnRead,proto3" json:"refresh_on_read,omitempty"`
+	Tiers                []*PromptCacheTier     `protobuf:"bytes,4,rep,name=tiers,proto3" json:"tiers,omitempty"`
+	// Operator-selected cadence. Absent means no safe refresh cadence is known;
+	// plugins that actively warm a cache must decline rather than guess.
+	WarmIntervalSeconds *uint32 `protobuf:"varint,5,opt,name=warm_interval_seconds,json=warmIntervalSeconds,proto3,oneof" json:"warm_interval_seconds,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *PromptCachePolicy) Reset() {
+	*x = PromptCachePolicy{}
+	mi := &file_proto_torana_v1_torana_proto_msgTypes[71]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PromptCachePolicy) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PromptCachePolicy) ProtoMessage() {}
+
+func (x *PromptCachePolicy) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_torana_v1_torana_proto_msgTypes[71]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PromptCachePolicy.ProtoReflect.Descriptor instead.
+func (*PromptCachePolicy) Descriptor() ([]byte, []int) {
+	return file_proto_torana_v1_torana_proto_rawDescGZIP(), []int{71}
+}
+
+func (x *PromptCachePolicy) GetCacheReadUsdPerMtok() float64 {
+	if x != nil && x.CacheReadUsdPerMtok != nil {
+		return *x.CacheReadUsdPerMtok
+	}
+	return 0
+}
+
+func (x *PromptCachePolicy) GetCacheWriteUsdPerMtok() float64 {
+	if x != nil && x.CacheWriteUsdPerMtok != nil {
+		return *x.CacheWriteUsdPerMtok
+	}
+	return 0
+}
+
+func (x *PromptCachePolicy) GetRefreshOnRead() bool {
+	if x != nil {
+		return x.RefreshOnRead
+	}
+	return false
+}
+
+func (x *PromptCachePolicy) GetTiers() []*PromptCacheTier {
+	if x != nil {
+		return x.Tiers
+	}
+	return nil
+}
+
+func (x *PromptCachePolicy) GetWarmIntervalSeconds() uint32 {
+	if x != nil && x.WarmIntervalSeconds != nil {
+		return *x.WarmIntervalSeconds
+	}
+	return 0
+}
+
 var File_proto_torana_v1_torana_proto protoreflect.FileDescriptor
 
 const file_proto_torana_v1_torana_proto_rawDesc = "" +
@@ -5453,7 +5645,25 @@ const file_proto_torana_v1_torana_proto_rawDesc = "" +
 	"\x13_input_usd_per_mtokB\x16\n" +
 	"\x14_output_usd_per_mtokB\x1a\n" +
 	"\x18_cache_read_usd_per_mtokB\x1b\n" +
-	"\x19_cache_write_usd_per_mtok*\x94\x01\n" +
+	"\x19_cache_write_usd_per_mtok\"6\n" +
+	"\x18PromptCachePolicyGetArgs\x12\x1a\n" +
+	"\bresource\x18\x01 \x01(\tR\bresource\"\x98\x01\n" +
+	"\x0fPromptCacheTier\x12\x1f\n" +
+	"\vttl_seconds\x18\x01 \x01(\rR\n" +
+	"ttlSeconds\x12.\n" +
+	"\x10write_multiplier\x18\x02 \x01(\x01H\x00R\x0fwriteMultiplier\x88\x01\x01\x12\x1f\n" +
+	"\vmarker_json\x18\x03 \x01(\fR\n" +
+	"markerJsonB\x13\n" +
+	"\x11_write_multiplier\"\xf1\x02\n" +
+	"\x11PromptCachePolicy\x129\n" +
+	"\x17cache_read_usd_per_mtok\x18\x01 \x01(\x01H\x00R\x13cacheReadUsdPerMtok\x88\x01\x01\x12;\n" +
+	"\x18cache_write_usd_per_mtok\x18\x02 \x01(\x01H\x01R\x14cacheWriteUsdPerMtok\x88\x01\x01\x12&\n" +
+	"\x0frefresh_on_read\x18\x03 \x01(\bR\rrefreshOnRead\x120\n" +
+	"\x05tiers\x18\x04 \x03(\v2\x1a.torana.v1.PromptCacheTierR\x05tiers\x127\n" +
+	"\x15warm_interval_seconds\x18\x05 \x01(\rH\x02R\x13warmIntervalSeconds\x88\x01\x01B\x1a\n" +
+	"\x18_cache_read_usd_per_mtokB\x1b\n" +
+	"\x19_cache_write_usd_per_mtokB\x18\n" +
+	"\x16_warm_interval_seconds*\x94\x01\n" +
 	"\x04Hook\x12\x14\n" +
 	"\x10HOOK_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13HOOK_BEFORE_REQUEST\x10\x01\x12\x17\n" +
@@ -5483,7 +5693,7 @@ func file_proto_torana_v1_torana_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_torana_v1_torana_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_proto_torana_v1_torana_proto_msgTypes = make([]protoimpl.MessageInfo, 69)
+var file_proto_torana_v1_torana_proto_msgTypes = make([]protoimpl.MessageInfo, 72)
 var file_proto_torana_v1_torana_proto_goTypes = []any{
 	(Hook)(0),                             // 0: torana.v1.Hook
 	(ErrorCode)(0),                        // 1: torana.v1.ErrorCode
@@ -5556,6 +5766,9 @@ var file_proto_torana_v1_torana_proto_goTypes = []any{
 	(*ModelCompleteResult)(nil),           // 68: torana.v1.ModelCompleteResult
 	(*ModelPricingGetArgs)(nil),           // 69: torana.v1.ModelPricingGetArgs
 	(*ModelPricing)(nil),                  // 70: torana.v1.ModelPricing
+	(*PromptCachePolicyGetArgs)(nil),      // 71: torana.v1.PromptCachePolicyGetArgs
+	(*PromptCacheTier)(nil),               // 72: torana.v1.PromptCacheTier
+	(*PromptCachePolicy)(nil),             // 73: torana.v1.PromptCachePolicy
 }
 var file_proto_torana_v1_torana_proto_depIdxs = []int32{
 	3,  // 0: torana.v1.Message.blocks:type_name -> torana.v1.RequestBlock
@@ -5606,11 +5819,12 @@ var file_proto_torana_v1_torana_proto_depIdxs = []int32{
 	63, // 45: torana.v1.OutboundHTTPResponse.headers:type_name -> torana.v1.HTTPHeader
 	66, // 46: torana.v1.ModelCompleteArgs.messages:type_name -> torana.v1.ModelMessage
 	18, // 47: torana.v1.ModelCompleteResult.usage:type_name -> torana.v1.Usage
-	48, // [48:48] is the sub-list for method output_type
-	48, // [48:48] is the sub-list for method input_type
-	48, // [48:48] is the sub-list for extension type_name
-	48, // [48:48] is the sub-list for extension extendee
-	0,  // [0:48] is the sub-list for field type_name
+	72, // 48: torana.v1.PromptCachePolicy.tiers:type_name -> torana.v1.PromptCacheTier
+	49, // [49:49] is the sub-list for method output_type
+	49, // [49:49] is the sub-list for method input_type
+	49, // [49:49] is the sub-list for extension type_name
+	49, // [49:49] is the sub-list for extension extendee
+	0,  // [0:49] is the sub-list for field type_name
 }
 
 func init() { file_proto_torana_v1_torana_proto_init() }
@@ -5675,13 +5889,15 @@ func file_proto_torana_v1_torana_proto_init() {
 	}
 	file_proto_torana_v1_torana_proto_msgTypes[65].OneofWrappers = []any{}
 	file_proto_torana_v1_torana_proto_msgTypes[68].OneofWrappers = []any{}
+	file_proto_torana_v1_torana_proto_msgTypes[70].OneofWrappers = []any{}
+	file_proto_torana_v1_torana_proto_msgTypes[71].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_torana_v1_torana_proto_rawDesc), len(file_proto_torana_v1_torana_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   69,
+			NumMessages:   72,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -518,7 +518,7 @@ pub fn model_complete(
     request: &pbv1::ModelCompleteArgs,
 ) -> Result<pbv1::ModelCompleteResult, HostCallError> {
     use prost::Message;
-    if request.service.is_empty()
+    if !valid_resource_name(&request.service)
         || request.messages.is_empty()
         || request
             .messages
@@ -540,7 +540,7 @@ pub fn model_complete(
 /// `Some(0.0)` is an explicitly free rate.
 pub fn get_model_pricing(resource: &str) -> Result<pbv1::ModelPricing, HostCallError> {
     use prost::Message;
-    if resource.is_empty() {
+    if !valid_resource_name(resource) {
         return Err(HostCallError::Protocol(
             "model pricing resource is required".to_owned(),
         ));
@@ -566,6 +566,105 @@ pub fn get_model_pricing(resource: &str) -> Result<pbv1::ModelPricing, HostCallE
         }
     }
     Ok(pricing)
+}
+
+/// Resolves one operator-bound prompt-cache-policy resource. The plugin names
+/// only its declared slot; provider, model, routing, prices, and lifetime
+/// semantics are owned by the binding.
+pub fn get_prompt_cache_policy(resource: &str) -> Result<pbv1::PromptCachePolicy, HostCallError> {
+    use prost::Message;
+    if !valid_resource_name(resource) {
+        return Err(HostCallError::Protocol(
+            "prompt cache policy resource is required".to_owned(),
+        ));
+    }
+    let value = host_call(
+        "env.cache_policy",
+        &pbv1::PromptCachePolicyGetArgs {
+            resource: resource.to_owned(),
+        },
+    )?;
+    let policy = pbv1::PromptCachePolicy::decode(value.as_slice())
+        .map_err(|error| HostCallError::Protocol(format!("decode PromptCachePolicy: {error}")))?;
+    validate_prompt_cache_policy(&policy)?;
+    Ok(policy)
+}
+
+fn valid_resource_name(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 64
+        && bytes.iter().enumerate().all(|(index, byte)| {
+            byte.is_ascii_alphanumeric() || (index > 0 && matches!(byte, b'.' | b'_' | b'-'))
+        })
+}
+
+fn validate_prompt_cache_policy(policy: &pbv1::PromptCachePolicy) -> Result<(), HostCallError> {
+    for rate in [
+        policy.cache_read_usd_per_mtok,
+        policy.cache_write_usd_per_mtok,
+    ] {
+        if rate.is_some_and(|value| !value.is_finite() || value < 0.0) {
+            return Err(HostCallError::Protocol(
+                "PromptCachePolicy rates must be finite and non-negative".to_owned(),
+            ));
+        }
+    }
+    if policy.cache_read_usd_per_mtok.is_none()
+        && policy.cache_write_usd_per_mtok.is_none()
+        && policy.tiers.is_empty()
+    {
+        return Err(HostCallError::Protocol(
+            "PromptCachePolicy carries no prices or tiers".to_owned(),
+        ));
+    }
+    if policy.warm_interval_seconds == Some(0) {
+        return Err(HostCallError::Protocol(
+            "PromptCachePolicy warm_interval_seconds must be positive when present".to_owned(),
+        ));
+    }
+    if policy.warm_interval_seconds.is_some() && !policy.refresh_on_read {
+        return Err(HostCallError::Protocol(
+            "PromptCachePolicy warm_interval_seconds requires refresh_on_read".to_owned(),
+        ));
+    }
+    let mut ttls = std::collections::BTreeSet::new();
+    for tier in &policy.tiers {
+        if tier.ttl_seconds == 0
+            || tier
+                .write_multiplier
+                .is_some_and(|value| !value.is_finite() || value < 0.0)
+            || !ttls.insert(tier.ttl_seconds)
+        {
+            return Err(HostCallError::Protocol(
+                "PromptCachePolicy contains an invalid tier".to_owned(),
+            ));
+        }
+        let marker: serde_json::Value =
+            serde_json::from_slice(&tier.marker_json).map_err(|_| {
+                HostCallError::Protocol("PromptCachePolicy marker_json is invalid JSON".to_owned())
+            })?;
+        if !marker.is_object() {
+            return Err(HostCallError::Protocol(
+                "PromptCachePolicy marker_json must be an object".to_owned(),
+            ));
+        }
+    }
+    if let Some(interval) = policy.warm_interval_seconds {
+        let shortest = policy
+            .tiers
+            .iter()
+            .map(|tier| tier.ttl_seconds)
+            .min()
+            .unwrap_or(0);
+        if shortest == 0 || interval >= shortest {
+            return Err(HostCallError::Protocol(
+                "PromptCachePolicy warm_interval_seconds must be below the shortest tier"
+                    .to_owned(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -804,5 +903,42 @@ mod tests {
             decode_host_call_result(&[0x1a, 0x00]),
             Err(HostCallError::Protocol(_))
         ));
+    }
+
+    #[test]
+    fn resource_names_match_the_typed_host_contract() {
+        for valid in ["cache", "request-cache", "a.b_c", "A1"] {
+            assert!(valid_resource_name(valid), "{valid}");
+        }
+        for invalid in ["", "-cache", "../cache", "cache/name", "caché"] {
+            assert!(!valid_resource_name(invalid), "{invalid}");
+        }
+        assert!(!valid_resource_name(&"a".repeat(65)));
+    }
+
+    #[test]
+    fn prompt_cache_policy_validation_rejects_unusable_results() {
+        let valid = pbv1::PromptCachePolicy {
+            cache_read_usd_per_mtok: Some(0.1),
+            cache_write_usd_per_mtok: Some(1.25),
+            refresh_on_read: true,
+            tiers: vec![pbv1::PromptCacheTier {
+                ttl_seconds: 300,
+                write_multiplier: Some(1.25),
+                marker_json: br#"{"type":"ephemeral"}"#.to_vec(),
+            }],
+            warm_interval_seconds: Some(240),
+        };
+        validate_prompt_cache_policy(&valid).unwrap();
+
+        let mut invalid = valid.clone();
+        invalid.tiers[0].marker_json = b"[]".to_vec();
+        assert!(validate_prompt_cache_policy(&invalid).is_err());
+        let mut invalid = valid.clone();
+        invalid.tiers[0].ttl_seconds = 0;
+        assert!(validate_prompt_cache_policy(&invalid).is_err());
+        let mut invalid = valid;
+        invalid.warm_interval_seconds = Some(300);
+        assert!(validate_prompt_cache_policy(&invalid).is_err());
     }
 }

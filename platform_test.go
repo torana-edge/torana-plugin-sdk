@@ -65,6 +65,23 @@ func TestPlatformHelpersUseTypedCommands(t *testing.T) {
 				t.Fatal(err)
 			}
 			return framedValue(t, value), nil
+		case "env.cache_policy":
+			var args pbv1.PromptCachePolicyGetArgs
+			if err := proto.Unmarshal(raw, &args); err != nil || args.Resource != "request-cache" {
+				t.Fatalf("prompt cache policy resource = %q, %v", args.Resource, err)
+			}
+			read, write, multiplier := 0.1, 1.25, 1.25
+			value, err := proto.Marshal(&pbv1.PromptCachePolicy{
+				CacheReadUsdPerMtok: &read, CacheWriteUsdPerMtok: &write, RefreshOnRead: true,
+				Tiers: []*pbv1.PromptCacheTier{
+					{TtlSeconds: 300, WriteMultiplier: &multiplier, MarkerJson: []byte(`{"ttl":"5m"}`)},
+					{TtlSeconds: 3600, MarkerJson: []byte(`{"ttl":"1h"}`)},
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return framedValue(t, value), nil
 		default:
 			t.Fatalf("unexpected command %q", command)
 			return nil, nil
@@ -101,8 +118,21 @@ func TestPlatformHelpersUseTypedCommands(t *testing.T) {
 		if err != nil || herr != nil || pricing.InputUsdPerMtok == nil || *pricing.InputUsdPerMtok != 0 {
 			t.Fatalf("GetModelPricing = %#v, %v, %v", pricing, herr, err)
 		}
+		policy, herr, err := GetPromptCachePolicy("request-cache")
+		if err != nil || herr != nil || !policy.RefreshOnRead || len(policy.Tiers) != 2 {
+			t.Fatalf("GetPromptCachePolicy = %#v, %v, %v", policy, herr, err)
+		}
+		if tier, ok := LongestPromptCacheTier(policy); !ok || tier.TtlSeconds != 3600 {
+			t.Fatalf("LongestPromptCacheTier = %#v, %v", tier, ok)
+		}
+		if ttl, ok := ShortestPromptCacheTTL(policy); !ok || ttl != 300 {
+			t.Fatalf("ShortestPromptCacheTTL = %d, %v", ttl, ok)
+		}
+		if refreshes, ok := PromptCacheBreakEvenRefreshes(policy); !ok || refreshes != 11 {
+			t.Fatalf("PromptCacheBreakEvenRefreshes = %d, %v", refreshes, ok)
+		}
 	})
-	want := []string{"env.credential_get", "env.file_append", "env.file_read", "env.file_write", "env.file_list", "env.file_delete", "env.http_request", "env.model_complete", "env.model_pricing"}
+	want := []string{"env.credential_get", "env.file_append", "env.file_read", "env.file_write", "env.file_list", "env.file_delete", "env.http_request", "env.model_complete", "env.model_pricing", "env.cache_policy"}
 	if !reflect.DeepEqual(commands, want) {
 		t.Fatalf("commands = %v, want %v", commands, want)
 	}
@@ -129,6 +159,9 @@ func TestPlatformHelpersRejectInvalidArgumentsBeforeHost(t *testing.T) {
 		if _, _, err := GetModelPricing("../price"); err == nil {
 			t.Fatal("invalid pricing resource accepted")
 		}
+		if _, _, err := GetPromptCachePolicy("../cache"); err == nil {
+			t.Fatal("invalid prompt-cache policy resource accepted")
+		}
 	})
 	if calls != 0 {
 		t.Fatalf("invalid arguments made %d host calls", calls)
@@ -138,7 +171,7 @@ func TestPlatformHelpersRejectInvalidArgumentsBeforeHost(t *testing.T) {
 func TestPlatformPermissionsAreRequestable(t *testing.T) {
 	for _, permission := range []string{
 		"env.credential_get", "env.file_append", "env.file_read", "env.file_write",
-		"env.file_list", "env.file_delete", "env.http_request", "env.model_complete", "env.model_pricing",
+		"env.file_list", "env.file_delete", "env.http_request", "env.model_complete", "env.model_pricing", "env.cache_policy",
 	} {
 		if !IsPermission(permission) {
 			t.Errorf("%q is not requestable", permission)
@@ -167,6 +200,16 @@ func TestModelResourceHelpersRejectMalformedHostValues(t *testing.T) {
 			value: &pbv1.ModelPricing{OutputUsdPerMtok: &negative},
 			invoke: func() error {
 				_, _, err := GetModelPricing("request-model")
+				return err
+			},
+		},
+		{
+			name: "invalid prompt cache tier marker", command: "env.cache_policy",
+			value: &pbv1.PromptCachePolicy{Tiers: []*pbv1.PromptCacheTier{{
+				TtlSeconds: 300, MarkerJson: []byte(`[]`),
+			}}},
+			invoke: func() error {
+				_, _, err := GetPromptCachePolicy("request-cache")
 				return err
 			},
 		},

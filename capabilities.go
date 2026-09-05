@@ -49,7 +49,7 @@ var Permissions = append([]string{
 	"env.file_list",
 	"env.file_read",
 	"env.file_write",
-	"env.host_call.torana_cache_pricing",
+	"env.cache_policy",
 	"env.host_call.torana_db_query",
 	"env.host_call.torana_evaluate_compaction",
 	"env.host_call.torana_kms_decrypt",
