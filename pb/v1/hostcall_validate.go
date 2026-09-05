@@ -1,11 +1,16 @@
 package v1
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/url"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/torana-edge/torana-plugin-sdk/pb/v1/jsontext"
 )
 
 // Validation for host-call envelopes and their normative argument schemas.
@@ -451,6 +456,121 @@ func (x *ModelPricing) Validate() error {
 		if rate.value != nil && (math.IsNaN(*rate.value) || math.IsInf(*rate.value, 0) || *rate.value < 0) {
 			return fmt.Errorf("model pricing %s must be finite and non-negative", rate.name)
 		}
+	}
+	return nil
+}
+
+func (x *PromptCachePolicyGetArgs) Validate() error {
+	if x == nil {
+		return fmt.Errorf("prompt cache policy args are nil")
+	}
+	if len(x.ProtoReflect().GetUnknown()) != 0 {
+		return fmt.Errorf("prompt cache policy args contain unknown fields")
+	}
+	return validateSlot("prompt cache policy resource", x.Resource)
+}
+
+func (x *PromptCacheTier) Validate() error {
+	if x == nil {
+		return fmt.Errorf("prompt cache tier is nil")
+	}
+	if len(x.ProtoReflect().GetUnknown()) != 0 {
+		return fmt.Errorf("prompt cache tier contains unknown fields")
+	}
+	if x.TtlSeconds == 0 {
+		return fmt.Errorf("prompt cache tier ttl_seconds must be positive")
+	}
+	if x.WriteMultiplier != nil && (math.IsNaN(*x.WriteMultiplier) || math.IsInf(*x.WriteMultiplier, 0) || *x.WriteMultiplier < 0) {
+		return fmt.Errorf("prompt cache tier write_multiplier must be finite and non-negative")
+	}
+	if err := validateJSONObject(x.MarkerJson); err != nil {
+		return fmt.Errorf("prompt cache tier marker_json: %w", err)
+	}
+	return nil
+}
+
+func (x *PromptCachePolicy) Validate() error {
+	if x == nil {
+		return fmt.Errorf("prompt cache policy is nil")
+	}
+	if len(x.ProtoReflect().GetUnknown()) != 0 {
+		return fmt.Errorf("prompt cache policy contains unknown fields")
+	}
+	rates := []struct {
+		name string
+		rate *float64
+	}{
+		{"cache_read_usd_per_mtok", x.CacheReadUsdPerMtok},
+		{"cache_write_usd_per_mtok", x.CacheWriteUsdPerMtok},
+	}
+	for _, item := range rates {
+		name, rate := item.name, item.rate
+		if rate != nil && (math.IsNaN(*rate) || math.IsInf(*rate, 0) || *rate < 0) {
+			return fmt.Errorf("prompt cache policy %s must be finite and non-negative", name)
+		}
+	}
+	if x.CacheReadUsdPerMtok == nil && x.CacheWriteUsdPerMtok == nil && len(x.Tiers) == 0 {
+		return fmt.Errorf("prompt cache policy carries no prices or tiers")
+	}
+	if x.WarmIntervalSeconds != nil && *x.WarmIntervalSeconds == 0 {
+		return fmt.Errorf("prompt cache policy warm_interval_seconds must be positive when present")
+	}
+	if x.WarmIntervalSeconds != nil && !x.RefreshOnRead {
+		return fmt.Errorf("prompt cache policy warm_interval_seconds requires refresh_on_read")
+	}
+	seenTTL := make(map[uint32]struct{}, len(x.Tiers))
+	for i, tier := range x.Tiers {
+		if err := tier.Validate(); err != nil {
+			return fmt.Errorf("prompt cache policy tier %d: %w", i, err)
+		}
+		if _, exists := seenTTL[tier.TtlSeconds]; exists {
+			return fmt.Errorf("prompt cache policy tier %d duplicates ttl_seconds %d", i, tier.TtlSeconds)
+		}
+		seenTTL[tier.TtlSeconds] = struct{}{}
+	}
+	if x.WarmIntervalSeconds != nil {
+		shortest, _ := shortestPromptCachePolicyTTL(x)
+		if shortest == 0 || *x.WarmIntervalSeconds >= shortest {
+			return fmt.Errorf("prompt cache policy warm_interval_seconds must be below the shortest tier")
+		}
+	}
+	return nil
+}
+
+func shortestPromptCachePolicyTTL(x *PromptCachePolicy) (uint32, bool) {
+	if x == nil || len(x.Tiers) == 0 || x.Tiers[0] == nil {
+		return 0, false
+	}
+	shortest := x.Tiers[0].TtlSeconds
+	for _, tier := range x.Tiers[1:] {
+		if tier == nil {
+			return 0, false
+		}
+		if tier.TtlSeconds < shortest {
+			shortest = tier.TtlSeconds
+		}
+	}
+	return shortest, true
+}
+
+func validateJSONObject(raw []byte) error {
+	if err := jsontext.Validate(raw); err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var object map[string]json.RawMessage
+	if err := decoder.Decode(&object); err != nil {
+		return err
+	}
+	if object == nil {
+		return fmt.Errorf("must be a JSON object")
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("must contain exactly one JSON value")
+		}
+		return err
 	}
 	return nil
 }

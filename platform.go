@@ -101,3 +101,70 @@ func GetModelPricing(resource string) (*pbv1.ModelPricing, *pbv1.HostError, erro
 	}
 	return &pricing, nil, nil
 }
+
+// GetPromptCachePolicy resolves one operator-bound prompt-cache policy. The
+// plugin supplies only its declared resource name; provider, model, routing,
+// prices, and lifetime semantics belong to the operator binding.
+func GetPromptCachePolicy(resource string) (*pbv1.PromptCachePolicy, *pbv1.HostError, error) {
+	request := &pbv1.PromptCachePolicyGetArgs{Resource: resource}
+	if err := request.Validate(); err != nil {
+		return nil, nil, err
+	}
+	value, herr, err := HostCall("env.cache_policy", request)
+	if err != nil || herr != nil {
+		return nil, herr, err
+	}
+	var policy pbv1.PromptCachePolicy
+	if err := proto.Unmarshal(value, &policy); err != nil {
+		return nil, nil, fmt.Errorf("torana: decode prompt cache policy: %w", err)
+	}
+	if err := policy.Validate(); err != nil {
+		return nil, nil, fmt.Errorf("torana: prompt cache policy: %w", err)
+	}
+	return &policy, nil, nil
+}
+
+// LongestPromptCacheTier returns the longest configured tier. Fewer than two
+// tiers means there is no tier-selection decision to make.
+func LongestPromptCacheTier(policy *pbv1.PromptCachePolicy) (*pbv1.PromptCacheTier, bool) {
+	if policy == nil || policy.Validate() != nil || len(policy.Tiers) < 2 {
+		return nil, false
+	}
+	best := policy.Tiers[0]
+	for _, tier := range policy.Tiers[1:] {
+		if tier.TtlSeconds > best.TtlSeconds {
+			best = tier
+		}
+	}
+	return proto.Clone(best).(*pbv1.PromptCacheTier), true
+}
+
+// ShortestPromptCacheTTL returns the shortest configured lifetime in seconds.
+func ShortestPromptCacheTTL(policy *pbv1.PromptCachePolicy) (uint32, bool) {
+	if policy == nil || policy.Validate() != nil || len(policy.Tiers) == 0 {
+		return 0, false
+	}
+	shortest := policy.Tiers[0].TtlSeconds
+	for _, tier := range policy.Tiers[1:] {
+		if tier.TtlSeconds < shortest {
+			shortest = tier.TtlSeconds
+		}
+	}
+	return shortest, true
+}
+
+// PromptCacheBreakEvenRefreshes returns floor(write/read - 1). Unknown, free,
+// or otherwise unusable prices return false so callers decline instead of
+// guessing about operator spend.
+func PromptCacheBreakEvenRefreshes(policy *pbv1.PromptCachePolicy) (int, bool) {
+	if policy == nil || policy.Validate() != nil || policy.CacheReadUsdPerMtok == nil || policy.CacheWriteUsdPerMtok == nil ||
+		*policy.CacheReadUsdPerMtok <= 0 || *policy.CacheWriteUsdPerMtok < *policy.CacheReadUsdPerMtok {
+		return 0, false
+	}
+	ratio := *policy.CacheWriteUsdPerMtok / *policy.CacheReadUsdPerMtok
+	maxInt := int(^uint(0) >> 1)
+	if ratio > float64(maxInt) {
+		return 0, false
+	}
+	return int(ratio) - 1, true
+}

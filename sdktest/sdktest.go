@@ -266,6 +266,31 @@ func (h *Harness) StubModelPricing(fn func(*pbv1.ModelPricingGetArgs) (*pbv1.Mod
 	})
 }
 
+// StubPromptCachePolicy installs a typed named prompt-cache-policy double.
+func (h *Harness) StubPromptCachePolicy(fn func(*pbv1.PromptCachePolicyGetArgs) (*pbv1.PromptCachePolicy, *pbv1.HostError, error)) *Harness {
+	return h.StubHostCall("env.cache_policy", func(args string) (string, error) {
+		var request pbv1.PromptCachePolicyGetArgs
+		if err := proto.Unmarshal([]byte(args), &request); err != nil {
+			return HostResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid PromptCachePolicyGetArgs"), nil
+		}
+		result, refusal, err := fn(&request)
+		if err != nil {
+			return "", err
+		}
+		if refusal != nil {
+			return HostResultError(refusal.Code, refusal.Message), nil
+		}
+		if result == nil {
+			return HostResultValue(nil), nil
+		}
+		raw, err := proto.Marshal(result)
+		if err != nil {
+			return "", err
+		}
+		return HostResultValue(raw), nil
+	})
+}
+
 // DenyPermission makes cmd answer with the host's permission-denied envelope,
 // so a plugin's handling of a refused capability is testable. Typed v1 commands
 // get a HostCallResult error arm; transitional JSON commands keep the legacy
@@ -433,7 +458,7 @@ func typedHostReply(cmd string) bool {
 		"env.original_request", "env.original_response",
 		"env.credential_get", "env.file_append", "env.file_read",
 		"env.file_write", "env.file_list", "env.file_delete", "env.http_request",
-		"env.model_complete", "env.model_pricing":
+		"env.model_complete", "env.model_pricing", "env.cache_policy":
 		return true
 	default:
 		// Extension commands (torana_*, verify_virtual_key) also speak the v1
@@ -843,8 +868,6 @@ func (h *Harness) builtin(cmd, args string) string {
 
 	// Unconfigured-host answers, matching runtime.go exactly. Stub these when
 	// a test needs them to succeed.
-	case "torana_cache_pricing":
-		return `{"status":"unavailable","reason":"pricing_unconfigured"}`
 	case "torana_evaluate_compaction":
 		return `{"apply":false,"reason":"no economics configured"}`
 	case "torana_record_savings", "torana_plugin_counter":

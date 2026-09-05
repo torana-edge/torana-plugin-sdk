@@ -246,6 +246,8 @@ func TestHostCallArgRoundTrip(t *testing.T) {
 		&v1.MetaAppendArgs{BlockIndex: 2, Fragment: []byte("frag")},
 		&v1.ModelCompleteArgs{Service: "summarizer", Messages: []*v1.ModelMessage{{Role: "user", Content: "text"}}},
 		&v1.ModelPricingGetArgs{Resource: "request-model"},
+		&v1.PromptCachePolicyGetArgs{Resource: "request-cache"},
+		&v1.PromptCachePolicy{Tiers: []*v1.PromptCacheTier{{TtlSeconds: 300, MarkerJson: []byte(`{"type":"ephemeral"}`)}}},
 	}
 	for _, m := range msgs {
 		raw, err := proto.Marshal(m)
@@ -262,6 +264,61 @@ func TestHostCallArgRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestPromptCachePolicyValidation(t *testing.T) {
+	read, write, multiplier := 0.1, 1.25, 1.25
+	warm, zeroWarm, tooLate := uint32(240), uint32(0), uint32(300)
+	valid := &v1.PromptCachePolicy{
+		CacheReadUsdPerMtok: &read, CacheWriteUsdPerMtok: &write, RefreshOnRead: true,
+		WarmIntervalSeconds: &warm,
+		Tiers:               []*v1.PromptCacheTier{{TtlSeconds: 300, WriteMultiplier: &multiplier, MarkerJson: []byte(`{"type":"ephemeral","ttl":"5m"}`)}},
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid prompt cache policy: %v", err)
+	}
+	if err := (&v1.PromptCachePolicyGetArgs{Resource: "request-cache"}).Validate(); err != nil {
+		t.Fatalf("valid resource: %v", err)
+	}
+	if err := (&v1.PromptCachePolicyGetArgs{Resource: "../cache"}).Validate(); err == nil {
+		t.Fatal("invalid resource accepted")
+	}
+
+	nan := math.NaN()
+	rows := map[string]*v1.PromptCachePolicy{
+		"nil":                  nil,
+		"empty":                {},
+		"negative rate":        {CacheReadUsdPerMtok: ptrFloat(-1)},
+		"nil tier":             {Tiers: []*v1.PromptCacheTier{nil}},
+		"zero ttl":             {Tiers: []*v1.PromptCacheTier{{MarkerJson: []byte(`{}`)}}},
+		"nan multiplier":       {Tiers: []*v1.PromptCacheTier{{TtlSeconds: 1, WriteMultiplier: &nan, MarkerJson: []byte(`{}`)}}},
+		"non-object marker":    {Tiers: []*v1.PromptCacheTier{{TtlSeconds: 1, MarkerJson: []byte(`[]`)}}},
+		"duplicate marker key": {Tiers: []*v1.PromptCacheTier{{TtlSeconds: 1, MarkerJson: []byte(`{"x":1,"\u0078":2}`)}}},
+		"duplicate ttl": {Tiers: []*v1.PromptCacheTier{
+			{TtlSeconds: 1, MarkerJson: []byte(`{}`)}, {TtlSeconds: 1, MarkerJson: []byte(`{}`)},
+		}},
+		"zero warm interval":   {CacheReadUsdPerMtok: &read, RefreshOnRead: true, WarmIntervalSeconds: &zeroWarm},
+		"warm without refresh": {CacheReadUsdPerMtok: &read, WarmIntervalSeconds: &warm},
+		"warm without tier":    {CacheReadUsdPerMtok: &read, RefreshOnRead: true, WarmIntervalSeconds: &warm},
+		"warm at shortest ttl": {RefreshOnRead: true, WarmIntervalSeconds: &tooLate, Tiers: []*v1.PromptCacheTier{
+			{TtlSeconds: 300, MarkerJson: []byte(`{}`)},
+		}},
+	}
+	for name, policy := range rows {
+		t.Run(name, func(t *testing.T) {
+			if err := policy.Validate(); err == nil {
+				t.Fatal("invalid prompt cache policy accepted")
+			}
+		})
+	}
+
+	unknown := proto.Clone(valid).(*v1.PromptCachePolicy)
+	unknown.ProtoReflect().SetUnknown([]byte{0xa0, 0x06, 0x01})
+	if err := unknown.Validate(); err == nil {
+		t.Fatal("unknown prompt cache policy field accepted")
+	}
+}
+
+func ptrFloat(value float64) *float64 { return &value }
 
 func TestModelResourceValidation(t *testing.T) {
 	one := uint32(1)

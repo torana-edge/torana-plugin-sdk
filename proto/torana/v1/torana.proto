@@ -1085,3 +1085,33 @@ message ModelPricing {
   optional double cache_read_usd_per_mtok = 3;
   optional double cache_write_usd_per_mtok = 4;
 }
+
+// PromptCachePolicyGetArgs resolves one operator-bound prompt-cache policy.
+// The plugin names only its declared resource slot; provider, model, and
+// routing coordinates are owned by the binding and never cross this boundary.
+message PromptCachePolicyGetArgs {
+  string resource = 1;
+}
+
+// PromptCacheTier is one cache lifetime offered by the bound upstream. The
+// marker is an exact JSON object because it is provider-visible wire data; a
+// plugin may only copy it into an existing cache-breakpoint carrier.
+message PromptCacheTier {
+  uint32 ttl_seconds = 1;
+  optional double write_multiplier = 2;
+  bytes marker_json = 3;
+}
+
+// PromptCachePolicy contains the economics and lifetime semantics needed by
+// cache policy plugins. Presence is meaningful for prices: absent is unknown,
+// explicitly present zero is free. Consumers must decline decisions requiring
+// unknown values rather than inventing provider defaults.
+message PromptCachePolicy {
+  optional double cache_read_usd_per_mtok = 1;
+  optional double cache_write_usd_per_mtok = 2;
+  bool refresh_on_read = 3;
+  repeated PromptCacheTier tiers = 4;
+  // Operator-selected cadence. Absent means no safe refresh cadence is known;
+  // plugins that actively warm a cache must decline rather than guess.
+  optional uint32 warm_interval_seconds = 5;
+}
