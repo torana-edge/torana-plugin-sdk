@@ -268,7 +268,8 @@ message ToolDef {
   // without pretending they are JSON Schema parameters.
   optional bytes input_format_json = 7;
   // Provider-neutral namespace path, outermost first. Empty for an ordinary
-  // top-level tool. Each present segment is non-empty valid UTF-8.
+  // top-level tool. Each present segment is non-empty valid UTF-8. Provider
+  // topology: observable by plugins but host-owned under replacement.
   repeated string namespace_path = 8;
 }
 
@@ -363,13 +364,15 @@ message ChatResponse {
 // Streaming
 // ---------------------------------------------------------------------------
 
-// Identifies the tool call a "tool_call" content block is assembling. Its
-// arguments arrive as ToolCallDelta events between the block's start and stop.
+// Identifies the tool call a "tool_call" content block is assembling. FUNCTION
+// arguments or FREEFORM input arrive as ToolCallDelta events between start and
+// stop; invocation_kind selects the one legal delta family.
 message ToolCallRef {
   string id = 1;
   string name = 2;
   // Opaque provider token on the call (Gemini thoughtSignature); empty otherwise.
   string signature = 3;
+  ToolInvocationKind invocation_kind = 4;
 }
 
 message ToolCallDelta {
@@ -378,6 +381,9 @@ message ToolCallDelta {
   // concurrently. See StreamEvent index invariants.
   int32 index = 1;
   string arguments_delta = 2;
+  // Present only for FREEFORM calls. Explicit empty fragments are legal and
+  // distinct from a function-call delta; arguments_delta must then be empty.
+  optional string input_text_delta = 3;
 }
 
 message StreamError {
@@ -469,7 +475,7 @@ message ContentBlockStop {
 //
 //   MessageStart{role, id, model}
 //     ContentBlockStart{index: 0, tool_call{id, name}}
-//       ToolCallDelta{index: 0, arguments_delta} ...
+//       ToolCallDelta{index: 0, arguments_delta|input_text_delta} ...
 //     ContentBlockStart{index: 1, tool_call{id, name}}   // 2nd tool opens
 //       ToolCallDelta{index: 1, arguments_delta} ...     //   before 0 closes;
 //       ToolCallDelta{index: 0, arguments_delta} ...     //   deltas interleave

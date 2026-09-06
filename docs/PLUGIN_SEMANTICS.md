@@ -88,7 +88,11 @@ and re-emits the exact assembled original on callback errors (fail-open).
 ```go
 sdk.NewStreamHandler().
 	OnToolCall(func(ctx context.Context, call sdk.ToolCall) (sdk.ToolCallAction, error) {
-		// call.Arguments is fully assembled JSON
+		if call.InvocationKind == pbv1.ToolInvocationKind_TOOL_INVOCATION_KIND_FREEFORM {
+			// InputText is present even when the assembled input is empty.
+			return sdk.ReplaceToolInput("safe free-form input"), nil
+		}
+		// Function-call Arguments is fully assembled JSON.
 		return sdk.ReplaceToolArguments(`{"rewritten":true}`), nil
 	}).
 	OnTextDelta(func(ctx context.Context, text string) (sdk.TextAction, error) {
@@ -96,6 +100,10 @@ sdk.NewStreamHandler().
 	}).
 	Register()
 ```
+
+Never coerce between these families: use `ReplaceToolArguments` for function
+calls and `ReplaceToolInput` for free-form calls. A mismatched action re-emits
+the original assembled call unchanged.
 
 Raw `OnStreamChunk` handlers that return a non-nil error trap so `failure_mode`
 applies. Once buffering begins, never forward only the current fragment — fail
@@ -269,7 +277,7 @@ host verifier's layer.
 | `RequestCacheBreakpoint.marker_json` | REQUIRED JSON object; positional (closes the cached prefix at its position) |
 | `RequestUnknownBlock` | non-empty provider `kind` + REQUIRED strict JSON object `payload_json`. The kind-specific projection invariant (no discriminant / canonical cache member inside the payload) is the PROVIDER ADAPTER's marshal validator — an executable edge obligation; the SDK has no provider vocabulary to prove it |
 | `RequestTrailingSignatureBlock` | non-empty token, assistant-only, FINAL block |
-| `ToolDef` | non-empty name. `FUNCTION` carries REQUIRED object `parameters_json`; `FREEFORM` carries REQUIRED object `input_format_json`. `namespace_path` records provider-neutral nesting, outermost first, with non-empty segments |
+| `ToolDef` | non-empty name. `FUNCTION` carries REQUIRED object `parameters_json`; `FREEFORM` carries REQUIRED object `input_format_json`. Host-owned `namespace_path` records provider-neutral nesting, outermost first, with non-empty segments; plugins may inspect but not move tools between namespaces |
 | `ToolDef.cache_control_json` | absent or JSON object |
 
 Universal rules:

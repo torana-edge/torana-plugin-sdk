@@ -138,6 +138,11 @@ func TestNestedContainerEvaluationPins(t *testing.T) {
 	if args.Kind() != PolicySection || !ok || sec != plugin_sdk.SectionMessagesAssistant {
 		t.Fatal("arguments_delta must be assistant — args-only change → assistant only")
 	}
+	input, _ := OutboundFieldPolicy("torana.v1.ToolCallDelta", "input_text_delta")
+	inputSection, ok := input.Section()
+	if input.Kind() != PolicySection || !ok || inputSection != plugin_sdk.SectionMessagesAssistant {
+		t.Fatal("ToolCallDelta.input_text_delta must be assistant section")
+	}
 
 	msg, _ := OutboundFieldPolicy("torana.v1.ChatResponse", "message")
 	if !msg.IsContainer() {
@@ -154,6 +159,11 @@ func TestNestedContainerEvaluationPins(t *testing.T) {
 	id, _ := OutboundFieldPolicy("torana.v1.ToolCallRef", "id")
 	if id.Kind() != PolicySection {
 		t.Fatal("ToolCallRef.id must be assistant section")
+	}
+	kind, _ := OutboundFieldPolicy("torana.v1.ToolCallRef", "invocation_kind")
+	kindSection, ok := kind.Section()
+	if kind.Kind() != PolicySection || !ok || kindSection != plugin_sdk.SectionMessagesAssistant {
+		t.Fatal("ToolCallRef.invocation_kind must be assistant section")
 	}
 
 	// Presence/oneof change of content_block_start still carries topology on the
@@ -376,18 +386,25 @@ func TestSignatureBindingsPinned(t *testing.T) {
 	}
 
 	ref := byMsg["torana.v1.ToolCallRef/signature"]
-	var sawSameID, sawArgs bool
+	var sawSameID, sawKind, sawArgs, sawInput bool
 	for _, c := range ref.Content {
 		if c.Scope == SignatureScopeSameMessage && c.Field == "id" {
 			sawSameID = true
+		}
+		if c.Scope == SignatureScopeSameMessage && c.Field == "invocation_kind" {
+			sawKind = true
 		}
 		if c.Scope == SignatureScopeToolCallBlockByIndex &&
 			c.Message == "torana.v1.ToolCallDelta" && c.Field == "arguments_delta" {
 			sawArgs = true
 		}
+		if c.Scope == SignatureScopeToolCallBlockByIndex &&
+			c.Message == "torana.v1.ToolCallDelta" && c.Field == "input_text_delta" {
+			sawInput = true
+		}
 	}
-	if !sawSameID || !sawArgs {
-		t.Fatal("ToolCallRef.signature must SameMessage id/name and ToolCallBlockByIndex arguments_delta")
+	if !sawSameID || !sawKind || !sawArgs || !sawInput {
+		t.Fatal("ToolCallRef.signature must bind identity, invocation family, function arguments, and free-form input")
 	}
 
 	sig := byMsg["torana.v1.StreamEvent/signature_delta"]

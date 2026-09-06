@@ -868,15 +868,18 @@ var signatureBindings = []SignatureBinding{
 		},
 	},
 	{
-		// ContentBlockStart{ToolCallRef{id,name,signature}} then
-		// ToolCallDelta{index, arguments_delta...} sharing that block index.
+		// ContentBlockStart{ToolCallRef{id,name,kind,signature}} then
+		// ToolCallDelta{index, arguments_delta...|input_text_delta...} sharing
+		// that block index.
 		Domain:         SignatureDomainOutbound,
 		Message:        "torana.v1.ToolCallRef",
 		SignatureField: "signature",
 		Content: []SignatureContentRef{
 			{Scope: SignatureScopeSameMessage, Field: "id"},
 			{Scope: SignatureScopeSameMessage, Field: "name"},
+			{Scope: SignatureScopeSameMessage, Field: "invocation_kind"},
 			{Scope: SignatureScopeToolCallBlockByIndex, Message: "torana.v1.ToolCallDelta", Field: "arguments_delta"},
+			{Scope: SignatureScopeToolCallBlockByIndex, Message: "torana.v1.ToolCallDelta", Field: "input_text_delta"},
 		},
 	},
 	{
@@ -954,8 +957,9 @@ var streamEventVariantPolicies = map[string]FieldPolicy{
 }
 
 var toolCallDeltaFieldPolicies = map[string]FieldPolicy{
-	"index":           topologyPolicy(),
-	"arguments_delta": sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	"index":            topologyPolicy(),
+	"arguments_delta":  sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	"input_text_delta": sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 }
 
 var streamErrorFieldPolicies = map[string]FieldPolicy{
@@ -982,9 +986,10 @@ var contentBlockStartFieldPolicies = map[string]FieldPolicy{
 }
 
 var toolCallRefFieldPolicies = map[string]FieldPolicy{
-	"id":        sectionPolicy(plugin_sdk.SectionMessagesAssistant),
-	"name":      sectionPolicy(plugin_sdk.SectionMessagesAssistant),
-	"signature": boundSignaturePolicy(),
+	"id":              sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	"name":            sectionPolicy(plugin_sdk.SectionMessagesAssistant),
+	"signature":       boundSignaturePolicy(),
+	"invocation_kind": sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 }
 
 var providerBlockFieldPolicies = map[string]FieldPolicy{

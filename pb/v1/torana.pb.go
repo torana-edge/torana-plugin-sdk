@@ -1420,7 +1420,8 @@ type ToolDef struct {
 	// without pretending they are JSON Schema parameters.
 	InputFormatJson []byte `protobuf:"bytes,7,opt,name=input_format_json,json=inputFormatJson,proto3,oneof" json:"input_format_json,omitempty"`
 	// Provider-neutral namespace path, outermost first. Empty for an ordinary
-	// top-level tool. Each present segment is non-empty valid UTF-8.
+	// top-level tool. Each present segment is non-empty valid UTF-8. Provider
+	// topology: observable by plugins but host-owned under replacement.
 	NamespacePath []string `protobuf:"bytes,8,rep,name=namespace_path,json=namespacePath,proto3" json:"namespace_path,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1917,16 +1918,18 @@ func (x *ChatResponse) GetCompletedAtUnixMs() int64 {
 	return 0
 }
 
-// Identifies the tool call a "tool_call" content block is assembling. Its
-// arguments arrive as ToolCallDelta events between the block's start and stop.
+// Identifies the tool call a "tool_call" content block is assembling. FUNCTION
+// arguments or FREEFORM input arrive as ToolCallDelta events between start and
+// stop; invocation_kind selects the one legal delta family.
 type ToolCallRef struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name  string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	// Opaque provider token on the call (Gemini thoughtSignature); empty otherwise.
-	Signature     string `protobuf:"bytes,3,opt,name=signature,proto3" json:"signature,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Signature      string             `protobuf:"bytes,3,opt,name=signature,proto3" json:"signature,omitempty"`
+	InvocationKind ToolInvocationKind `protobuf:"varint,4,opt,name=invocation_kind,json=invocationKind,proto3,enum=torana.v1.ToolInvocationKind" json:"invocation_kind,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ToolCallRef) Reset() {
@@ -1980,6 +1983,13 @@ func (x *ToolCallRef) GetSignature() string {
 	return ""
 }
 
+func (x *ToolCallRef) GetInvocationKind() ToolInvocationKind {
+	if x != nil {
+		return x.InvocationKind
+	}
+	return ToolInvocationKind_TOOL_INVOCATION_KIND_FUNCTION
+}
+
 type ToolCallDelta struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Must name the OPEN tool-call block this delta belongs to: tool deltas
@@ -1987,6 +1997,9 @@ type ToolCallDelta struct {
 	// concurrently. See StreamEvent index invariants.
 	Index          int32  `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
 	ArgumentsDelta string `protobuf:"bytes,2,opt,name=arguments_delta,json=argumentsDelta,proto3" json:"arguments_delta,omitempty"`
+	// Present only for FREEFORM calls. Explicit empty fragments are legal and
+	// distinct from a function-call delta; arguments_delta must then be empty.
+	InputTextDelta *string `protobuf:"bytes,3,opt,name=input_text_delta,json=inputTextDelta,proto3,oneof" json:"input_text_delta,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -2031,6 +2044,13 @@ func (x *ToolCallDelta) GetIndex() int32 {
 func (x *ToolCallDelta) GetArgumentsDelta() string {
 	if x != nil {
 		return x.ArgumentsDelta
+	}
+	return ""
+}
+
+func (x *ToolCallDelta) GetInputTextDelta() string {
+	if x != nil && x.InputTextDelta != nil {
+		return *x.InputTextDelta
 	}
 	return ""
 }
@@ -2525,7 +2545,7 @@ func (x *ContentBlockStop) GetIndex() int32 {
 //
 //	MessageStart{role, id, model}
 //	  ContentBlockStart{index: 0, tool_call{id, name}}
-//	    ToolCallDelta{index: 0, arguments_delta} ...
+//	    ToolCallDelta{index: 0, arguments_delta|input_text_delta} ...
 //	  ContentBlockStart{index: 1, tool_call{id, name}}   // 2nd tool opens
 //	    ToolCallDelta{index: 1, arguments_delta} ...     //   before 0 closes;
 //	    ToolCallDelta{index: 0, arguments_delta} ...     //   deltas interleave
@@ -5574,14 +5594,17 @@ const file_proto_torana_v1_torana_proto_rawDesc = "" +
 	"\x18provider_extensions_json\x18\b \x01(\fR\x16providerExtensionsJson\x12\x1a\n" +
 	"\bprovider\x18\t \x01(\tR\bprovider\x12/\n" +
 	"\x14completed_at_unix_ms\x18\n" +
-	" \x01(\x03R\x11completedAtUnixMs\"O\n" +
+	" \x01(\x03R\x11completedAtUnixMs\"\x97\x01\n" +
 	"\vToolCallRef\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1c\n" +
-	"\tsignature\x18\x03 \x01(\tR\tsignature\"N\n" +
+	"\tsignature\x18\x03 \x01(\tR\tsignature\x12F\n" +
+	"\x0finvocation_kind\x18\x04 \x01(\x0e2\x1d.torana.v1.ToolInvocationKindR\x0einvocationKind\"\x92\x01\n" +
 	"\rToolCallDelta\x12\x14\n" +
 	"\x05index\x18\x01 \x01(\x05R\x05index\x12'\n" +
-	"\x0farguments_delta\x18\x02 \x01(\tR\x0eargumentsDelta\";\n" +
+	"\x0farguments_delta\x18\x02 \x01(\tR\x0eargumentsDelta\x12-\n" +
+	"\x10input_text_delta\x18\x03 \x01(\tH\x00R\x0einputTextDelta\x88\x01\x01B\x13\n" +
+	"\x11_input_text_delta\";\n" +
 	"\vStreamError\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"H\n" +
@@ -5916,42 +5939,43 @@ var file_proto_torana_v1_torana_proto_depIdxs = []int32{
 	17, // 18: torana.v1.ResponseMessage.tool_calls:type_name -> torana.v1.ToolCall
 	21, // 19: torana.v1.ChatResponse.message:type_name -> torana.v1.ResponseMessage
 	19, // 20: torana.v1.ChatResponse.usage:type_name -> torana.v1.Usage
-	28, // 21: torana.v1.ContentBlockStart.text:type_name -> torana.v1.TextBlock
-	29, // 22: torana.v1.ContentBlockStart.thinking:type_name -> torana.v1.ThinkingBlock
-	23, // 23: torana.v1.ContentBlockStart.tool_call:type_name -> torana.v1.ToolCallRef
-	30, // 24: torana.v1.ContentBlockStart.provider:type_name -> torana.v1.ProviderBlock
-	24, // 25: torana.v1.StreamEvent.tool_call_delta:type_name -> torana.v1.ToolCallDelta
-	19, // 26: torana.v1.StreamEvent.usage:type_name -> torana.v1.Usage
-	25, // 27: torana.v1.StreamEvent.error:type_name -> torana.v1.StreamError
-	26, // 28: torana.v1.StreamEvent.message_start:type_name -> torana.v1.MessageStart
-	27, // 29: torana.v1.StreamEvent.message_stop:type_name -> torana.v1.MessageStop
-	31, // 30: torana.v1.StreamEvent.content_block_start:type_name -> torana.v1.ContentBlockStart
-	32, // 31: torana.v1.StreamEvent.content_block_stop:type_name -> torana.v1.ContentBlockStop
-	33, // 32: torana.v1.StreamEvents.events:type_name -> torana.v1.StreamEvent
-	22, // 33: torana.v1.AfterResponse.response:type_name -> torana.v1.ChatResponse
-	20, // 34: torana.v1.HookInput.chat_request:type_name -> torana.v1.ChatRequest
-	39, // 35: torana.v1.HookInput.after_response:type_name -> torana.v1.AfterResponse
-	33, // 36: torana.v1.HookInput.stream_event:type_name -> torana.v1.StreamEvent
-	35, // 37: torana.v1.HookInput.http_request:type_name -> torana.v1.HttpRequest
-	37, // 38: torana.v1.HookInput.tick_request:type_name -> torana.v1.TickRequest
-	20, // 39: torana.v1.HookResult.replace_request:type_name -> torana.v1.ChatRequest
-	22, // 40: torana.v1.HookResult.replace_response:type_name -> torana.v1.ChatResponse
-	34, // 41: torana.v1.HookResult.emit_events:type_name -> torana.v1.StreamEvents
-	36, // 42: torana.v1.HookResult.serve_http:type_name -> torana.v1.HttpResponse
-	38, // 43: torana.v1.HookResult.tick_outcome:type_name -> torana.v1.TickOutcome
-	41, // 44: torana.v1.HookResult.suppress:type_name -> torana.v1.Suppress
-	2,  // 45: torana.v1.HostError.code:type_name -> torana.v1.ErrorCode
-	43, // 46: torana.v1.HostCallResult.error:type_name -> torana.v1.HostError
-	64, // 47: torana.v1.OutboundHTTPRequestArgs.headers:type_name -> torana.v1.HTTPHeader
-	64, // 48: torana.v1.OutboundHTTPResponse.headers:type_name -> torana.v1.HTTPHeader
-	67, // 49: torana.v1.ModelCompleteArgs.messages:type_name -> torana.v1.ModelMessage
-	19, // 50: torana.v1.ModelCompleteResult.usage:type_name -> torana.v1.Usage
-	73, // 51: torana.v1.PromptCachePolicy.tiers:type_name -> torana.v1.PromptCacheTier
-	52, // [52:52] is the sub-list for method output_type
-	52, // [52:52] is the sub-list for method input_type
-	52, // [52:52] is the sub-list for extension type_name
-	52, // [52:52] is the sub-list for extension extendee
-	0,  // [0:52] is the sub-list for field type_name
+	0,  // 21: torana.v1.ToolCallRef.invocation_kind:type_name -> torana.v1.ToolInvocationKind
+	28, // 22: torana.v1.ContentBlockStart.text:type_name -> torana.v1.TextBlock
+	29, // 23: torana.v1.ContentBlockStart.thinking:type_name -> torana.v1.ThinkingBlock
+	23, // 24: torana.v1.ContentBlockStart.tool_call:type_name -> torana.v1.ToolCallRef
+	30, // 25: torana.v1.ContentBlockStart.provider:type_name -> torana.v1.ProviderBlock
+	24, // 26: torana.v1.StreamEvent.tool_call_delta:type_name -> torana.v1.ToolCallDelta
+	19, // 27: torana.v1.StreamEvent.usage:type_name -> torana.v1.Usage
+	25, // 28: torana.v1.StreamEvent.error:type_name -> torana.v1.StreamError
+	26, // 29: torana.v1.StreamEvent.message_start:type_name -> torana.v1.MessageStart
+	27, // 30: torana.v1.StreamEvent.message_stop:type_name -> torana.v1.MessageStop
+	31, // 31: torana.v1.StreamEvent.content_block_start:type_name -> torana.v1.ContentBlockStart
+	32, // 32: torana.v1.StreamEvent.content_block_stop:type_name -> torana.v1.ContentBlockStop
+	33, // 33: torana.v1.StreamEvents.events:type_name -> torana.v1.StreamEvent
+	22, // 34: torana.v1.AfterResponse.response:type_name -> torana.v1.ChatResponse
+	20, // 35: torana.v1.HookInput.chat_request:type_name -> torana.v1.ChatRequest
+	39, // 36: torana.v1.HookInput.after_response:type_name -> torana.v1.AfterResponse
+	33, // 37: torana.v1.HookInput.stream_event:type_name -> torana.v1.StreamEvent
+	35, // 38: torana.v1.HookInput.http_request:type_name -> torana.v1.HttpRequest
+	37, // 39: torana.v1.HookInput.tick_request:type_name -> torana.v1.TickRequest
+	20, // 40: torana.v1.HookResult.replace_request:type_name -> torana.v1.ChatRequest
+	22, // 41: torana.v1.HookResult.replace_response:type_name -> torana.v1.ChatResponse
+	34, // 42: torana.v1.HookResult.emit_events:type_name -> torana.v1.StreamEvents
+	36, // 43: torana.v1.HookResult.serve_http:type_name -> torana.v1.HttpResponse
+	38, // 44: torana.v1.HookResult.tick_outcome:type_name -> torana.v1.TickOutcome
+	41, // 45: torana.v1.HookResult.suppress:type_name -> torana.v1.Suppress
+	2,  // 46: torana.v1.HostError.code:type_name -> torana.v1.ErrorCode
+	43, // 47: torana.v1.HostCallResult.error:type_name -> torana.v1.HostError
+	64, // 48: torana.v1.OutboundHTTPRequestArgs.headers:type_name -> torana.v1.HTTPHeader
+	64, // 49: torana.v1.OutboundHTTPResponse.headers:type_name -> torana.v1.HTTPHeader
+	67, // 50: torana.v1.ModelCompleteArgs.messages:type_name -> torana.v1.ModelMessage
+	19, // 51: torana.v1.ModelCompleteResult.usage:type_name -> torana.v1.Usage
+	73, // 52: torana.v1.PromptCachePolicy.tiers:type_name -> torana.v1.PromptCacheTier
+	53, // [53:53] is the sub-list for method output_type
+	53, // [53:53] is the sub-list for method input_type
+	53, // [53:53] is the sub-list for extension type_name
+	53, // [53:53] is the sub-list for extension extendee
+	0,  // [0:53] is the sub-list for field type_name
 }
 
 func init() { file_proto_torana_v1_torana_proto_init() }
@@ -5979,6 +6003,7 @@ func file_proto_torana_v1_torana_proto_init() {
 	file_proto_torana_v1_torana_proto_msgTypes[15].OneofWrappers = []any{}
 	file_proto_torana_v1_torana_proto_msgTypes[17].OneofWrappers = []any{}
 	file_proto_torana_v1_torana_proto_msgTypes[18].OneofWrappers = []any{}
+	file_proto_torana_v1_torana_proto_msgTypes[21].OneofWrappers = []any{}
 	file_proto_torana_v1_torana_proto_msgTypes[28].OneofWrappers = []any{
 		(*ContentBlockStart_Text)(nil),
 		(*ContentBlockStart_Thinking)(nil),

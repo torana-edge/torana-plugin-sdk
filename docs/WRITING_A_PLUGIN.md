@@ -328,7 +328,9 @@ policy and compaction plugins do not need provider-specific JSON parsing.
 
 Definitions use the same `ToolDef.invocation_kind`. Function definitions carry
 `parameters_json`; free-form definitions carry `input_format_json` and may
-carry an outermost-first `namespace_path` for harness tool namespaces.
+carry an outermost-first `namespace_path` for harness tool namespaces. The path
+is observable provider topology, not part of `ir.tools.write`: plugins may edit
+the definition inside its namespace but cannot move it to another namespace.
 - **Purity**: the projection is a fresh clone; the input is never mutated
   and the returned bytes never alias it. Raw JSON folds verbatim (member
   order and lexemes are identity-relevant), optional scalars fold
@@ -394,7 +396,8 @@ Opaque signatures (`thinking_signature`, `ToolCall.signature`,
 `ToolCallRef.signature`) bind provider tokens to content. Mutating signed
 content while leaving the signature in place is invalid — the host must reject
 that mutation or clear the signature. On the stream path, `ToolCallRef.signature`
-binds `id`/`name` and `ToolCallDelta.arguments_delta` for the **same unique
+binds `id`/`name`/invocation kind and the matching
+`ToolCallDelta.arguments_delta` or presence-sensitive `input_text_delta` for the **same unique
 content-block index** (never reused after close; adapters must assign distinct
 indexes to parallel tool calls, which may be open concurrently — non-tool
 content stays exclusive). `StreamError` is a terminal abort: it may arrive

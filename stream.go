@@ -85,11 +85,16 @@ func (a *StreamAssembler) Feed(ev *pbv1.StreamEvent) FeedResult {
 
 	case *pbv1.StreamEvent_ToolCallDelta:
 		d := e.ToolCallDelta
-		// Empty fragment is the meta_append read path — skip the host call.
-		if len(d.ArgumentsDelta) == 0 {
+		fragment := d.ArgumentsDelta
+		if d.InputTextDelta != nil {
+			fragment = *d.InputTextDelta
+		}
+		// Empty fragment is a no-op. The start ref retains the invocation kind,
+		// so an explicitly empty FREEFORM input remains distinguishable.
+		if len(fragment) == 0 {
 			return FeedResult{Suppress: true}
 		}
-		if _, herr, err := MetaAppend(d.Index, []byte(d.ArgumentsDelta)); err != nil {
+		if _, herr, err := MetaAppend(d.Index, []byte(fragment)); err != nil {
 			return FeedResult{Err: err}
 		} else if herr != nil {
 			return FeedResult{Err: fmt.Errorf("meta_append: %s", herr.Message)}
@@ -113,16 +118,23 @@ func (a *StreamAssembler) Feed(ev *pbv1.StreamEvent) FeedResult {
 		if err != nil {
 			return FeedResult{Err: fmt.Errorf("tool-call frame corrupt: %w", err)}
 		}
+		call := &ToolCall{
+			Index:          stop.Index,
+			ID:             ref.Id,
+			Name:           ref.Name,
+			Signature:      ref.Signature,
+			InvocationKind: ref.InvocationKind,
+			ref:            ref,
+		}
+		if ref.InvocationKind == pbv1.ToolInvocationKind_TOOL_INVOCATION_KIND_FREEFORM {
+			input := args
+			call.InputText = &input
+		} else {
+			call.Arguments = args
+		}
 		return FeedResult{
 			Suppress: true,
-			Complete: &ToolCall{
-				Index:     stop.Index,
-				ID:        ref.Id,
-				Name:      ref.Name,
-				Signature: ref.Signature,
-				Arguments: args,
-				ref:       ref,
-			},
+			Complete: call,
 		}
 
 	case *pbv1.StreamEvent_Error:
@@ -145,12 +157,13 @@ func (a *StreamAssembler) Feed(ev *pbv1.StreamEvent) FeedResult {
 // is built from the known fields.
 func reemitRef(call ToolCall, sig string) *pbv1.ToolCallRef {
 	if call.ref == nil {
-		return &pbv1.ToolCallRef{Id: call.ID, Name: call.Name, Signature: sig}
+		return &pbv1.ToolCallRef{Id: call.ID, Name: call.Name, Signature: sig, InvocationKind: call.InvocationKind}
 	}
 	out, _ := proto.Clone(call.ref).(*pbv1.ToolCallRef)
 	out.Id = call.ID
 	out.Name = call.Name
 	out.Signature = sig
+	out.InvocationKind = call.InvocationKind
 	return out
 }
 
@@ -193,10 +206,20 @@ func decodeToolFrame(buf []byte) (*pbv1.ToolCallRef, string, error) {
 // Pass and fail-open re-emission keep call.Arguments (and thus Signature)
 // byte-identical so the host can verify the buffered tool block transactionally
 // — temporary suppress-then-reemit is not deletion/forgery.
-func EmitAssembledToolCall(call ToolCall, args string) []*pbv1.StreamEvent {
+func EmitAssembledToolCall(call ToolCall, payload string) []*pbv1.StreamEvent {
+	original := call.Arguments
+	if call.InvocationKind == pbv1.ToolInvocationKind_TOOL_INVOCATION_KIND_FREEFORM && call.InputText != nil {
+		original = *call.InputText
+	}
 	sig := call.Signature
-	if args != call.Arguments {
+	if payload != original {
 		sig = ""
+	}
+	delta := &pbv1.ToolCallDelta{Index: call.Index}
+	if call.InvocationKind == pbv1.ToolInvocationKind_TOOL_INVOCATION_KIND_FREEFORM {
+		delta.InputTextDelta = &payload
+	} else {
+		delta.ArgumentsDelta = payload
 	}
 	return []*pbv1.StreamEvent{
 		{Event: &pbv1.StreamEvent_ContentBlockStart{
@@ -206,10 +229,7 @@ func EmitAssembledToolCall(call ToolCall, args string) []*pbv1.StreamEvent {
 			},
 		}},
 		{Event: &pbv1.StreamEvent_ToolCallDelta{
-			ToolCallDelta: &pbv1.ToolCallDelta{
-				Index:          call.Index,
-				ArgumentsDelta: args,
-			},
+			ToolCallDelta: delta,
 		}},
 		{Event: &pbv1.StreamEvent_ContentBlockStop{
 			ContentBlockStop: &pbv1.ContentBlockStop{Index: call.Index},
@@ -226,6 +246,10 @@ type ToolCall struct {
 	Name      string
 	Signature string
 	Arguments string
+	// InputText is present for FREEFORM invocations. It is presence-sensitive:
+	// an explicitly empty input points at "", while function calls use nil.
+	InputText      *string
+	InvocationKind pbv1.ToolInvocationKind
 
 	// ref is the ToolCallRef the host actually sent, kept whole so re-emission
 	// can preserve fields this build does not know about.
@@ -244,11 +268,12 @@ type ToolCall struct {
 
 // ToolCallAction is what OnToolCall returns.
 type ToolCallAction struct {
-	pass       bool
-	replace    string
-	suppress   bool
-	err        error
-	hasReplace bool
+	pass        bool
+	replace     string
+	suppress    bool
+	err         error
+	hasReplace  bool
+	replaceKind pbv1.ToolInvocationKind
 }
 
 func PassToolCall() ToolCallAction { return ToolCallAction{pass: true} }
@@ -257,7 +282,14 @@ func ReplaceToolArguments(args string) ToolCallAction {
 	if !json.Valid([]byte(args)) {
 		return ToolCallAction{err: fmt.Errorf("ReplaceToolArguments: arguments are not valid JSON")}
 	}
-	return ToolCallAction{hasReplace: true, replace: args}
+	return ToolCallAction{hasReplace: true, replace: args, replaceKind: pbv1.ToolInvocationKind_TOOL_INVOCATION_KIND_FUNCTION}
+}
+
+// ReplaceToolInput replaces the provider-native free-form input of a FREEFORM
+// tool call. Empty input is valid and remains presence-distinct from a function
+// arguments delta.
+func ReplaceToolInput(input string) ToolCallAction {
+	return ToolCallAction{hasReplace: true, replace: input, replaceKind: pbv1.ToolInvocationKind_TOOL_INVOCATION_KIND_FREEFORM}
 }
 
 func SuppressToolCall() ToolCallAction { return ToolCallAction{suppress: true} }
@@ -340,17 +372,25 @@ func (s *StreamHandler) Handle(ctx context.Context, ev *pbv1.StreamEvent) (Strea
 	if fr.Complete != nil {
 		call := *fr.Complete
 		action, cbErr := s.onToolCall(ctx, call)
+		payload := call.Arguments
+		if call.InvocationKind == pbv1.ToolInvocationKind_TOOL_INVOCATION_KIND_FREEFORM && call.InputText != nil {
+			payload = *call.InputText
+		}
 		if cbErr != nil || action.err != nil {
-			return EmitEvents(EmitAssembledToolCall(call, call.Arguments)...), nil
+			return EmitEvents(EmitAssembledToolCall(call, payload)...), nil
 		}
 		if action.suppress {
 			return SuppressEvent(), nil
 		}
-		args := call.Arguments
 		if action.hasReplace {
-			args = action.replace
+			if action.replaceKind != call.InvocationKind {
+				// A callback used the wrong mutation family. Preserve the original
+				// call exactly, matching callback-error fail-open behavior.
+				return EmitEvents(EmitAssembledToolCall(call, payload)...), nil
+			}
+			payload = action.replace
 		}
-		return EmitEvents(EmitAssembledToolCall(call, args)...), nil
+		return EmitEvents(EmitAssembledToolCall(call, payload)...), nil
 	}
 	if fr.Suppress {
 		return SuppressEvent(), nil

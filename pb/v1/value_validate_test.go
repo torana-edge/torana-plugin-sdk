@@ -58,6 +58,28 @@ func TestNegativeStreamIndexesAreRejected(t *testing.T) {
 	}
 }
 
+func TestStreamingFreeformToolValidation(t *testing.T) {
+	input := ""
+	for _, tc := range []struct {
+		name  string
+		value interface{ Validate() error }
+		ok    bool
+	}{
+		{"function start", &v1.ContentBlockStart{Block: &v1.ContentBlockStart_ToolCall{ToolCall: &v1.ToolCallRef{Id: "c", Name: "f"}}}, true},
+		{"freeform start", &v1.ContentBlockStart{Block: &v1.ContentBlockStart_ToolCall{ToolCall: &v1.ToolCallRef{Id: "c", Name: "f", InvocationKind: v1.ToolInvocationKind_TOOL_INVOCATION_KIND_FREEFORM}}}, true},
+		{"unknown start kind", &v1.ContentBlockStart{Block: &v1.ContentBlockStart_ToolCall{ToolCall: &v1.ToolCallRef{Id: "c", Name: "f", InvocationKind: 99}}}, false},
+		{"function delta", &v1.ToolCallDelta{ArgumentsDelta: `{}`}, true},
+		{"freeform empty delta", &v1.ToolCallDelta{InputTextDelta: &input}, true},
+		{"contradictory delta", &v1.ToolCallDelta{ArgumentsDelta: `{}`, InputTextDelta: &input}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.value.Validate() == nil; got != tc.ok {
+				t.Fatalf("Validate success = %v, want %v", got, tc.ok)
+			}
+		})
+	}
+}
+
 func TestHTTPStatusRange(t *testing.T) {
 	// Shared out-of-band values.
 	for _, status := range []int32{0, 99, 600, -1} {
