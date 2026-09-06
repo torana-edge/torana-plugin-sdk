@@ -274,9 +274,11 @@ host verifier's layer.
 | `RequestTextBlock.signature` / `RequestThinkingBlock.signature` | UTF-8; provenance-governed (unchanged signature over changed covered content = stale, cleared-over-changed = allowed, cleared-over-unchanged = dropped/rejected, added/changed/reused = rejected — the host verifier's matrix) |
 | `RequestToolUseBlock` | non-empty `id` and `name`; `FUNCTION` carries REQUIRED object `arguments_json` and no `input_text`; `FREEFORM` carries present `input_text` (explicit empty is valid) and no `arguments_json`; the signature binds the kind and complete input |
 | `RequestToolResultBlock` | non-empty `tool_call_id`, optional `tool_name`, explicit `invocation_kind`, and NON-EMPTY ordered NESTED `content` (one explicit empty text element is the canonical empty-result spelling; an empty list is refused). `ToolResultContentBlock`: text/unknown/cache only |
+| `RequestToolResultBlock.is_error` | absent or bool; PRESENCE is meaningful (an explicit `false` differs from absent, and the two fingerprint differently). Set by harnesses when the tool ran and failed, as distinct from a result that merely reads like a failure |
 | `RequestCacheBreakpoint.marker_json` | REQUIRED JSON object; positional (closes the cached prefix at its position) |
 | `RequestUnknownBlock` | non-empty provider `kind` + REQUIRED strict JSON object `payload_json`. The kind-specific projection invariant (no discriminant / canonical cache member inside the payload) is the PROVIDER ADAPTER's marshal validator — an executable edge obligation; the SDK has no provider vocabulary to prove it |
 | `RequestTrailingSignatureBlock` | non-empty token, assistant-only, FINAL block |
+| `RequestRefusalBlock.refusal` | UTF-8; explicit empty is a first-class arm. A model refusal (OpenAI assistant `refusal`) IS assistant content, so it occupies an ordered body position rather than a side-channel field. A format with no refusal concept refuses the request rather than inventing one |
 | `ToolDef` | non-empty name. `FUNCTION` carries REQUIRED object `parameters_json`; `FREEFORM` carries REQUIRED object `input_format_json`. Host-owned `namespace_path` records provider-neutral nesting, outermost first, with non-empty segments; plugins may inspect but not move tools between namespaces |
 | `ToolDef.cache_control_json` | absent or JSON object |
 
