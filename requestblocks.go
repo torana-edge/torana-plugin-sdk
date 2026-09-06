@@ -57,6 +57,7 @@ var fingerprintFieldCoverage = []string{
 	"torana.v1.RequestBlock.cache_breakpoint",
 	"torana.v1.RequestBlock.unknown",
 	"torana.v1.RequestBlock.trailing_signature",
+	"torana.v1.RequestBlock.refusal",
 	// Leaf fields.
 	"torana.v1.RequestTextBlock.text",
 	"torana.v1.RequestTextBlock.signature",
@@ -80,6 +81,7 @@ var fingerprintFieldCoverage = []string{
 	"torana.v1.RequestToolResultBlock.scheduling",
 	"torana.v1.RequestToolResultBlock.signature",
 	"torana.v1.RequestToolResultBlock.invocation_kind",
+	"torana.v1.RequestToolResultBlock.is_error",
 	"torana.v1.RequestCacheBreakpoint.marker_json",
 	"torana.v1.RequestUnknownBlock.kind",
 	"torana.v1.RequestUnknownBlock.payload_json",
@@ -87,6 +89,7 @@ var fingerprintFieldCoverage = []string{
 	"torana.v1.RequestUnknownBlock.signature",
 	"torana.v1.RequestTrailingSignatureBlock.signature",
 	"torana.v1.RequestTrailingSignatureBlock.part_metadata_json",
+	"torana.v1.RequestRefusalBlock.refusal",
 	// Nested tool-result content.
 	"torana.v1.ToolResultContentBlock.text",
 	"torana.v1.ToolResultContentBlock.unknown",
@@ -293,6 +296,12 @@ func RequestBlocksFingerprint(msg *pbv1.Message) (string, error) {
 			} else {
 				frame("sched", "0")
 			}
+			if k.ToolResult.IsError != nil {
+				frame("iserr", "1")
+				frame("iserrval", strconv.FormatBool(*k.ToolResult.IsError))
+			} else {
+				frame("iserr", "0")
+			}
 			frame("trsig", k.ToolResult.Signature)
 			frame("ikind", strconv.FormatInt(int64(k.ToolResult.InvocationKind), 10))
 			nestedSum, err := ToolResultContentFingerprint(k.ToolResult.Content)
@@ -322,6 +331,12 @@ func RequestBlocksFingerprint(msg *pbv1.Message) (string, error) {
 			}
 			frame("sig", k.TrailingSignature.Signature)
 			frameBytes("pmeta", k.TrailingSignature.PartMetadataJson)
+		case *pbv1.RequestBlock_Refusal:
+			frame("kind", "refusal")
+			if k.Refusal == nil {
+				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] typed-nil refusal arm", i)
+			}
+			frame("refusal", k.Refusal.Refusal)
 		default:
 			return "", fmt.Errorf("request blocks fingerprint: blocks[%d] has no oneof arm", i)
 		}

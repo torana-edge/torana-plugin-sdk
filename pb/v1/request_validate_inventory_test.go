@@ -46,6 +46,7 @@ func TestReplacementFieldInventoryExact(t *testing.T) {
 		&RequestTextBlock{},
 		&RequestThinkingBlock{},
 		&RequestRedactedThinkingBlock{},
+		&RequestRefusalBlock{},
 		&RequestToolUseBlock{},
 		&RequestToolResultBlock{},
 		&RequestCacheBreakpoint{},
