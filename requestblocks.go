@@ -70,6 +70,8 @@ var fingerprintFieldCoverage = []string{
 	"torana.v1.RequestToolUseBlock.arguments_json",
 	"torana.v1.RequestToolUseBlock.signature",
 	"torana.v1.RequestToolUseBlock.part_metadata_json",
+	"torana.v1.RequestToolUseBlock.input_text",
+	"torana.v1.RequestToolUseBlock.invocation_kind",
 	"torana.v1.RequestToolResultBlock.tool_call_id",
 	"torana.v1.RequestToolResultBlock.tool_name",
 	"torana.v1.RequestToolResultBlock.content",
@@ -77,6 +79,7 @@ var fingerprintFieldCoverage = []string{
 	"torana.v1.RequestToolResultBlock.will_continue",
 	"torana.v1.RequestToolResultBlock.scheduling",
 	"torana.v1.RequestToolResultBlock.signature",
+	"torana.v1.RequestToolResultBlock.invocation_kind",
 	"torana.v1.RequestCacheBreakpoint.marker_json",
 	"torana.v1.RequestUnknownBlock.kind",
 	"torana.v1.RequestUnknownBlock.payload_json",
@@ -261,6 +264,13 @@ func RequestBlocksFingerprint(msg *pbv1.Message) (string, error) {
 			frameBytes("args", k.ToolUse.ArgumentsJson)
 			frame("sig", k.ToolUse.Signature)
 			frameBytes("pmeta", k.ToolUse.PartMetadataJson)
+			frame("ikind", strconv.FormatInt(int64(k.ToolUse.InvocationKind), 10))
+			if k.ToolUse.InputText != nil {
+				frame("input-present", "1")
+				frame("input", *k.ToolUse.InputText)
+			} else {
+				frame("input-present", "0")
+			}
 		case *pbv1.RequestBlock_ToolResult:
 			frame("kind", "tool_result")
 			if k.ToolResult == nil {
@@ -284,6 +294,7 @@ func RequestBlocksFingerprint(msg *pbv1.Message) (string, error) {
 				frame("sched", "0")
 			}
 			frame("trsig", k.ToolResult.Signature)
+			frame("ikind", strconv.FormatInt(int64(k.ToolResult.InvocationKind), 10))
 			nestedSum, err := ToolResultContentFingerprint(k.ToolResult.Content)
 			if err != nil {
 				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] nested content: %w", i, err)

@@ -483,6 +483,8 @@ var requestSignatureContracts = []struct {
 		{scope: SignatureScopeSameMessage, ref: "id"},
 		{scope: SignatureScopeSameMessage, ref: "name"},
 		{scope: SignatureScopeSameMessage, ref: "arguments_json"},
+		{scope: SignatureScopeSameMessage, ref: "input_text"},
+		{scope: SignatureScopeSameMessage, ref: "invocation_kind"},
 		{scope: SignatureScopeSameMessage, ref: "part_metadata_json"},
 	}},
 	{message: "torana.v1.RequestUnknownBlock", field: "signature", content: []requestContractRef{
@@ -497,6 +499,7 @@ var requestSignatureContracts = []struct {
 		{scope: SignatureScopeSameMessage, ref: "will_continue"},
 		{scope: SignatureScopeSameMessage, ref: "scheduling"},
 		{scope: SignatureScopeSameMessage, ref: "content"},
+		{scope: SignatureScopeSameMessage, ref: "invocation_kind"},
 	}},
 	{message: "torana.v1.RequestTrailingSignatureBlock", field: "signature", content: []requestContractRef{
 		{scope: SignatureScopeSameMessage, ref: "part_metadata_json"},
@@ -541,8 +544,11 @@ type SignatureContractRef struct {
 // optional refs and the single repeated-message target are explicit pins;
 // anything else fails startup.
 var requestCoveredFieldKinds = map[string]requestCoveredFieldKind{
-	"torana.v1.RequestToolResultBlock.will_continue": {kind: protoreflect.BoolKind, optional: true},
-	"torana.v1.RequestToolResultBlock.scheduling":    {kind: protoreflect.StringKind, optional: true},
+	"torana.v1.RequestToolResultBlock.will_continue":   {kind: protoreflect.BoolKind, optional: true},
+	"torana.v1.RequestToolResultBlock.scheduling":      {kind: protoreflect.StringKind, optional: true},
+	"torana.v1.RequestToolUseBlock.input_text":         {kind: protoreflect.StringKind, optional: true},
+	"torana.v1.RequestToolUseBlock.invocation_kind":    {kind: protoreflect.EnumKind},
+	"torana.v1.RequestToolResultBlock.invocation_kind": {kind: protoreflect.EnumKind},
 }
 
 // requestCoveredFieldKind is one pinned covered-field class.
@@ -672,6 +678,11 @@ func validateRequestCoveredFieldKinds(b SignatureBinding, contract *struct {
 				return fmt.Errorf("%s.%s content[%d]: %s has kind %v, want pinned %v",
 					b.Message, b.SignatureField, i, full, fd.Kind(), pinned.kind)
 			}
+		case pinned.kind != 0:
+			if fd.HasOptionalKeyword() || fd.Kind() != pinned.kind {
+				return fmt.Errorf("%s.%s content[%d]: %s has kind %v, want pinned %v",
+					b.Message, b.SignatureField, i, full, fd.Kind(), pinned.kind)
+			}
 		case fd.HasOptionalKeyword() || fd.Kind() == protoreflect.BoolKind:
 			return fmt.Errorf("%s.%s content[%d]: %s is optional/bool but not pinned as presence-aware",
 				b.Message, b.SignatureField, i, full)
@@ -782,6 +793,8 @@ var signatureBindings = []SignatureBinding{
 			{Scope: SignatureScopeSameMessage, Field: "id"},
 			{Scope: SignatureScopeSameMessage, Field: "name"},
 			{Scope: SignatureScopeSameMessage, Field: "arguments_json"},
+			{Scope: SignatureScopeSameMessage, Field: "input_text"},
+			{Scope: SignatureScopeSameMessage, Field: "invocation_kind"},
 			{Scope: SignatureScopeSameMessage, Field: "part_metadata_json"},
 		},
 	},
@@ -814,6 +827,7 @@ var signatureBindings = []SignatureBinding{
 			{Scope: SignatureScopeSameMessage, Field: "will_continue"},
 			{Scope: SignatureScopeSameMessage, Field: "scheduling"},
 			{Scope: SignatureScopeSameMessage, Field: "content"},
+			{Scope: SignatureScopeSameMessage, Field: "invocation_kind"},
 		},
 	},
 	{

@@ -122,7 +122,7 @@ func checkRuleMatchesDescriptor(t *testing.T, fd protoreflect.FieldDescriptor, r
 		if !fd.IsList() || fd.Kind() != protoreflect.MessageKind {
 			t.Fatalf("field %s: rule %s requires a repeated message field", full, rule)
 		}
-	case rule == "repeated-text-utf8":
+	case rule == "repeated-text-utf8" || rule == "repeated-text-required-utf8":
 		if !fd.IsList() || fd.Kind() != protoreflect.StringKind {
 			t.Fatalf("field %s: rule %s requires a repeated string field", full, rule)
 		}
@@ -149,6 +149,11 @@ func checkRuleMatchesDescriptor(t *testing.T, fd protoreflect.FieldDescriptor, r
 	case rule == "float-finite-optional":
 		if fd.IsList() || fd.Kind() != protoreflect.DoubleKind || !fd.HasOptionalKeyword() {
 			t.Fatalf("field %s: rule %s requires an optional double field", full, rule)
+		}
+	case rule == "enum-tool-invocation-kind":
+		if fd.IsList() || fd.Kind() != protoreflect.EnumKind ||
+			fd.Enum().FullName() != "torana.v1.ToolInvocationKind" {
+			t.Fatalf("field %s: rule %s requires ToolInvocationKind", full, rule)
 		}
 	default:
 		t.Fatalf("field %s: unrecognised rule class %q", full, rule)
@@ -263,7 +268,11 @@ func TestReplacementStringUTF8Sweep(t *testing.T) {
 			continue
 		}
 		probe := &ToolDef{Name: "read", ParametersJson: []byte(`{}`)}
-		probe.ProtoReflect().Set(fd, protoreflect.ValueOfString(bad))
+		if fd.IsList() {
+			probe.ProtoReflect().Mutable(fd).List().Append(protoreflect.ValueOfString(bad))
+		} else {
+			probe.ProtoReflect().Set(fd, protoreflect.ValueOfString(bad))
+		}
 		reject(t, "tools[0]."+string(fd.Name()), &ChatRequest{Tools: []*ToolDef{probe}})
 	}
 

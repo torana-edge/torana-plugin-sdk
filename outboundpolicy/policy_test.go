@@ -337,9 +337,9 @@ func TestSignatureBindingsPinned(t *testing.T) {
 	if tu.Domain != SignatureDomainRequest || tu.Message != "torana.v1.RequestToolUseBlock" {
 		t.Fatal("RequestToolUseBlock.signature must be a request-domain binding")
 	}
-	want := map[string]bool{"id": true, "name": true, "arguments_json": true, "part_metadata_json": true}
+	want := map[string]bool{"id": true, "name": true, "arguments_json": true, "input_text": true, "invocation_kind": true, "part_metadata_json": true}
 	if len(tu.Content) != len(want) {
-		t.Fatalf("tool-use signature must cover exactly id/name/arguments_json/part_metadata_json, got %d refs", len(tu.Content))
+		t.Fatalf("tool-use signature must cover the complete function/free-form invocation, got %d refs", len(tu.Content))
 	}
 	for _, r := range tu.Content {
 		if r.Scope != SignatureScopeSameMessage || r.Message != "" || !want[r.Field] {

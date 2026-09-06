@@ -308,7 +308,11 @@ type ToolCallView struct {
 	Id        string
 	Name      string
 	Arguments []byte // exact authoritative raw bytes (verbatim)
-	Signature string
+	// InputText is present only for a FREEFORM invocation; the pointer keeps
+	// explicit empty input distinct from a function call.
+	InputText      *string
+	InvocationKind pbv1.ToolInvocationKind
+	Signature      string
 }
 
 // ToolCalls returns the tool-use blocks' views in wire order.
@@ -319,11 +323,17 @@ func ToolCalls(msg *pbv1.Message) []ToolCallView {
 	var out []ToolCallView
 	for i, b := range msg.Blocks {
 		if tu := b.GetToolUse(); tu != nil {
+			var input *string
+			if tu.InputText != nil {
+				v := *tu.InputText
+				input = &v
+			}
 			out = append(out, ToolCallView{
 				Block:     i,
 				Id:        tu.Id,
 				Name:      tu.Name,
 				Arguments: append([]byte(nil), tu.ArgumentsJson...),
+				InputText: input, InvocationKind: tu.InvocationKind,
 				Signature: tu.Signature,
 			})
 		}
@@ -334,10 +344,11 @@ func ToolCalls(msg *pbv1.Message) []ToolCallView {
 // ToolResultView is a copied view of one tool-result block.
 type ToolResultView struct {
 	// Block is the block index inside Message.blocks.
-	Block      int
-	ToolCallId string
-	ToolName   string
-	Content    []ToolResultContentView // ordered nested content, copied
+	Block          int
+	ToolCallId     string
+	ToolName       string
+	Content        []ToolResultContentView // ordered nested content, copied
+	InvocationKind pbv1.ToolInvocationKind
 }
 
 // ToolResultContentView is a copied view of one nested tool-result content
@@ -357,7 +368,7 @@ func ToolResults(msg *pbv1.Message) []ToolResultView {
 	var out []ToolResultView
 	for i, b := range msg.Blocks {
 		if tr := b.GetToolResult(); tr != nil {
-			v := ToolResultView{Block: i, ToolCallId: tr.ToolCallId, ToolName: tr.ToolName}
+			v := ToolResultView{Block: i, ToolCallId: tr.ToolCallId, ToolName: tr.ToolName, InvocationKind: tr.InvocationKind}
 			for _, c := range tr.Content {
 				v.Content = append(v.Content, toolResultContentView(c))
 			}
@@ -393,6 +404,10 @@ type ToolCallInput struct {
 	Id        string
 	Name      string
 	Arguments []byte // exact authoritative raw bytes; must be a JSON object
+	// FREEFORM calls carry a presence-sensitive InputText and no Arguments.
+	// FUNCTION (the zero value) carries Arguments and no InputText.
+	InputText      *string
+	InvocationKind pbv1.ToolInvocationKind
 }
 
 // validateCallInput checks the structural leaf contract of a tool call.
@@ -403,8 +418,23 @@ func validateCallInput(call ToolCallInput) error {
 	if call.Name == "" {
 		return fmt.Errorf("tool call name must be non-empty")
 	}
-	if err := validJSONObject(call.Arguments); err != nil {
-		return fmt.Errorf("tool call arguments: %w", err)
+	switch call.InvocationKind {
+	case pbv1.ToolInvocationKind_TOOL_INVOCATION_KIND_FUNCTION:
+		if call.InputText != nil {
+			return fmt.Errorf("function tool call cannot carry free-form input")
+		}
+		if err := validJSONObject(call.Arguments); err != nil {
+			return fmt.Errorf("tool call arguments: %w", err)
+		}
+	case pbv1.ToolInvocationKind_TOOL_INVOCATION_KIND_FREEFORM:
+		if len(call.Arguments) != 0 {
+			return fmt.Errorf("free-form tool call cannot carry JSON arguments")
+		}
+		if call.InputText == nil {
+			return fmt.Errorf("free-form tool call input must be present")
+		}
+	default:
+		return fmt.Errorf("unknown tool invocation kind %d", call.InvocationKind)
 	}
 	return nil
 }
@@ -427,9 +457,11 @@ func AddToolCall(msg *pbv1.Message, at int, call ToolCallInput) error {
 	}
 	block := &pbv1.RequestBlock{
 		Kind: &pbv1.RequestBlock_ToolUse{ToolUse: &pbv1.RequestToolUseBlock{
-			Id:            call.Id,
-			Name:          call.Name,
-			ArgumentsJson: append([]byte(nil), call.Arguments...),
+			Id:             call.Id,
+			Name:           call.Name,
+			ArgumentsJson:  append([]byte(nil), call.Arguments...),
+			InputText:      cloneString(call.InputText),
+			InvocationKind: call.InvocationKind,
 		}},
 	}
 	msg.Blocks = append(msg.Blocks, nil)
@@ -462,14 +494,30 @@ func ReplaceToolCall(msg *pbv1.Message, block int, call ToolCallInput) error {
 	// exact argument bytes) is a no-op that PRESERVES the call-bound
 	// provenance token; only a real change clears it (stale).
 	if tu.ToolUse.Id == call.Id && tu.ToolUse.Name == call.Name &&
-		bytes.Equal(tu.ToolUse.ArgumentsJson, call.Arguments) {
+		bytes.Equal(tu.ToolUse.ArgumentsJson, call.Arguments) &&
+		equalOptionalString(tu.ToolUse.InputText, call.InputText) &&
+		tu.ToolUse.InvocationKind == call.InvocationKind {
 		return nil
 	}
 	tu.ToolUse.Id = call.Id
 	tu.ToolUse.Name = call.Name
 	tu.ToolUse.ArgumentsJson = append([]byte(nil), call.Arguments...)
+	tu.ToolUse.InputText = cloneString(call.InputText)
+	tu.ToolUse.InvocationKind = call.InvocationKind
 	tu.ToolUse.Signature = "" // stale: changed covered content
 	return nil
+}
+
+func cloneString(v *string) *string {
+	if v == nil {
+		return nil
+	}
+	out := *v
+	return &out
+}
+
+func equalOptionalString(a, b *string) bool {
+	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
 }
 
 // CacheBreakpointView is a copied view of one cache-breakpoint block.

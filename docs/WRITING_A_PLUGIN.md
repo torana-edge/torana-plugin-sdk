@@ -315,7 +315,20 @@ cached prefix and whether the request carries a cache-breakpoint carrier:
   params (`max_tokens` / `temperature` / `top_p` / `stop_sequences`,
   presence-aware). ONLY `stream` and `torana_meta_json` are excluded — every
   other top-level field folds, so an additive field is a deliberate,
-  inventory-tested decision.
+inventory-tested decision.
+
+### Function and free-form tools
+
+`ToolCalls` and `ToolResults` expose both ordinary JSON function calls and
+provider-native free-form tools in the same wire-ordered views. Inspect
+`InvocationKind` before reading the input: `FUNCTION` uses `Arguments`, while
+`FREEFORM` uses the presence-sensitive `InputText` (an empty string is still a
+real input). Free-form results retain their ordered text/unknown content, so
+policy and compaction plugins do not need provider-specific JSON parsing.
+
+Definitions use the same `ToolDef.invocation_kind`. Function definitions carry
+`parameters_json`; free-form definitions carry `input_format_json` and may
+carry an outermost-first `namespace_path` for harness tool namespaces.
 - **Purity**: the projection is a fresh clone; the input is never mutated
   and the returned bytes never alias it. Raw JSON folds verbatim (member
   order and lexemes are identity-relevant), optional scalars fold
