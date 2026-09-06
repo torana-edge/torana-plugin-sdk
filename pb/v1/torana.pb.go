@@ -21,6 +21,58 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// The provider-neutral tool invocation family. FUNCTION is zero so existing
+// function-call producers retain their natural protobuf default.
+type ToolInvocationKind int32
+
+const (
+	// buf:lint:ignore ENUM_ZERO_VALUE_SUFFIX
+	// FUNCTION is deliberately the canonical zero value: existing ordinary
+	// function calls need no redundant presence bit and there is no second
+	// "unspecified function" spelling in the accepted request domain.
+	ToolInvocationKind_TOOL_INVOCATION_KIND_FUNCTION ToolInvocationKind = 0
+	ToolInvocationKind_TOOL_INVOCATION_KIND_FREEFORM ToolInvocationKind = 1
+)
+
+// Enum value maps for ToolInvocationKind.
+var (
+	ToolInvocationKind_name = map[int32]string{
+		0: "TOOL_INVOCATION_KIND_FUNCTION",
+		1: "TOOL_INVOCATION_KIND_FREEFORM",
+	}
+	ToolInvocationKind_value = map[string]int32{
+		"TOOL_INVOCATION_KIND_FUNCTION": 0,
+		"TOOL_INVOCATION_KIND_FREEFORM": 1,
+	}
+)
+
+func (x ToolInvocationKind) Enum() *ToolInvocationKind {
+	p := new(ToolInvocationKind)
+	*p = x
+	return p
+}
+
+func (x ToolInvocationKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ToolInvocationKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_proto_torana_v1_torana_proto_enumTypes[0].Descriptor()
+}
+
+func (ToolInvocationKind) Type() protoreflect.EnumType {
+	return &file_proto_torana_v1_torana_proto_enumTypes[0]
+}
+
+func (x ToolInvocationKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ToolInvocationKind.Descriptor instead.
+func (ToolInvocationKind) EnumDescriptor() ([]byte, []int) {
+	return file_proto_torana_v1_torana_proto_rawDescGZIP(), []int{0}
+}
+
 // Hook names a hook. It is NOT carried on the wire: the payload oneof is the
 // sole discriminator, so a frame cannot claim one hook while carrying another's
 // payload. This type exists for host and SDK code to name hooks in signatures
@@ -99,11 +151,11 @@ func (x Hook) String() string {
 }
 
 func (Hook) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_torana_v1_torana_proto_enumTypes[0].Descriptor()
+	return file_proto_torana_v1_torana_proto_enumTypes[1].Descriptor()
 }
 
 func (Hook) Type() protoreflect.EnumType {
-	return &file_proto_torana_v1_torana_proto_enumTypes[0]
+	return &file_proto_torana_v1_torana_proto_enumTypes[1]
 }
 
 func (x Hook) Number() protoreflect.EnumNumber {
@@ -112,7 +164,7 @@ func (x Hook) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Hook.Descriptor instead.
 func (Hook) EnumDescriptor() ([]byte, []int) {
-	return file_proto_torana_v1_torana_proto_rawDescGZIP(), []int{0}
+	return file_proto_torana_v1_torana_proto_rawDescGZIP(), []int{1}
 }
 
 // ErrorCode classifies a failed host call.
@@ -169,11 +221,11 @@ func (x ErrorCode) String() string {
 }
 
 func (ErrorCode) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_torana_v1_torana_proto_enumTypes[1].Descriptor()
+	return file_proto_torana_v1_torana_proto_enumTypes[2].Descriptor()
 }
 
 func (ErrorCode) Type() protoreflect.EnumType {
-	return &file_proto_torana_v1_torana_proto_enumTypes[1]
+	return &file_proto_torana_v1_torana_proto_enumTypes[2]
 }
 
 func (x ErrorCode) Number() protoreflect.EnumNumber {
@@ -182,7 +234,7 @@ func (x ErrorCode) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ErrorCode.Descriptor instead.
 func (ErrorCode) EnumDescriptor() ([]byte, []int) {
-	return file_proto_torana_v1_torana_proto_rawDescGZIP(), []int{1}
+	return file_proto_torana_v1_torana_proto_rawDescGZIP(), []int{2}
 }
 
 // A single turn in a chat conversation.
@@ -625,8 +677,13 @@ type RequestToolUseBlock struct {
 	// Provider Part-level custom metadata (Gemini partMetadata), absent or a
 	// strict JSON object; covered by this block's signature binding.
 	PartMetadataJson []byte `protobuf:"bytes,5,opt,name=part_metadata_json,json=partMetadataJson,proto3" json:"part_metadata_json,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Free-form tool input. Presence is meaningful: an explicitly empty input
+	// differs from a function call. Required for FREEFORM and forbidden for
+	// FUNCTION; arguments_json has the inverse rule.
+	InputText      *string            `protobuf:"bytes,6,opt,name=input_text,json=inputText,proto3,oneof" json:"input_text,omitempty"`
+	InvocationKind ToolInvocationKind `protobuf:"varint,7,opt,name=invocation_kind,json=invocationKind,proto3,enum=torana.v1.ToolInvocationKind" json:"invocation_kind,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *RequestToolUseBlock) Reset() {
@@ -694,6 +751,20 @@ func (x *RequestToolUseBlock) GetPartMetadataJson() []byte {
 	return nil
 }
 
+func (x *RequestToolUseBlock) GetInputText() string {
+	if x != nil && x.InputText != nil {
+		return *x.InputText
+	}
+	return ""
+}
+
+func (x *RequestToolUseBlock) GetInvocationKind() ToolInvocationKind {
+	if x != nil {
+		return x.InvocationKind
+	}
+	return ToolInvocationKind_TOOL_INVOCATION_KIND_FUNCTION
+}
+
 // A tool result at its exact wire position inside a (usually user-role)
 // message. Provider message boundaries stay intact: one provider message
 // with [text, tool_result, text] stays ONE Message with three blocks.
@@ -725,9 +796,13 @@ type RequestToolResultBlock struct {
 	// a functionResponse part): the complete signed Part — identity, provider
 	// metadata, willContinue/scheduling, and the ordered nested content.
 	// Provenance-governed exactly like the other request tokens.
-	Signature     string `protobuf:"bytes,7,opt,name=signature,proto3" json:"signature,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Signature string `protobuf:"bytes,7,opt,name=signature,proto3" json:"signature,omitempty"`
+	// Selects the provider wire family used for this result. Nested content is
+	// ordered for both families; FREEFORM results commonly carry typed text or
+	// provider-specific structured elements.
+	InvocationKind ToolInvocationKind `protobuf:"varint,8,opt,name=invocation_kind,json=invocationKind,proto3,enum=torana.v1.ToolInvocationKind" json:"invocation_kind,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *RequestToolResultBlock) Reset() {
@@ -807,6 +882,13 @@ func (x *RequestToolResultBlock) GetSignature() string {
 		return x.Signature
 	}
 	return ""
+}
+
+func (x *RequestToolResultBlock) GetInvocationKind() ToolInvocationKind {
+	if x != nil {
+		return x.InvocationKind
+	}
+	return ToolInvocationKind_TOOL_INVOCATION_KIND_FUNCTION
 }
 
 // A provider cache breakpoint at an explicit position in the ordered body:
@@ -1331,9 +1413,18 @@ type ToolDef struct {
 	ParametersJson []byte `protobuf:"bytes,3,opt,name=parameters_json,json=parametersJson,proto3" json:"parameters_json,omitempty"`
 	Strict         bool   `protobuf:"varint,4,opt,name=strict,proto3" json:"strict,omitempty"`
 	// Opaque cache breakpoint after this tool definition (JSON object).
-	CacheControlJson []byte `protobuf:"bytes,5,opt,name=cache_control_json,json=cacheControlJson,proto3" json:"cache_control_json,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	CacheControlJson []byte             `protobuf:"bytes,5,opt,name=cache_control_json,json=cacheControlJson,proto3" json:"cache_control_json,omitempty"`
+	InvocationKind   ToolInvocationKind `protobuf:"varint,6,opt,name=invocation_kind,json=invocationKind,proto3,enum=torana.v1.ToolInvocationKind" json:"invocation_kind,omitempty"`
+	// Required strict JSON object for FREEFORM definitions and absent for
+	// FUNCTION definitions. Carries formats such as a grammar definition
+	// without pretending they are JSON Schema parameters.
+	InputFormatJson []byte `protobuf:"bytes,7,opt,name=input_format_json,json=inputFormatJson,proto3,oneof" json:"input_format_json,omitempty"`
+	// Provider-neutral namespace path, outermost first. Empty for an ordinary
+	// top-level tool. Each present segment is non-empty valid UTF-8. Provider
+	// topology: observable by plugins but host-owned under replacement.
+	NamespacePath []string `protobuf:"bytes,8,rep,name=namespace_path,json=namespacePath,proto3" json:"namespace_path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ToolDef) Reset() {
@@ -1397,6 +1488,27 @@ func (x *ToolDef) GetStrict() bool {
 func (x *ToolDef) GetCacheControlJson() []byte {
 	if x != nil {
 		return x.CacheControlJson
+	}
+	return nil
+}
+
+func (x *ToolDef) GetInvocationKind() ToolInvocationKind {
+	if x != nil {
+		return x.InvocationKind
+	}
+	return ToolInvocationKind_TOOL_INVOCATION_KIND_FUNCTION
+}
+
+func (x *ToolDef) GetInputFormatJson() []byte {
+	if x != nil {
+		return x.InputFormatJson
+	}
+	return nil
+}
+
+func (x *ToolDef) GetNamespacePath() []string {
+	if x != nil {
+		return x.NamespacePath
 	}
 	return nil
 }
@@ -1806,16 +1918,18 @@ func (x *ChatResponse) GetCompletedAtUnixMs() int64 {
 	return 0
 }
 
-// Identifies the tool call a "tool_call" content block is assembling. Its
-// arguments arrive as ToolCallDelta events between the block's start and stop.
+// Identifies the tool call a "tool_call" content block is assembling. FUNCTION
+// arguments or FREEFORM input arrive as ToolCallDelta events between start and
+// stop; invocation_kind selects the one legal delta family.
 type ToolCallRef struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name  string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	// Opaque provider token on the call (Gemini thoughtSignature); empty otherwise.
-	Signature     string `protobuf:"bytes,3,opt,name=signature,proto3" json:"signature,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Signature      string             `protobuf:"bytes,3,opt,name=signature,proto3" json:"signature,omitempty"`
+	InvocationKind ToolInvocationKind `protobuf:"varint,4,opt,name=invocation_kind,json=invocationKind,proto3,enum=torana.v1.ToolInvocationKind" json:"invocation_kind,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ToolCallRef) Reset() {
@@ -1869,6 +1983,13 @@ func (x *ToolCallRef) GetSignature() string {
 	return ""
 }
 
+func (x *ToolCallRef) GetInvocationKind() ToolInvocationKind {
+	if x != nil {
+		return x.InvocationKind
+	}
+	return ToolInvocationKind_TOOL_INVOCATION_KIND_FUNCTION
+}
+
 type ToolCallDelta struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Must name the OPEN tool-call block this delta belongs to: tool deltas
@@ -1876,6 +1997,9 @@ type ToolCallDelta struct {
 	// concurrently. See StreamEvent index invariants.
 	Index          int32  `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
 	ArgumentsDelta string `protobuf:"bytes,2,opt,name=arguments_delta,json=argumentsDelta,proto3" json:"arguments_delta,omitempty"`
+	// Present only for FREEFORM calls. Explicit empty fragments are legal and
+	// distinct from a function-call delta; arguments_delta must then be empty.
+	InputTextDelta *string `protobuf:"bytes,3,opt,name=input_text_delta,json=inputTextDelta,proto3,oneof" json:"input_text_delta,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -1920,6 +2044,13 @@ func (x *ToolCallDelta) GetIndex() int32 {
 func (x *ToolCallDelta) GetArgumentsDelta() string {
 	if x != nil {
 		return x.ArgumentsDelta
+	}
+	return ""
+}
+
+func (x *ToolCallDelta) GetInputTextDelta() string {
+	if x != nil && x.InputTextDelta != nil {
+		return *x.InputTextDelta
 	}
 	return ""
 }
@@ -2414,7 +2545,7 @@ func (x *ContentBlockStop) GetIndex() int32 {
 //
 //	MessageStart{role, id, model}
 //	  ContentBlockStart{index: 0, tool_call{id, name}}
-//	    ToolCallDelta{index: 0, arguments_delta} ...
+//	    ToolCallDelta{index: 0, arguments_delta|input_text_delta} ...
 //	  ContentBlockStart{index: 1, tool_call{id, name}}   // 2nd tool opens
 //	    ToolCallDelta{index: 1, arguments_delta} ...     //   before 0 closes;
 //	    ToolCallDelta{index: 0, arguments_delta} ...     //   deltas interleave
@@ -5359,13 +5490,17 @@ const file_proto_torana_v1_torana_proto_rawDesc = "" +
 	"\tsignature\x18\x02 \x01(\tR\tsignature\x12,\n" +
 	"\x12part_metadata_json\x18\x03 \x01(\fR\x10partMetadataJson\"2\n" +
 	"\x1cRequestRedactedThinkingBlock\x12\x12\n" +
-	"\x04data\x18\x01 \x01(\tR\x04data\"\xac\x01\n" +
+	"\x04data\x18\x01 \x01(\tR\x04data\"\xa7\x02\n" +
 	"\x13RequestToolUseBlock\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12%\n" +
 	"\x0earguments_json\x18\x03 \x01(\fR\rargumentsJson\x12\x1c\n" +
 	"\tsignature\x18\x04 \x01(\tR\tsignature\x12,\n" +
-	"\x12part_metadata_json\x18\x05 \x01(\fR\x10partMetadataJson\"\xd0\x02\n" +
+	"\x12part_metadata_json\x18\x05 \x01(\fR\x10partMetadataJson\x12\"\n" +
+	"\n" +
+	"input_text\x18\x06 \x01(\tH\x00R\tinputText\x88\x01\x01\x12F\n" +
+	"\x0finvocation_kind\x18\a \x01(\x0e2\x1d.torana.v1.ToolInvocationKindR\x0einvocationKindB\r\n" +
+	"\v_input_text\"\x98\x03\n" +
 	"\x16RequestToolResultBlock\x12 \n" +
 	"\ftool_call_id\x18\x01 \x01(\tR\n" +
 	"toolCallId\x12\x1b\n" +
@@ -5376,7 +5511,8 @@ const file_proto_torana_v1_torana_proto_rawDesc = "" +
 	"\n" +
 	"scheduling\x18\x06 \x01(\tH\x01R\n" +
 	"scheduling\x88\x01\x01\x12\x1c\n" +
-	"\tsignature\x18\a \x01(\tR\tsignatureB\x10\n" +
+	"\tsignature\x18\a \x01(\tR\tsignature\x12F\n" +
+	"\x0finvocation_kind\x18\b \x01(\x0e2\x1d.torana.v1.ToolInvocationKindR\x0einvocationKindB\x10\n" +
 	"\x0e_will_continueB\r\n" +
 	"\v_scheduling\"9\n" +
 	"\x16RequestCacheBreakpoint\x12\x1f\n" +
@@ -5407,13 +5543,17 @@ const file_proto_torana_v1_torana_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12%\n" +
 	"\x0earguments_json\x18\x03 \x01(\fR\rargumentsJson\x12\x1c\n" +
-	"\tsignature\x18\x04 \x01(\tR\tsignature\"\xae\x01\n" +
+	"\tsignature\x18\x04 \x01(\tR\tsignature\"\xe4\x02\n" +
 	"\aToolDef\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12'\n" +
 	"\x0fparameters_json\x18\x03 \x01(\fR\x0eparametersJson\x12\x16\n" +
 	"\x06strict\x18\x04 \x01(\bR\x06strict\x12,\n" +
-	"\x12cache_control_json\x18\x05 \x01(\fR\x10cacheControlJson\"\xa9\x01\n" +
+	"\x12cache_control_json\x18\x05 \x01(\fR\x10cacheControlJson\x12F\n" +
+	"\x0finvocation_kind\x18\x06 \x01(\x0e2\x1d.torana.v1.ToolInvocationKindR\x0einvocationKind\x12/\n" +
+	"\x11input_format_json\x18\a \x01(\fH\x00R\x0finputFormatJson\x88\x01\x01\x12%\n" +
+	"\x0enamespace_path\x18\b \x03(\tR\rnamespacePathB\x14\n" +
+	"\x12_input_format_json\"\xa9\x01\n" +
 	"\x05Usage\x12!\n" +
 	"\finput_tokens\x18\x01 \x01(\x05R\vinputTokens\x12#\n" +
 	"\routput_tokens\x18\x02 \x01(\x05R\foutputTokens\x12*\n" +
@@ -5454,14 +5594,17 @@ const file_proto_torana_v1_torana_proto_rawDesc = "" +
 	"\x18provider_extensions_json\x18\b \x01(\fR\x16providerExtensionsJson\x12\x1a\n" +
 	"\bprovider\x18\t \x01(\tR\bprovider\x12/\n" +
 	"\x14completed_at_unix_ms\x18\n" +
-	" \x01(\x03R\x11completedAtUnixMs\"O\n" +
+	" \x01(\x03R\x11completedAtUnixMs\"\x97\x01\n" +
 	"\vToolCallRef\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1c\n" +
-	"\tsignature\x18\x03 \x01(\tR\tsignature\"N\n" +
+	"\tsignature\x18\x03 \x01(\tR\tsignature\x12F\n" +
+	"\x0finvocation_kind\x18\x04 \x01(\x0e2\x1d.torana.v1.ToolInvocationKindR\x0einvocationKind\"\x92\x01\n" +
 	"\rToolCallDelta\x12\x14\n" +
 	"\x05index\x18\x01 \x01(\x05R\x05index\x12'\n" +
-	"\x0farguments_delta\x18\x02 \x01(\tR\x0eargumentsDelta\";\n" +
+	"\x0farguments_delta\x18\x02 \x01(\tR\x0eargumentsDelta\x12-\n" +
+	"\x10input_text_delta\x18\x03 \x01(\tH\x00R\x0einputTextDelta\x88\x01\x01B\x13\n" +
+	"\x11_input_text_delta\";\n" +
 	"\vStreamError\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"H\n" +
@@ -5663,7 +5806,10 @@ const file_proto_torana_v1_torana_proto_rawDesc = "" +
 	"\x15warm_interval_seconds\x18\x05 \x01(\rH\x02R\x13warmIntervalSeconds\x88\x01\x01B\x1a\n" +
 	"\x18_cache_read_usd_per_mtokB\x1b\n" +
 	"\x19_cache_write_usd_per_mtokB\x18\n" +
-	"\x16_warm_interval_seconds*\x94\x01\n" +
+	"\x16_warm_interval_seconds*Z\n" +
+	"\x12ToolInvocationKind\x12!\n" +
+	"\x1dTOOL_INVOCATION_KIND_FUNCTION\x10\x00\x12!\n" +
+	"\x1dTOOL_INVOCATION_KIND_FREEFORM\x10\x01*\x94\x01\n" +
 	"\x04Hook\x12\x14\n" +
 	"\x10HOOK_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13HOOK_BEFORE_REQUEST\x10\x01\x12\x17\n" +
@@ -5692,139 +5838,144 @@ func file_proto_torana_v1_torana_proto_rawDescGZIP() []byte {
 	return file_proto_torana_v1_torana_proto_rawDescData
 }
 
-var file_proto_torana_v1_torana_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_proto_torana_v1_torana_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
 var file_proto_torana_v1_torana_proto_msgTypes = make([]protoimpl.MessageInfo, 72)
 var file_proto_torana_v1_torana_proto_goTypes = []any{
-	(Hook)(0),                             // 0: torana.v1.Hook
-	(ErrorCode)(0),                        // 1: torana.v1.ErrorCode
-	(*Message)(nil),                       // 2: torana.v1.Message
-	(*RequestBlock)(nil),                  // 3: torana.v1.RequestBlock
-	(*RequestTextBlock)(nil),              // 4: torana.v1.RequestTextBlock
-	(*RequestThinkingBlock)(nil),          // 5: torana.v1.RequestThinkingBlock
-	(*RequestRedactedThinkingBlock)(nil),  // 6: torana.v1.RequestRedactedThinkingBlock
-	(*RequestToolUseBlock)(nil),           // 7: torana.v1.RequestToolUseBlock
-	(*RequestToolResultBlock)(nil),        // 8: torana.v1.RequestToolResultBlock
-	(*RequestCacheBreakpoint)(nil),        // 9: torana.v1.RequestCacheBreakpoint
-	(*RequestUnknownBlock)(nil),           // 10: torana.v1.RequestUnknownBlock
-	(*RequestTrailingSignatureBlock)(nil), // 11: torana.v1.RequestTrailingSignatureBlock
-	(*ToolResultContentBlock)(nil),        // 12: torana.v1.ToolResultContentBlock
-	(*ToolResultTextBlock)(nil),           // 13: torana.v1.ToolResultTextBlock
-	(*ToolResultUnknownBlock)(nil),        // 14: torana.v1.ToolResultUnknownBlock
-	(*ToolResultCacheBreakpoint)(nil),     // 15: torana.v1.ToolResultCacheBreakpoint
-	(*ToolCall)(nil),                      // 16: torana.v1.ToolCall
-	(*ToolDef)(nil),                       // 17: torana.v1.ToolDef
-	(*Usage)(nil),                         // 18: torana.v1.Usage
-	(*ChatRequest)(nil),                   // 19: torana.v1.ChatRequest
-	(*ResponseMessage)(nil),               // 20: torana.v1.ResponseMessage
-	(*ChatResponse)(nil),                  // 21: torana.v1.ChatResponse
-	(*ToolCallRef)(nil),                   // 22: torana.v1.ToolCallRef
-	(*ToolCallDelta)(nil),                 // 23: torana.v1.ToolCallDelta
-	(*StreamError)(nil),                   // 24: torana.v1.StreamError
-	(*MessageStart)(nil),                  // 25: torana.v1.MessageStart
-	(*MessageStop)(nil),                   // 26: torana.v1.MessageStop
-	(*TextBlock)(nil),                     // 27: torana.v1.TextBlock
-	(*ThinkingBlock)(nil),                 // 28: torana.v1.ThinkingBlock
-	(*ProviderBlock)(nil),                 // 29: torana.v1.ProviderBlock
-	(*ContentBlockStart)(nil),             // 30: torana.v1.ContentBlockStart
-	(*ContentBlockStop)(nil),              // 31: torana.v1.ContentBlockStop
-	(*StreamEvent)(nil),                   // 32: torana.v1.StreamEvent
-	(*StreamEvents)(nil),                  // 33: torana.v1.StreamEvents
-	(*HttpRequest)(nil),                   // 34: torana.v1.HttpRequest
-	(*HttpResponse)(nil),                  // 35: torana.v1.HttpResponse
-	(*TickRequest)(nil),                   // 36: torana.v1.TickRequest
-	(*TickOutcome)(nil),                   // 37: torana.v1.TickOutcome
-	(*AfterResponse)(nil),                 // 38: torana.v1.AfterResponse
-	(*HookInput)(nil),                     // 39: torana.v1.HookInput
-	(*Suppress)(nil),                      // 40: torana.v1.Suppress
-	(*HookResult)(nil),                    // 41: torana.v1.HookResult
-	(*HostError)(nil),                     // 42: torana.v1.HostError
-	(*HostCallResult)(nil),                // 43: torana.v1.HostCallResult
-	(*BlockRequestArgs)(nil),              // 44: torana.v1.BlockRequestArgs
-	(*RespondRequestArgs)(nil),            // 45: torana.v1.RespondRequestArgs
-	(*RouteRequestArgs)(nil),              // 46: torana.v1.RouteRequestArgs
-	(*SetIdentityArgs)(nil),               // 47: torana.v1.SetIdentityArgs
-	(*StateGetArgs)(nil),                  // 48: torana.v1.StateGetArgs
-	(*StateSetArgs)(nil),                  // 49: torana.v1.StateSetArgs
-	(*StateDeleteArgs)(nil),               // 50: torana.v1.StateDeleteArgs
-	(*MetaGetArgs)(nil),                   // 51: torana.v1.MetaGetArgs
-	(*MetaSetArgs)(nil),                   // 52: torana.v1.MetaSetArgs
-	(*CacheGetArgs)(nil),                  // 53: torana.v1.CacheGetArgs
-	(*CacheSetArgs)(nil),                  // 54: torana.v1.CacheSetArgs
-	(*MetaAppendArgs)(nil),                // 55: torana.v1.MetaAppendArgs
-	(*CredentialGetArgs)(nil),             // 56: torana.v1.CredentialGetArgs
-	(*FileAppendArgs)(nil),                // 57: torana.v1.FileAppendArgs
-	(*FileReadArgs)(nil),                  // 58: torana.v1.FileReadArgs
-	(*FileWriteArgs)(nil),                 // 59: torana.v1.FileWriteArgs
-	(*FileListArgs)(nil),                  // 60: torana.v1.FileListArgs
-	(*FileListResult)(nil),                // 61: torana.v1.FileListResult
-	(*FileDeleteArgs)(nil),                // 62: torana.v1.FileDeleteArgs
-	(*HTTPHeader)(nil),                    // 63: torana.v1.HTTPHeader
-	(*OutboundHTTPRequestArgs)(nil),       // 64: torana.v1.OutboundHTTPRequestArgs
-	(*OutboundHTTPResponse)(nil),          // 65: torana.v1.OutboundHTTPResponse
-	(*ModelMessage)(nil),                  // 66: torana.v1.ModelMessage
-	(*ModelCompleteArgs)(nil),             // 67: torana.v1.ModelCompleteArgs
-	(*ModelCompleteResult)(nil),           // 68: torana.v1.ModelCompleteResult
-	(*ModelPricingGetArgs)(nil),           // 69: torana.v1.ModelPricingGetArgs
-	(*ModelPricing)(nil),                  // 70: torana.v1.ModelPricing
-	(*PromptCachePolicyGetArgs)(nil),      // 71: torana.v1.PromptCachePolicyGetArgs
-	(*PromptCacheTier)(nil),               // 72: torana.v1.PromptCacheTier
-	(*PromptCachePolicy)(nil),             // 73: torana.v1.PromptCachePolicy
+	(ToolInvocationKind)(0),               // 0: torana.v1.ToolInvocationKind
+	(Hook)(0),                             // 1: torana.v1.Hook
+	(ErrorCode)(0),                        // 2: torana.v1.ErrorCode
+	(*Message)(nil),                       // 3: torana.v1.Message
+	(*RequestBlock)(nil),                  // 4: torana.v1.RequestBlock
+	(*RequestTextBlock)(nil),              // 5: torana.v1.RequestTextBlock
+	(*RequestThinkingBlock)(nil),          // 6: torana.v1.RequestThinkingBlock
+	(*RequestRedactedThinkingBlock)(nil),  // 7: torana.v1.RequestRedactedThinkingBlock
+	(*RequestToolUseBlock)(nil),           // 8: torana.v1.RequestToolUseBlock
+	(*RequestToolResultBlock)(nil),        // 9: torana.v1.RequestToolResultBlock
+	(*RequestCacheBreakpoint)(nil),        // 10: torana.v1.RequestCacheBreakpoint
+	(*RequestUnknownBlock)(nil),           // 11: torana.v1.RequestUnknownBlock
+	(*RequestTrailingSignatureBlock)(nil), // 12: torana.v1.RequestTrailingSignatureBlock
+	(*ToolResultContentBlock)(nil),        // 13: torana.v1.ToolResultContentBlock
+	(*ToolResultTextBlock)(nil),           // 14: torana.v1.ToolResultTextBlock
+	(*ToolResultUnknownBlock)(nil),        // 15: torana.v1.ToolResultUnknownBlock
+	(*ToolResultCacheBreakpoint)(nil),     // 16: torana.v1.ToolResultCacheBreakpoint
+	(*ToolCall)(nil),                      // 17: torana.v1.ToolCall
+	(*ToolDef)(nil),                       // 18: torana.v1.ToolDef
+	(*Usage)(nil),                         // 19: torana.v1.Usage
+	(*ChatRequest)(nil),                   // 20: torana.v1.ChatRequest
+	(*ResponseMessage)(nil),               // 21: torana.v1.ResponseMessage
+	(*ChatResponse)(nil),                  // 22: torana.v1.ChatResponse
+	(*ToolCallRef)(nil),                   // 23: torana.v1.ToolCallRef
+	(*ToolCallDelta)(nil),                 // 24: torana.v1.ToolCallDelta
+	(*StreamError)(nil),                   // 25: torana.v1.StreamError
+	(*MessageStart)(nil),                  // 26: torana.v1.MessageStart
+	(*MessageStop)(nil),                   // 27: torana.v1.MessageStop
+	(*TextBlock)(nil),                     // 28: torana.v1.TextBlock
+	(*ThinkingBlock)(nil),                 // 29: torana.v1.ThinkingBlock
+	(*ProviderBlock)(nil),                 // 30: torana.v1.ProviderBlock
+	(*ContentBlockStart)(nil),             // 31: torana.v1.ContentBlockStart
+	(*ContentBlockStop)(nil),              // 32: torana.v1.ContentBlockStop
+	(*StreamEvent)(nil),                   // 33: torana.v1.StreamEvent
+	(*StreamEvents)(nil),                  // 34: torana.v1.StreamEvents
+	(*HttpRequest)(nil),                   // 35: torana.v1.HttpRequest
+	(*HttpResponse)(nil),                  // 36: torana.v1.HttpResponse
+	(*TickRequest)(nil),                   // 37: torana.v1.TickRequest
+	(*TickOutcome)(nil),                   // 38: torana.v1.TickOutcome
+	(*AfterResponse)(nil),                 // 39: torana.v1.AfterResponse
+	(*HookInput)(nil),                     // 40: torana.v1.HookInput
+	(*Suppress)(nil),                      // 41: torana.v1.Suppress
+	(*HookResult)(nil),                    // 42: torana.v1.HookResult
+	(*HostError)(nil),                     // 43: torana.v1.HostError
+	(*HostCallResult)(nil),                // 44: torana.v1.HostCallResult
+	(*BlockRequestArgs)(nil),              // 45: torana.v1.BlockRequestArgs
+	(*RespondRequestArgs)(nil),            // 46: torana.v1.RespondRequestArgs
+	(*RouteRequestArgs)(nil),              // 47: torana.v1.RouteRequestArgs
+	(*SetIdentityArgs)(nil),               // 48: torana.v1.SetIdentityArgs
+	(*StateGetArgs)(nil),                  // 49: torana.v1.StateGetArgs
+	(*StateSetArgs)(nil),                  // 50: torana.v1.StateSetArgs
+	(*StateDeleteArgs)(nil),               // 51: torana.v1.StateDeleteArgs
+	(*MetaGetArgs)(nil),                   // 52: torana.v1.MetaGetArgs
+	(*MetaSetArgs)(nil),                   // 53: torana.v1.MetaSetArgs
+	(*CacheGetArgs)(nil),                  // 54: torana.v1.CacheGetArgs
+	(*CacheSetArgs)(nil),                  // 55: torana.v1.CacheSetArgs
+	(*MetaAppendArgs)(nil),                // 56: torana.v1.MetaAppendArgs
+	(*CredentialGetArgs)(nil),             // 57: torana.v1.CredentialGetArgs
+	(*FileAppendArgs)(nil),                // 58: torana.v1.FileAppendArgs
+	(*FileReadArgs)(nil),                  // 59: torana.v1.FileReadArgs
+	(*FileWriteArgs)(nil),                 // 60: torana.v1.FileWriteArgs
+	(*FileListArgs)(nil),                  // 61: torana.v1.FileListArgs
+	(*FileListResult)(nil),                // 62: torana.v1.FileListResult
+	(*FileDeleteArgs)(nil),                // 63: torana.v1.FileDeleteArgs
+	(*HTTPHeader)(nil),                    // 64: torana.v1.HTTPHeader
+	(*OutboundHTTPRequestArgs)(nil),       // 65: torana.v1.OutboundHTTPRequestArgs
+	(*OutboundHTTPResponse)(nil),          // 66: torana.v1.OutboundHTTPResponse
+	(*ModelMessage)(nil),                  // 67: torana.v1.ModelMessage
+	(*ModelCompleteArgs)(nil),             // 68: torana.v1.ModelCompleteArgs
+	(*ModelCompleteResult)(nil),           // 69: torana.v1.ModelCompleteResult
+	(*ModelPricingGetArgs)(nil),           // 70: torana.v1.ModelPricingGetArgs
+	(*ModelPricing)(nil),                  // 71: torana.v1.ModelPricing
+	(*PromptCachePolicyGetArgs)(nil),      // 72: torana.v1.PromptCachePolicyGetArgs
+	(*PromptCacheTier)(nil),               // 73: torana.v1.PromptCacheTier
+	(*PromptCachePolicy)(nil),             // 74: torana.v1.PromptCachePolicy
 }
 var file_proto_torana_v1_torana_proto_depIdxs = []int32{
-	3,  // 0: torana.v1.Message.blocks:type_name -> torana.v1.RequestBlock
-	4,  // 1: torana.v1.RequestBlock.text:type_name -> torana.v1.RequestTextBlock
-	5,  // 2: torana.v1.RequestBlock.thinking:type_name -> torana.v1.RequestThinkingBlock
-	6,  // 3: torana.v1.RequestBlock.redacted_thinking:type_name -> torana.v1.RequestRedactedThinkingBlock
-	7,  // 4: torana.v1.RequestBlock.tool_use:type_name -> torana.v1.RequestToolUseBlock
-	8,  // 5: torana.v1.RequestBlock.tool_result:type_name -> torana.v1.RequestToolResultBlock
-	9,  // 6: torana.v1.RequestBlock.cache_breakpoint:type_name -> torana.v1.RequestCacheBreakpoint
-	10, // 7: torana.v1.RequestBlock.unknown:type_name -> torana.v1.RequestUnknownBlock
-	11, // 8: torana.v1.RequestBlock.trailing_signature:type_name -> torana.v1.RequestTrailingSignatureBlock
-	12, // 9: torana.v1.RequestToolResultBlock.content:type_name -> torana.v1.ToolResultContentBlock
-	13, // 10: torana.v1.ToolResultContentBlock.text:type_name -> torana.v1.ToolResultTextBlock
-	14, // 11: torana.v1.ToolResultContentBlock.unknown:type_name -> torana.v1.ToolResultUnknownBlock
-	15, // 12: torana.v1.ToolResultContentBlock.cache_breakpoint:type_name -> torana.v1.ToolResultCacheBreakpoint
-	2,  // 13: torana.v1.ChatRequest.messages:type_name -> torana.v1.Message
-	17, // 14: torana.v1.ChatRequest.tools:type_name -> torana.v1.ToolDef
-	16, // 15: torana.v1.ResponseMessage.tool_calls:type_name -> torana.v1.ToolCall
-	20, // 16: torana.v1.ChatResponse.message:type_name -> torana.v1.ResponseMessage
-	18, // 17: torana.v1.ChatResponse.usage:type_name -> torana.v1.Usage
-	27, // 18: torana.v1.ContentBlockStart.text:type_name -> torana.v1.TextBlock
-	28, // 19: torana.v1.ContentBlockStart.thinking:type_name -> torana.v1.ThinkingBlock
-	22, // 20: torana.v1.ContentBlockStart.tool_call:type_name -> torana.v1.ToolCallRef
-	29, // 21: torana.v1.ContentBlockStart.provider:type_name -> torana.v1.ProviderBlock
-	23, // 22: torana.v1.StreamEvent.tool_call_delta:type_name -> torana.v1.ToolCallDelta
-	18, // 23: torana.v1.StreamEvent.usage:type_name -> torana.v1.Usage
-	24, // 24: torana.v1.StreamEvent.error:type_name -> torana.v1.StreamError
-	25, // 25: torana.v1.StreamEvent.message_start:type_name -> torana.v1.MessageStart
-	26, // 26: torana.v1.StreamEvent.message_stop:type_name -> torana.v1.MessageStop
-	30, // 27: torana.v1.StreamEvent.content_block_start:type_name -> torana.v1.ContentBlockStart
-	31, // 28: torana.v1.StreamEvent.content_block_stop:type_name -> torana.v1.ContentBlockStop
-	32, // 29: torana.v1.StreamEvents.events:type_name -> torana.v1.StreamEvent
-	21, // 30: torana.v1.AfterResponse.response:type_name -> torana.v1.ChatResponse
-	19, // 31: torana.v1.HookInput.chat_request:type_name -> torana.v1.ChatRequest
-	38, // 32: torana.v1.HookInput.after_response:type_name -> torana.v1.AfterResponse
-	32, // 33: torana.v1.HookInput.stream_event:type_name -> torana.v1.StreamEvent
-	34, // 34: torana.v1.HookInput.http_request:type_name -> torana.v1.HttpRequest
-	36, // 35: torana.v1.HookInput.tick_request:type_name -> torana.v1.TickRequest
-	19, // 36: torana.v1.HookResult.replace_request:type_name -> torana.v1.ChatRequest
-	21, // 37: torana.v1.HookResult.replace_response:type_name -> torana.v1.ChatResponse
-	33, // 38: torana.v1.HookResult.emit_events:type_name -> torana.v1.StreamEvents
-	35, // 39: torana.v1.HookResult.serve_http:type_name -> torana.v1.HttpResponse
-	37, // 40: torana.v1.HookResult.tick_outcome:type_name -> torana.v1.TickOutcome
-	40, // 41: torana.v1.HookResult.suppress:type_name -> torana.v1.Suppress
-	1,  // 42: torana.v1.HostError.code:type_name -> torana.v1.ErrorCode
-	42, // 43: torana.v1.HostCallResult.error:type_name -> torana.v1.HostError
-	63, // 44: torana.v1.OutboundHTTPRequestArgs.headers:type_name -> torana.v1.HTTPHeader
-	63, // 45: torana.v1.OutboundHTTPResponse.headers:type_name -> torana.v1.HTTPHeader
-	66, // 46: torana.v1.ModelCompleteArgs.messages:type_name -> torana.v1.ModelMessage
-	18, // 47: torana.v1.ModelCompleteResult.usage:type_name -> torana.v1.Usage
-	72, // 48: torana.v1.PromptCachePolicy.tiers:type_name -> torana.v1.PromptCacheTier
-	49, // [49:49] is the sub-list for method output_type
-	49, // [49:49] is the sub-list for method input_type
-	49, // [49:49] is the sub-list for extension type_name
-	49, // [49:49] is the sub-list for extension extendee
-	0,  // [0:49] is the sub-list for field type_name
+	4,  // 0: torana.v1.Message.blocks:type_name -> torana.v1.RequestBlock
+	5,  // 1: torana.v1.RequestBlock.text:type_name -> torana.v1.RequestTextBlock
+	6,  // 2: torana.v1.RequestBlock.thinking:type_name -> torana.v1.RequestThinkingBlock
+	7,  // 3: torana.v1.RequestBlock.redacted_thinking:type_name -> torana.v1.RequestRedactedThinkingBlock
+	8,  // 4: torana.v1.RequestBlock.tool_use:type_name -> torana.v1.RequestToolUseBlock
+	9,  // 5: torana.v1.RequestBlock.tool_result:type_name -> torana.v1.RequestToolResultBlock
+	10, // 6: torana.v1.RequestBlock.cache_breakpoint:type_name -> torana.v1.RequestCacheBreakpoint
+	11, // 7: torana.v1.RequestBlock.unknown:type_name -> torana.v1.RequestUnknownBlock
+	12, // 8: torana.v1.RequestBlock.trailing_signature:type_name -> torana.v1.RequestTrailingSignatureBlock
+	0,  // 9: torana.v1.RequestToolUseBlock.invocation_kind:type_name -> torana.v1.ToolInvocationKind
+	13, // 10: torana.v1.RequestToolResultBlock.content:type_name -> torana.v1.ToolResultContentBlock
+	0,  // 11: torana.v1.RequestToolResultBlock.invocation_kind:type_name -> torana.v1.ToolInvocationKind
+	14, // 12: torana.v1.ToolResultContentBlock.text:type_name -> torana.v1.ToolResultTextBlock
+	15, // 13: torana.v1.ToolResultContentBlock.unknown:type_name -> torana.v1.ToolResultUnknownBlock
+	16, // 14: torana.v1.ToolResultContentBlock.cache_breakpoint:type_name -> torana.v1.ToolResultCacheBreakpoint
+	0,  // 15: torana.v1.ToolDef.invocation_kind:type_name -> torana.v1.ToolInvocationKind
+	3,  // 16: torana.v1.ChatRequest.messages:type_name -> torana.v1.Message
+	18, // 17: torana.v1.ChatRequest.tools:type_name -> torana.v1.ToolDef
+	17, // 18: torana.v1.ResponseMessage.tool_calls:type_name -> torana.v1.ToolCall
+	21, // 19: torana.v1.ChatResponse.message:type_name -> torana.v1.ResponseMessage
+	19, // 20: torana.v1.ChatResponse.usage:type_name -> torana.v1.Usage
+	0,  // 21: torana.v1.ToolCallRef.invocation_kind:type_name -> torana.v1.ToolInvocationKind
+	28, // 22: torana.v1.ContentBlockStart.text:type_name -> torana.v1.TextBlock
+	29, // 23: torana.v1.ContentBlockStart.thinking:type_name -> torana.v1.ThinkingBlock
+	23, // 24: torana.v1.ContentBlockStart.tool_call:type_name -> torana.v1.ToolCallRef
+	30, // 25: torana.v1.ContentBlockStart.provider:type_name -> torana.v1.ProviderBlock
+	24, // 26: torana.v1.StreamEvent.tool_call_delta:type_name -> torana.v1.ToolCallDelta
+	19, // 27: torana.v1.StreamEvent.usage:type_name -> torana.v1.Usage
+	25, // 28: torana.v1.StreamEvent.error:type_name -> torana.v1.StreamError
+	26, // 29: torana.v1.StreamEvent.message_start:type_name -> torana.v1.MessageStart
+	27, // 30: torana.v1.StreamEvent.message_stop:type_name -> torana.v1.MessageStop
+	31, // 31: torana.v1.StreamEvent.content_block_start:type_name -> torana.v1.ContentBlockStart
+	32, // 32: torana.v1.StreamEvent.content_block_stop:type_name -> torana.v1.ContentBlockStop
+	33, // 33: torana.v1.StreamEvents.events:type_name -> torana.v1.StreamEvent
+	22, // 34: torana.v1.AfterResponse.response:type_name -> torana.v1.ChatResponse
+	20, // 35: torana.v1.HookInput.chat_request:type_name -> torana.v1.ChatRequest
+	39, // 36: torana.v1.HookInput.after_response:type_name -> torana.v1.AfterResponse
+	33, // 37: torana.v1.HookInput.stream_event:type_name -> torana.v1.StreamEvent
+	35, // 38: torana.v1.HookInput.http_request:type_name -> torana.v1.HttpRequest
+	37, // 39: torana.v1.HookInput.tick_request:type_name -> torana.v1.TickRequest
+	20, // 40: torana.v1.HookResult.replace_request:type_name -> torana.v1.ChatRequest
+	22, // 41: torana.v1.HookResult.replace_response:type_name -> torana.v1.ChatResponse
+	34, // 42: torana.v1.HookResult.emit_events:type_name -> torana.v1.StreamEvents
+	36, // 43: torana.v1.HookResult.serve_http:type_name -> torana.v1.HttpResponse
+	38, // 44: torana.v1.HookResult.tick_outcome:type_name -> torana.v1.TickOutcome
+	41, // 45: torana.v1.HookResult.suppress:type_name -> torana.v1.Suppress
+	2,  // 46: torana.v1.HostError.code:type_name -> torana.v1.ErrorCode
+	43, // 47: torana.v1.HostCallResult.error:type_name -> torana.v1.HostError
+	64, // 48: torana.v1.OutboundHTTPRequestArgs.headers:type_name -> torana.v1.HTTPHeader
+	64, // 49: torana.v1.OutboundHTTPResponse.headers:type_name -> torana.v1.HTTPHeader
+	67, // 50: torana.v1.ModelCompleteArgs.messages:type_name -> torana.v1.ModelMessage
+	19, // 51: torana.v1.ModelCompleteResult.usage:type_name -> torana.v1.Usage
+	73, // 52: torana.v1.PromptCachePolicy.tiers:type_name -> torana.v1.PromptCacheTier
+	53, // [53:53] is the sub-list for method output_type
+	53, // [53:53] is the sub-list for method input_type
+	53, // [53:53] is the sub-list for extension type_name
+	53, // [53:53] is the sub-list for extension extendee
+	0,  // [0:53] is the sub-list for field type_name
 }
 
 func init() { file_proto_torana_v1_torana_proto_init() }
@@ -5842,14 +5993,17 @@ func file_proto_torana_v1_torana_proto_init() {
 		(*RequestBlock_Unknown)(nil),
 		(*RequestBlock_TrailingSignature)(nil),
 	}
+	file_proto_torana_v1_torana_proto_msgTypes[5].OneofWrappers = []any{}
 	file_proto_torana_v1_torana_proto_msgTypes[6].OneofWrappers = []any{}
 	file_proto_torana_v1_torana_proto_msgTypes[10].OneofWrappers = []any{
 		(*ToolResultContentBlock_Text)(nil),
 		(*ToolResultContentBlock_Unknown)(nil),
 		(*ToolResultContentBlock_CacheBreakpoint)(nil),
 	}
+	file_proto_torana_v1_torana_proto_msgTypes[15].OneofWrappers = []any{}
 	file_proto_torana_v1_torana_proto_msgTypes[17].OneofWrappers = []any{}
 	file_proto_torana_v1_torana_proto_msgTypes[18].OneofWrappers = []any{}
+	file_proto_torana_v1_torana_proto_msgTypes[21].OneofWrappers = []any{}
 	file_proto_torana_v1_torana_proto_msgTypes[28].OneofWrappers = []any{
 		(*ContentBlockStart_Text)(nil),
 		(*ContentBlockStart_Thinking)(nil),
@@ -5896,7 +6050,7 @@ func file_proto_torana_v1_torana_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_torana_v1_torana_proto_rawDesc), len(file_proto_torana_v1_torana_proto_rawDesc)),
-			NumEnums:      2,
+			NumEnums:      3,
 			NumMessages:   72,
 			NumExtensions: 0,
 			NumServices:   0,

@@ -19,6 +19,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"testing"
 
 	"github.com/torana-edge/torana-plugin-sdk/outboundpolicy"
@@ -91,6 +92,13 @@ func ownRefValue(b *pbv1.RequestBlock, surface, ref string) string {
 			return tu.Name
 		case "arguments_json":
 			return string(tu.ArgumentsJson)
+		case "input_text":
+			if tu.InputText == nil {
+				return "absent"
+			}
+			return "present:" + *tu.InputText
+		case "invocation_kind":
+			return fmt.Sprint(tu.InvocationKind)
 		case "part_metadata_json":
 			return string(tu.PartMetadataJson)
 		}
@@ -136,6 +144,8 @@ func ownRefValue(b *pbv1.RequestBlock, surface, ref string) string {
 				}
 			}
 			return out
+		case "invocation_kind":
+			return fmt.Sprint(tr.InvocationKind)
 		}
 	case "torana.v1.RequestTrailingSignatureBlock":
 		ts := b.GetTrailingSignature()
@@ -255,6 +265,17 @@ func surfaceBaseline(surface string) *pbv1.Message {
 	return nil
 }
 
+func baselineForRef(surface, ref string) *pbv1.Message {
+	base := surfaceBaseline(surface)
+	if surface == "torana.v1.RequestToolUseBlock" && ref == "input_text" {
+		tu := tokenBlockOf(base, surface).GetToolUse()
+		tu.ArgumentsJson = nil
+		tu.InvocationKind = pbv1.ToolInvocationKind_TOOL_INVOCATION_KIND_FREEFORM
+		tu.InputText = strPtr("before")
+	}
+	return base
+}
+
 // resultContentHelpers builds the tool-result content arm helpers.
 func trUnknownContent() *pbv1.ToolResultContentBlock {
 	return &pbv1.ToolResultContentBlock{Kind: &pbv1.ToolResultContentBlock_Unknown{Unknown: &pbv1.ToolResultUnknownBlock{Kind: "k", PayloadJson: []byte(`{}`)}}}
@@ -313,6 +334,12 @@ func mutatorFor(surface, ref string, scope outboundpolicy.SignatureScope) func(*
 				b.GetToolUse().Name = "write"
 			case "arguments_json":
 				b.GetToolUse().ArgumentsJson = []byte(`{"x":1}`)
+			case "input_text":
+				b.GetToolUse().InputText = strPtr("input")
+			case "invocation_kind":
+				b.GetToolUse().InvocationKind = pbv1.ToolInvocationKind_TOOL_INVOCATION_KIND_FREEFORM
+				b.GetToolUse().ArgumentsJson = nil
+				b.GetToolUse().InputText = strPtr("input")
 			case "part_metadata_json":
 				b.GetToolUse().PartMetadataJson = []byte(`{"x":1}`)
 			}
@@ -340,6 +367,8 @@ func mutatorFor(surface, ref string, scope outboundpolicy.SignatureScope) func(*
 				tr.Scheduling = strPtr("SILENT")
 			case "content":
 				tr.Content = append(tr.Content, trUnknownContent())
+			case "invocation_kind":
+				tr.InvocationKind = pbv1.ToolInvocationKind_TOOL_INVOCATION_KIND_FREEFORM
 			}
 		case "torana.v1.RequestTrailingSignatureBlock":
 			if ref == "part_metadata_json" {
@@ -403,12 +432,17 @@ func TestSignatureMatrixBidirectionalInventory(t *testing.T) {
 	for _, c := range contracts {
 		for _, ref := range c.Content {
 			caseKeys[c.Message+"/"+scopeName(ref.Scope)+"/"+ref.Ref] = true
-			base := surfaceBaseline(c.Message)
+			base := baselineForRef(c.Message, ref.Ref)
 			if base == nil {
 				t.Fatalf("no baseline for %s", c.Message)
 			}
 			mutated := proto.Clone(base).(*pbv1.Message)
 			mutatorFor(c.Message, ref.Ref, ref.Scope)(mutated)
+			for label, candidate := range map[string]*pbv1.Message{"before": base, "after": mutated} {
+				if err := (&pbv1.ChatRequest{Model: "m", Messages: []*pbv1.Message{candidate}}).ValidateReplacement(); err != nil {
+					t.Fatalf("%s/%s: %s state is outside the replacement domain: %v", c.Message, ref.Ref, label, err)
+				}
+			}
 			before := coveredProjection(base, c)
 			after := coveredProjection(mutated, c)
 			if before == after {

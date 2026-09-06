@@ -210,6 +210,9 @@ func TestMarkerCarrierInventory(t *testing.T) {
 			"parameters_json":    false,
 			"strict":             false,
 			"cache_control_json": true,
+			"invocation_kind":    false,
+			"input_format_json":  false,
+			"namespace_path":     false,
 		}, ""},
 		{"RequestBlock", (&RequestBlock{}).ProtoReflect().Descriptor(), func(d protoreflect.MessageDescriptor) []protoreflect.FieldDescriptor {
 			var out []protoreflect.FieldDescriptor

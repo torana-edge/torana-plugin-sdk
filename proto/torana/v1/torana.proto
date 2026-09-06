@@ -111,6 +111,11 @@ message RequestToolUseBlock {
   // Provider Part-level custom metadata (Gemini partMetadata), absent or a
   // strict JSON object; covered by this block's signature binding.
   bytes part_metadata_json = 5;
+  // Free-form tool input. Presence is meaningful: an explicitly empty input
+  // differs from a function call. Required for FREEFORM and forbidden for
+  // FUNCTION; arguments_json has the inverse rule.
+  optional string input_text = 6;
+  ToolInvocationKind invocation_kind = 7;
 }
 
 // A tool result at its exact wire position inside a (usually user-role)
@@ -144,6 +149,21 @@ message RequestToolResultBlock {
   // metadata, willContinue/scheduling, and the ordered nested content.
   // Provenance-governed exactly like the other request tokens.
   string signature = 7;
+  // Selects the provider wire family used for this result. Nested content is
+  // ordered for both families; FREEFORM results commonly carry typed text or
+  // provider-specific structured elements.
+  ToolInvocationKind invocation_kind = 8;
+}
+
+// The provider-neutral tool invocation family. FUNCTION is zero so existing
+// function-call producers retain their natural protobuf default.
+enum ToolInvocationKind {
+  // buf:lint:ignore ENUM_ZERO_VALUE_SUFFIX
+  // FUNCTION is deliberately the canonical zero value: existing ordinary
+  // function calls need no redundant presence bit and there is no second
+  // "unspecified function" spelling in the accepted request domain.
+  TOOL_INVOCATION_KIND_FUNCTION = 0;
+  TOOL_INVOCATION_KIND_FREEFORM = 1;
 }
 
 // A provider cache breakpoint at an explicit position in the ordered body:
@@ -242,6 +262,15 @@ message ToolDef {
   bool strict = 4;
   // Opaque cache breakpoint after this tool definition (JSON object).
   bytes cache_control_json = 5;
+  ToolInvocationKind invocation_kind = 6;
+  // Required strict JSON object for FREEFORM definitions and absent for
+  // FUNCTION definitions. Carries formats such as a grammar definition
+  // without pretending they are JSON Schema parameters.
+  optional bytes input_format_json = 7;
+  // Provider-neutral namespace path, outermost first. Empty for an ordinary
+  // top-level tool. Each present segment is non-empty valid UTF-8. Provider
+  // topology: observable by plugins but host-owned under replacement.
+  repeated string namespace_path = 8;
 }
 
 // Token accounting reported by the provider.
@@ -335,13 +364,15 @@ message ChatResponse {
 // Streaming
 // ---------------------------------------------------------------------------
 
-// Identifies the tool call a "tool_call" content block is assembling. Its
-// arguments arrive as ToolCallDelta events between the block's start and stop.
+// Identifies the tool call a "tool_call" content block is assembling. FUNCTION
+// arguments or FREEFORM input arrive as ToolCallDelta events between start and
+// stop; invocation_kind selects the one legal delta family.
 message ToolCallRef {
   string id = 1;
   string name = 2;
   // Opaque provider token on the call (Gemini thoughtSignature); empty otherwise.
   string signature = 3;
+  ToolInvocationKind invocation_kind = 4;
 }
 
 message ToolCallDelta {
@@ -350,6 +381,9 @@ message ToolCallDelta {
   // concurrently. See StreamEvent index invariants.
   int32 index = 1;
   string arguments_delta = 2;
+  // Present only for FREEFORM calls. Explicit empty fragments are legal and
+  // distinct from a function-call delta; arguments_delta must then be empty.
+  optional string input_text_delta = 3;
 }
 
 message StreamError {
@@ -441,7 +475,7 @@ message ContentBlockStop {
 //
 //   MessageStart{role, id, model}
 //     ContentBlockStart{index: 0, tool_call{id, name}}
-//       ToolCallDelta{index: 0, arguments_delta} ...
+//       ToolCallDelta{index: 0, arguments_delta|input_text_delta} ...
 //     ContentBlockStart{index: 1, tool_call{id, name}}   // 2nd tool opens
 //       ToolCallDelta{index: 1, arguments_delta} ...     //   before 0 closes;
 //       ToolCallDelta{index: 0, arguments_delta} ...     //   deltas interleave

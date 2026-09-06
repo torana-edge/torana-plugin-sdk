@@ -146,6 +146,9 @@ func (x *ContentBlockStart) Validate() error {
 		if b.ToolCall.Name == "" {
 			return fmt.Errorf("tool-call block at index %d has no tool name", x.Index)
 		}
+		if !validToolInvocationKind(b.ToolCall.InvocationKind) {
+			return fmt.Errorf("tool-call block at index %d has unknown invocation kind %d", x.Index, b.ToolCall.InvocationKind)
+		}
 
 	case *ContentBlockStart_Provider:
 		if b == nil || b.Provider == nil {
@@ -181,7 +184,15 @@ func (x *ToolCallDelta) Validate() error {
 	if x.Index < 0 {
 		return fmt.Errorf("tool call delta index %d is negative", x.Index)
 	}
+	if x.InputTextDelta != nil && x.ArgumentsDelta != "" {
+		return fmt.Errorf("tool call delta cannot carry both arguments and free-form input")
+	}
 	return nil
+}
+
+func validToolInvocationKind(kind ToolInvocationKind) bool {
+	return kind == ToolInvocationKind_TOOL_INVOCATION_KIND_FUNCTION ||
+		kind == ToolInvocationKind_TOOL_INVOCATION_KIND_FREEFORM
 }
 
 // Validate reports whether a non-streaming tool call is applicable as a

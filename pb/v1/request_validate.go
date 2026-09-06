@@ -26,9 +26,10 @@ package v1
 //	                                 optional provenance-governed signature
 //	RequestThinkingBlock              text + current-block signature
 //	RequestRedactedThinkingBlock      data
-//	RequestToolUseBlock               non-empty id, non-empty name,
-//	                                 arguments_json REQUIRED non-empty JSON object ({} canonical),
-//	                                 optional provenance-governed signature
+//	RequestToolUseBlock               non-empty id and name; FUNCTION carries
+//	                                 required object arguments_json and no input_text;
+//	                                 FREEFORM carries present input_text (empty legal)
+//	                                 and no arguments_json
 //	RequestToolResultBlock            non-empty tool_call_id, optional tool_name,
 //	                                 NON-EMPTY ordered NESTED
 //	                                 ToolResultContentBlock content (one
@@ -50,10 +51,11 @@ package v1
 //	                                 no provider vocabulary to prove it
 //	RequestTrailingSignatureBlock     non-empty token, ASSISTANT-ONLY, FINAL
 //	ToolResultContentBlock            oneof text | unknown | cache_breakpoint
-//	ToolDef                           non-empty name,
-//	                                 parameters_json REQUIRED non-empty JSON object
-//	                                 ({} is a valid unconstrained schema; empty bytes are not),
-//	                                 cache_control_json absent | JSON object
+//	ToolDef                           non-empty name; FUNCTION carries required
+//	                                 object parameters_json; FREEFORM carries
+//	                                 required object input_format_json; namespace
+//	                                 segments are non-empty; cache_control_json
+//	                                 absent | JSON object
 //
 // These rules are ABSOLUTE STRUCTURAL validity: they validate what a plugin
 // RETURNS as a ReplaceRequest with no accepted request in sight, so the
@@ -104,7 +106,7 @@ var requestJSONFields = map[string]jsonFieldRule{
 	"torana.v1.ChatRequest.torana_meta_json":          {shape: "object"},
 	"torana.v1.ChatRequest.provider_extensions_json":  {shape: "object"},
 	"torana.v1.ChatRequest.safety_settings_json":      {shape: "array"},
-	"torana.v1.RequestToolUseBlock.arguments_json":    {shape: "object", required: true},
+	"torana.v1.RequestToolUseBlock.arguments_json":    {shape: "object"},
 	"torana.v1.RequestUnknownBlock.payload_json":      {shape: "object", required: true},
 	"torana.v1.RequestCacheBreakpoint.marker_json":    {shape: "object", required: true},
 	"torana.v1.ToolResultUnknownBlock.payload_json":   {shape: "object", required: true},
@@ -113,8 +115,9 @@ var requestJSONFields = map[string]jsonFieldRule{
 	// inventory totality; the request validator never walks it — the
 	// response validator governs its shape.
 	"torana.v1.ToolCall.arguments_json":    {shape: "object", required: true},
-	"torana.v1.ToolDef.parameters_json":    {shape: "object", required: true},
+	"torana.v1.ToolDef.parameters_json":    {shape: "object"},
 	"torana.v1.ToolDef.cache_control_json": {shape: "object"},
+	"torana.v1.ToolDef.input_format_json":  {shape: "object"},
 	// Provider Part-level custom metadata (Gemini partMetadata): absent or a
 	// strict JSON object, on every Part-mapped block.
 	"torana.v1.RequestTextBlock.part_metadata_json":              {shape: "object"},
@@ -180,16 +183,19 @@ var requestScalarRules = map[string]string{
 	// RequestRedactedThinkingBlock
 	"torana.v1.RequestRedactedThinkingBlock.data": "text-utf8",
 	// RequestToolUseBlock
-	"torana.v1.RequestToolUseBlock.id":        "text-required-utf8",
-	"torana.v1.RequestToolUseBlock.name":      "text-required-utf8",
-	"torana.v1.RequestToolUseBlock.signature": "text-utf8",
+	"torana.v1.RequestToolUseBlock.id":              "text-required-utf8",
+	"torana.v1.RequestToolUseBlock.name":            "text-required-utf8",
+	"torana.v1.RequestToolUseBlock.signature":       "text-utf8",
+	"torana.v1.RequestToolUseBlock.input_text":      "text-utf8-optional",
+	"torana.v1.RequestToolUseBlock.invocation_kind": "enum-tool-invocation-kind",
 	// RequestToolResultBlock
-	"torana.v1.RequestToolResultBlock.tool_call_id":  "text-required-utf8",
-	"torana.v1.RequestToolResultBlock.tool_name":     "text-utf8",
-	"torana.v1.RequestToolResultBlock.content":       "repeated-message-nonnil",
-	"torana.v1.RequestToolResultBlock.will_continue": "bool-optional",
-	"torana.v1.RequestToolResultBlock.scheduling":    "text-utf8-optional",
-	"torana.v1.RequestToolResultBlock.signature":     "text-utf8",
+	"torana.v1.RequestToolResultBlock.tool_call_id":    "text-required-utf8",
+	"torana.v1.RequestToolResultBlock.tool_name":       "text-utf8",
+	"torana.v1.RequestToolResultBlock.content":         "repeated-message-nonnil",
+	"torana.v1.RequestToolResultBlock.will_continue":   "bool-optional",
+	"torana.v1.RequestToolResultBlock.scheduling":      "text-utf8-optional",
+	"torana.v1.RequestToolResultBlock.signature":       "text-utf8",
+	"torana.v1.RequestToolResultBlock.invocation_kind": "enum-tool-invocation-kind",
 	// ToolResultContentBlock oneof member fields
 	"torana.v1.ToolResultContentBlock.text":             "oneof-message-member",
 	"torana.v1.ToolResultContentBlock.unknown":          "oneof-message-member",
@@ -210,9 +216,11 @@ var requestScalarRules = map[string]string{
 	"torana.v1.ToolCall.name":      "text-required-utf8",
 	"torana.v1.ToolCall.signature": "text-utf8",
 	// ToolDef
-	"torana.v1.ToolDef.name":        "text-required-utf8",
-	"torana.v1.ToolDef.description": "text-utf8",
-	"torana.v1.ToolDef.strict":      "bool",
+	"torana.v1.ToolDef.name":            "text-required-utf8",
+	"torana.v1.ToolDef.description":     "text-utf8",
+	"torana.v1.ToolDef.strict":          "bool",
+	"torana.v1.ToolDef.invocation_kind": "enum-tool-invocation-kind",
+	"torana.v1.ToolDef.namespace_path":  "repeated-text-required-utf8",
 }
 
 // checkStringsUTF8 enforces UTF-8 validity on every protobuf string field
@@ -462,6 +470,24 @@ func validateRequestBlock(b *RequestBlock, mi string, bi, blockCount int, role s
 		if tu.Name == "" {
 			return fmt.Errorf("%s.tool_use.name must be non-empty", what)
 		}
+		switch tu.InvocationKind {
+		case ToolInvocationKind_TOOL_INVOCATION_KIND_FUNCTION:
+			if tu.InputText != nil {
+				return fmt.Errorf("%s.tool_use.input_text is forbidden for a function invocation", what)
+			}
+			if len(tu.ArgumentsJson) == 0 {
+				return fmt.Errorf("%s.tool_use.arguments_json is required for a function invocation", what)
+			}
+		case ToolInvocationKind_TOOL_INVOCATION_KIND_FREEFORM:
+			if len(tu.ArgumentsJson) != 0 {
+				return fmt.Errorf("%s.tool_use.arguments_json is forbidden for a free-form invocation", what)
+			}
+			if tu.InputText == nil {
+				return fmt.Errorf("%s.tool_use.input_text is required for a free-form invocation", what)
+			}
+		default:
+			return fmt.Errorf("%s.tool_use.invocation_kind is unknown", what)
+		}
 		if err := validateJSONField(tu.ArgumentsJson, what+".tool_use.arguments_json",
 			requestJSONFields["torana.v1.RequestToolUseBlock.arguments_json"]); err != nil {
 			return err
@@ -478,6 +504,10 @@ func validateRequestBlock(b *RequestBlock, mi string, bi, blockCount int, role s
 		}
 		if tr.ToolCallId == "" {
 			return fmt.Errorf("%s.tool_result.tool_call_id must be non-empty", what)
+		}
+		if tr.InvocationKind != ToolInvocationKind_TOOL_INVOCATION_KIND_FUNCTION &&
+			tr.InvocationKind != ToolInvocationKind_TOOL_INVOCATION_KIND_FREEFORM {
+			return fmt.Errorf("%s.tool_result.invocation_kind is unknown", what)
 		}
 		if err := validateJSONField(tr.PartMetadataJson, what+".tool_result.part_metadata_json",
 			requestJSONFields["torana.v1.RequestToolResultBlock.part_metadata_json"]); err != nil {
@@ -607,8 +637,38 @@ func validateToolDefReplacement(td *ToolDef, i int) error {
 	if td.Name == "" {
 		return fmt.Errorf("%s.name must be non-empty", what)
 	}
+	switch td.InvocationKind {
+	case ToolInvocationKind_TOOL_INVOCATION_KIND_FUNCTION:
+		if len(td.ParametersJson) == 0 {
+			return fmt.Errorf("%s.parameters_json is required for a function definition", what)
+		}
+		if td.InputFormatJson != nil {
+			return fmt.Errorf("%s.input_format_json is forbidden for a function definition", what)
+		}
+	case ToolInvocationKind_TOOL_INVOCATION_KIND_FREEFORM:
+		if len(td.ParametersJson) != 0 {
+			return fmt.Errorf("%s.parameters_json is forbidden for a free-form definition", what)
+		}
+		if len(td.InputFormatJson) == 0 {
+			return fmt.Errorf("%s.input_format_json is required for a free-form definition", what)
+		}
+		if td.Strict {
+			return fmt.Errorf("%s.strict is forbidden for a free-form definition", what)
+		}
+	default:
+		return fmt.Errorf("%s.invocation_kind is unknown", what)
+	}
+	for j, segment := range td.NamespacePath {
+		if segment == "" {
+			return fmt.Errorf("%s.namespace_path[%d] must be non-empty", what, j)
+		}
+	}
 	if err := validateJSONField(td.ParametersJson, what+".parameters_json",
 		requestJSONFields["torana.v1.ToolDef.parameters_json"]); err != nil {
+		return err
+	}
+	if err := validateJSONField(td.InputFormatJson, what+".input_format_json",
+		requestJSONFields["torana.v1.ToolDef.input_format_json"]); err != nil {
 		return err
 	}
 	return validateJSONField(td.CacheControlJson, what+".cache_control_json",

@@ -24,7 +24,10 @@ type signedScope struct {
 	signature string
 	id        string
 	name      string
+	kind      pbv1.ToolInvocationKind
 	arguments string
+	input     string
+	inputSeen bool
 }
 
 func scopeOf(events []*pbv1.StreamEvent, index int32) signedScope {
@@ -44,9 +47,14 @@ func scopeOf(events []*pbv1.StreamEvent, index int32) signedScope {
 			s.signature = tc.ToolCall.Signature
 			s.id = tc.ToolCall.Id
 			s.name = tc.ToolCall.Name
+			s.kind = tc.ToolCall.InvocationKind
 		case *pbv1.StreamEvent_ToolCallDelta:
 			if e.ToolCallDelta.Index == index {
 				s.arguments += e.ToolCallDelta.ArgumentsDelta
+				if e.ToolCallDelta.InputTextDelta != nil {
+					s.inputSeen = true
+					s.input += *e.ToolCallDelta.InputTextDelta
+				}
 			}
 		}
 	}
@@ -54,9 +62,11 @@ func scopeOf(events []*pbv1.StreamEvent, index int32) signedScope {
 }
 
 // contentChanged compares everything the ToolCallRef.signature binding covers:
-// id, name, and the assembled arguments. Not the signature itself.
+// id, name, invocation family, and the assembled arguments or free-form input.
+// Not the signature itself or transport fragment boundaries.
 func contentChanged(a, b signedScope) bool {
-	return a.id != b.id || a.name != b.name || a.arguments != b.arguments
+	return a.id != b.id || a.name != b.name || a.kind != b.kind ||
+		a.arguments != b.arguments || a.inputSeen != b.inputSeen || a.input != b.input
 }
 
 // The fixtures are the cross-repo contract, so they must hold up when the
@@ -197,6 +207,32 @@ func TestEmitAssembledToolCallSatisfiesThePolicy(t *testing.T) {
 			}
 			if !got.Allowed() {
 				t.Fatalf("the SDK emits output its own policy rejects: %v", got)
+			}
+		})
+	}
+}
+
+func TestEmitAssembledFreeformToolCallSatisfiesThePolicy(t *testing.T) {
+	original := "echo original"
+	call := plugin_sdk.ToolCall{
+		Index: 4, ID: "call", Name: "shell", Signature: "provider-token",
+		InvocationKind: pbv1.ToolInvocationKind_TOOL_INVOCATION_KIND_FREEFORM,
+		InputText:      &original,
+	}
+	accepted := plugin_sdk.EmitAssembledToolCall(call, original)
+	for _, tc := range []struct {
+		name, input string
+		want        SignatureMutation
+	}{
+		{"pass", original, SignatureIntact},
+		{"replacement", "echo safe", SignatureCleared},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			returned := plugin_sdk.EmitAssembledToolCall(call, tc.input)
+			before, after := scopeOf(accepted, 4), scopeOf(returned, 4)
+			got := ClassifySignatureMutation(before.signature, after.signature, contentChanged(before, after))
+			if got != tc.want || !got.Allowed() {
+				t.Fatalf("got %v, want allowed %v", got, tc.want)
 			}
 		})
 	}
