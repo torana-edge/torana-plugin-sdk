@@ -191,7 +191,7 @@ destroy it. Two rules keep a plugin compliant:
 
 **1. Never strip cache breakpoints.** Cache markers are `RequestCacheBreakpoint`
 blocks at explicit positions in the ordered message body (Anthropic
-`cache_control`, Bedrock `cachePoint` both project to positional blocks);
+`cache_control` projects to positional blocks);
 `ToolDef.cache_control_json` carries the tool-definition marker. Markers
 survive automatically — a plugin that returns a request keeps them without
 doing anything. But a plugin that *restructures* messages (splits, merges,
