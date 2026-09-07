@@ -174,9 +174,13 @@ var requestScalarRules = map[string]string{
 	"torana.v1.RequestBlock.cache_breakpoint":   "oneof-message-member",
 	"torana.v1.RequestBlock.unknown":            "oneof-message-member",
 	"torana.v1.RequestBlock.trailing_signature": "oneof-message-member",
+	"torana.v1.RequestBlock.refusal":            "oneof-message-member",
 	// RequestTextBlock
 	"torana.v1.RequestTextBlock.text":      "text-utf8",
 	"torana.v1.RequestTextBlock.signature": "text-utf8",
+	// RequestRefusalBlock — explicit empty is a first-class arm, exactly as
+	// for text: the provider-visible position must survive an empty string.
+	"torana.v1.RequestRefusalBlock.refusal": "text-utf8",
 	// RequestThinkingBlock
 	"torana.v1.RequestThinkingBlock.text":      "text-utf8",
 	"torana.v1.RequestThinkingBlock.signature": "text-utf8",
@@ -196,6 +200,7 @@ var requestScalarRules = map[string]string{
 	"torana.v1.RequestToolResultBlock.scheduling":      "text-utf8-optional",
 	"torana.v1.RequestToolResultBlock.signature":       "text-utf8",
 	"torana.v1.RequestToolResultBlock.invocation_kind": "enum-tool-invocation-kind",
+	"torana.v1.RequestToolResultBlock.is_error":        "bool-optional",
 	// ToolResultContentBlock oneof member fields
 	"torana.v1.ToolResultContentBlock.text":             "oneof-message-member",
 	"torana.v1.ToolResultContentBlock.unknown":          "oneof-message-member",

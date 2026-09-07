@@ -33,6 +33,7 @@ func fingerprintSeed() *pbv1.Message {
 				WillContinue:     boolPtr(true),
 				Scheduling:       strPtr("WHEN_IDLE"),
 				Signature:        "trsig",
+				IsError:          boolPtr(false),
 				Content: []*pbv1.ToolResultContentBlock{
 					{Kind: &pbv1.ToolResultContentBlock_Text{Text: &pbv1.ToolResultTextBlock{Text: "ok"}}},
 					{Kind: &pbv1.ToolResultContentBlock_Unknown{Unknown: &pbv1.ToolResultUnknownBlock{
@@ -49,6 +50,7 @@ func fingerprintSeed() *pbv1.Message {
 			{Kind: &pbv1.RequestBlock_Unknown{Unknown: &pbv1.RequestUnknownBlock{
 				Kind: "custom", PayloadJson: []byte(`{"v":1e999}`), PartMetadataJson: []byte(`{}`), Signature: "usig",
 			}}},
+			{Kind: &pbv1.RequestBlock_Refusal{Refusal: &pbv1.RequestRefusalBlock{Refusal: "I cannot help with that"}}},
 			{Kind: &pbv1.RequestBlock_TrailingSignature{TrailingSignature: &pbv1.RequestTrailingSignatureBlock{Signature: "t", PartMetadataJson: []byte(`{}`)}}},
 		},
 	}
@@ -119,8 +121,31 @@ func TestRequestBlocksFingerprintSensitive(t *testing.T) {
 	mutate("unknown kind", func(m *pbv1.Message) { m.Blocks[6].GetUnknown().Kind = "custom2" })
 	mutate("unknown payload", func(m *pbv1.Message) { m.Blocks[6].GetUnknown().PayloadJson = []byte(`{"v":2}`) })
 	mutate("trailing signature", func(m *pbv1.Message) {
-		m.Blocks[7].GetTrailingSignature().Signature = "t2"
+		m.Blocks[8].GetTrailingSignature().Signature = "t2"
 	})
+	// is_error: presence AND value must both move the fingerprint. Absent,
+	// explicit false, and explicit true are three distinct requests, and the
+	// inventory test above would pass even if the field were framed as a
+	// constant — which is exactly the mistake it cannot catch.
+	mutate("is_error false -> true", func(m *pbv1.Message) {
+		m.Blocks[4].GetToolResult().IsError = boolPtr(true)
+	})
+	mutate("is_error false -> absent", func(m *pbv1.Message) {
+		m.Blocks[4].GetToolResult().IsError = nil
+	})
+	mutate("refusal text", func(m *pbv1.Message) {
+		m.Blocks[7].GetRefusal().Refusal = "I will not help with that"
+	})
+	mutate("refusal emptied", func(m *pbv1.Message) {
+		// Explicit empty is a first-class arm, distinct from other content.
+		m.Blocks[7].GetRefusal().Refusal = ""
+	})
+	mutate("refusal arm replaced by text", func(m *pbv1.Message) {
+		m.Blocks[7] = &pbv1.RequestBlock{Kind: &pbv1.RequestBlock_Text{
+			Text: &pbv1.RequestTextBlock{Text: "I cannot help with that"},
+		}}
+	})
+
 	mutate("text part metadata", func(m *pbv1.Message) {
 		m.Blocks[1].GetText().PartMetadataJson = []byte(`{"src":"y"}`)
 	})
@@ -155,7 +180,7 @@ func TestRequestBlocksFingerprintSensitive(t *testing.T) {
 		m.Blocks[6].GetUnknown().Signature = "usig2"
 	})
 	mutate("trailing part metadata", func(m *pbv1.Message) {
-		m.Blocks[7].GetTrailingSignature().PartMetadataJson = []byte(`{"src":"y"}`)
+		m.Blocks[8].GetTrailingSignature().PartMetadataJson = []byte(`{"src":"y"}`)
 	})
 	mutate("block order", func(m *pbv1.Message) {
 		m.Blocks[0], m.Blocks[1] = m.Blocks[1], m.Blocks[0]
@@ -185,6 +210,15 @@ func TestRequestBlocksFingerprintTotality(t *testing.T) {
 			Role: "user",
 			Blocks: []*pbv1.RequestBlock{
 				{Kind: &pbv1.RequestBlock_Text{}},
+			},
+		},
+		// A typed-nil refusal arm must be an ERROR, never a digest. Totality is
+		// the whole contract of this function: a caller that fingerprints an
+		// unvalidated message must be refused, not handed a hash of nothing.
+		"typed-nil refusal arm": {
+			Role: "assistant",
+			Blocks: []*pbv1.RequestBlock{
+				{Kind: &pbv1.RequestBlock_Refusal{}},
 			},
 		},
 		"typed-nil tool result": {

@@ -236,6 +236,7 @@ func TestMarkerCarrierInventory(t *testing.T) {
 			"cache_breakpoint":   true,
 			"unknown":            false,
 			"trailing_signature": false,
+			"refusal":            false,
 		}, ""},
 		{"ToolResultContentBlock", (&ToolResultContentBlock{}).ProtoReflect().Descriptor(), func(d protoreflect.MessageDescriptor) []protoreflect.FieldDescriptor {
 			var out []protoreflect.FieldDescriptor

@@ -58,6 +58,7 @@ message RequestBlock {
     RequestCacheBreakpoint cache_breakpoint = 6;
     RequestUnknownBlock unknown = 7;
     RequestTrailingSignatureBlock trailing_signature = 8;
+    RequestRefusalBlock refusal = 9;
   }
 }
 
@@ -91,6 +92,20 @@ message RequestThinkingBlock {
 // with a placeholder; only the placeholder bytes survive.
 message RequestRedactedThinkingBlock {
   string data = 1;
+}
+
+// A model refusal (OpenAI assistant `refusal`).
+//
+// A refusal IS assistant content — the model's answer for that turn — so it
+// occupies an ordered body position rather than a side-channel field. Modelling
+// it explicitly is deliberate: the alternative, a per-message bag of unmodelled
+// members, would let the next wire field a format grows be silently dropped,
+// which is exactly how refusals were lost before this block existed. A format
+// with no refusal concept refuses the request instead of inventing one.
+message RequestRefusalBlock {
+  // The provider's refusal text. Explicit empty is a first-class arm: the
+  // provider-visible position must survive even when the string is empty.
+  string refusal = 1;
 }
 
 // An assistant's request to invoke a tool.
@@ -153,6 +168,12 @@ message RequestToolResultBlock {
   // ordered for both families; FREEFORM results commonly carry typed text or
   // provider-specific structured elements.
   ToolInvocationKind invocation_kind = 8;
+  // Anthropic tool_result `is_error`: the tool ran and failed, as distinct from
+  // a result that merely reads like a failure. Presence is meaningful — an
+  // explicit false differs from absent — so a provider that omits the member
+  // round-trips without acquiring one. Harnesses set this on every failed tool
+  // call, so dropping it changes what the model is told happened.
+  optional bool is_error = 9;
 }
 
 // The provider-neutral tool invocation family. FUNCTION is zero so existing
