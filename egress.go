@@ -39,8 +39,7 @@ import (
 // sent. A plugin replaying or refreshing a conversation must therefore supply
 // the path that conversation used. This is why it is a required field rather
 // than something the SDK guesses: guessing would silently work for OpenAI-shaped
-// providers and silently fail for Bedrock's :invoke or Code Assist's
-// :generateContent.
+// providers and silently fail for Code Assist's :generateContent.
 
 // Refusal classification for SendRequest:
 //
