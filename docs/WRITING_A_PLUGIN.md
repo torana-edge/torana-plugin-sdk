@@ -607,6 +607,42 @@ if errors.Is(err, sdk.ErrStateUnavailable) {
   have no result payload, so an empty value is a successful ack, not an
   error.
 
+### Decoding JSON you did not write: `strictjson`
+
+A plugin that reads JSON off the wire and re-emits it must not change it on the
+way through. `encoding/json` is built to be forgiving, and every one of those
+conveniences is a silent rewrite of someone else's bytes:
+
+| `encoding/json` | What that costs a plugin |
+|---|---|
+| replaces invalid UTF-8 with U+FFFD | two different inputs decode to the same text |
+| keeps the **last** of duplicate members | the request you forward is not the one you were given |
+| decodes numbers as `float64` | `9007199254740993` re-emits as `9007199254740992` |
+| ignores data after the top-level value | a second, unnoticed document rides along |
+
+`github.com/torana-edge/torana-plugin-sdk/strictjson` refuses each of these
+instead:
+
+```go
+import "github.com/torana-edge/torana-plugin-sdk/strictjson"
+
+// A lossless object: numbers keep their exact lexeme through json.Number,
+// duplicates are rejected at every nesting level, and trailing data is an
+// error. "null" decodes to a nil map with no error, so you decide whether
+// absence is tolerable.
+args, err := strictjson.DecodeObject([]byte(argsJSON))
+
+// A closed object: the same refusals, plus unknown and null members.
+// Presence is preserved — a member written as "" or false is reported
+// present, one that was never written is not.
+raw, err := strictjson.DecodeObjectStrict(body, "version", "tools")
+```
+
+Use `DecodeObject` for data whose shape you do not own (tool arguments, a
+model's JSON output) and `DecodeObjectStrict` for a document you define (your
+own config envelope, a response from a service you specified).
+
+
 ## 5. Describing your configuration (`schema.json`)
 
 Optional. Without it, an operator edits your plugin's settings as raw JSON. With
