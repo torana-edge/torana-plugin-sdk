@@ -348,6 +348,21 @@ func (h *Harness) SeedCache(key, value string) *Harness {
 	return h
 }
 
+// SeedSharedCache warms the CROSS-PLUGIN cache, which sdk.SharedCacheGet reads
+// and SeedCache does not touch.
+//
+// The two stores are deliberately separate — a plugin's private cache is its
+// own, the shared one is how plugins hand each other derived facts — so a test
+// has to say which it means. Seeding the private store for a plugin that reads
+// the shared one produces a miss, and a cache miss usually looks like the
+// plugin simply choosing not to use the value.
+func (h *Harness) SeedSharedCache(key, value string) *Harness {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.sharedCache[key] = value
+	return h
+}
+
 func (h *Harness) SeedState(key, value string) *Harness {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -406,6 +421,15 @@ func (h *Harness) Cache(key string) (string, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	v, ok := h.cache[key]
+	return v, ok
+}
+
+// SharedCache reads the cross-plugin store, so a test can assert what the
+// plugin published for other plugins rather than only what it kept.
+func (h *Harness) SharedCache(key string) (string, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	v, ok := h.sharedCache[key]
 	return v, ok
 }
 
