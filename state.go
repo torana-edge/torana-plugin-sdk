@@ -18,15 +18,18 @@ import (
 //     request ends. For carrying fragment buffers or tool-call tracking between
 //     hooks of one request.
 //   - Cache (env.cache_*): across requests, TTL'd, and private to this plugin.
-//     For reusable data that need not survive a restart.
+//     For reusable data whose lifetime may depend on the configured backend.
 //   - Shared (env.shared_cache_*): across requests, TTL'd, and shared by every
 //     plugin granted access. For deliberate producer/consumer protocols;
 //     prefix keys to avoid collisions.
 //   - State (env.state_*): across requests and restarts, private to this plugin,
 //     and without expiry. For data a plugin must retain after redeployment.
 //
-// State is the only one that survives a restart. Meta, Cache, and State are
-// plugin-private; only Shared is a cross-plugin namespace.
+// State is the only scope designed to retain data across restarts. Cache
+// persistence is backend- and TTL-dependent: an in-memory cache does not
+// survive a process restart, while a Redis-backed cache may. Private versus
+// shared describes namespace visibility, not persistence: Meta, Cache, and
+// State are plugin-private; only Shared is a cross-plugin namespace.
 //
 // It requires the env.state_get / env.state_set / env.state_keys permissions.
 // Nothing expires on its own: a plugin that writes per-conversation keys must
