@@ -139,6 +139,8 @@ func TestDecodeObjectStrictContract(t *testing.T) {
 		{name: "a subset of the known members", raw: `{"version":1}`, accept: true},
 		{name: "no members at all", raw: `{}`, accept: true},
 		{name: "an unknown member", raw: `{"version":1,"extra":2}`, accept: false},
+		{name: "a top-level null is not an object", raw: `null`, accept: false},
+		{name: "an empty object still is one", raw: `{}`, accept: true},
 		{name: "a null member", raw: `{"version":null}`, accept: false},
 		{name: "a duplicate known member", raw: `{"version":1,"version":2}`, accept: false},
 		{name: "invalid UTF-8", raw: "{\"version\":\"\xff\"}", accept: false},

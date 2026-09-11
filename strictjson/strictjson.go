@@ -168,6 +168,8 @@ func DecodeObject(data []byte) (map[string]any, error) {
 }
 
 // DecodeObjectStrict decodes data as a JSON OBJECT, rejecting:
+//   - a top-level null, which is not an object (unlike DecodeObject, which
+//     returns it as a nil map and leaves the policy to the caller);
 //   - duplicate keys at ANY nesting level (a repeated tool name in a registry,
 //     a repeated status member in a verify response, ...);
 //   - unknown members (anything outside known);
@@ -187,6 +189,18 @@ func DecodeObjectStrict(data []byte, known ...string) (map[string]json.RawMessag
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("not a JSON object")
+	}
+	// encoding/json decodes a top-level null into a nil map with no error, so
+	// without this check "null" would be accepted as a valid closed envelope
+	// and the member loop below would simply have nothing to walk. An empty
+	// object decodes to a non-nil empty map and stays valid: {} is an object
+	// with no members, null is not an object.
+	//
+	// DecodeObject deliberately differs — it hands top-level null back as a
+	// nil map and says so, leaving the policy to the caller. This entry point
+	// makes a stronger promise and has to keep it.
+	if raw == nil {
+		return nil, fmt.Errorf("not a JSON object: null")
 	}
 	permitted := make(map[string]bool, len(known))
 	for _, member := range known {
