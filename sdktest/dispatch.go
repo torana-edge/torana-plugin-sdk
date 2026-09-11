@@ -30,15 +30,21 @@ func (h *Harness) NewRequest() *Request {
 }
 
 func (r *Request) with(fn func()) {
+	r.h.scopeMu.Lock()
+	defer r.h.scopeMu.Unlock()
+
 	r.h.mu.Lock()
 	previous := r.h.meta
 	r.h.meta = r.meta
 	r.h.mu.Unlock()
+	defer func() {
+		r.h.mu.Lock()
+		r.meta = r.h.meta
+		r.h.meta = previous
+		r.h.mu.Unlock()
+	}()
+
 	r.h.with(fn)
-	r.h.mu.Lock()
-	r.meta = r.h.meta
-	r.h.meta = previous
-	r.h.mu.Unlock()
 }
 
 // RequestResult is the outcome of a before-request dispatch.

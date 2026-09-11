@@ -85,6 +85,10 @@ type Harness struct {
 	t    testing.TB
 	host *sdk.TestHost
 
+	// scopeMu serializes the complete request-metadata install, dispatch,
+	// capture, and restore transaction. It must remain distinct from mu:
+	// host calls made during the dispatch acquire mu themselves.
+	scopeMu     sync.Mutex
 	mu          sync.Mutex
 	meta        map[string]string
 	cache       map[string]string
