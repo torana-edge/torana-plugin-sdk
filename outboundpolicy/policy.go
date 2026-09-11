@@ -410,9 +410,8 @@ type SignatureContentRef struct {
 // or clears the signature when that content changes. A plugin cannot
 // manufacture a valid provider signature.
 //
-// Domain separates binding reachability from response-field reachability:
-// request-side Message.thinking_signature remains normative after
-// ResponseMessage dropped thinking from the response shape.
+// Domain separates request-block bindings from response/stream bindings; a
+// token is validated against the descriptor inventory for its own domain.
 type SignatureBinding struct {
 	Domain         SignatureDomain
 	Message        protoreflect.FullName
@@ -429,8 +428,8 @@ const (
 	// SignatureDomainOutbound pairs with PolicyBoundSignature entries in the
 	// response/stream field registries in this package.
 	SignatureDomainOutbound
-	// SignatureDomainRequest covers ChatRequest Message fields that are not
-	// reachable from ChatResponse after ResponseMessage. Validated against
+	// SignatureDomainRequest covers signed ChatRequest block fields that are
+	// not reachable from ChatResponse. Validated against
 	// the request proto, not the outbound field registry.
 	SignatureDomainRequest
 )
@@ -1278,9 +1277,8 @@ func validateRequestBindingCompleteness(bindings []SignatureBinding) error {
 // validateSignatureBindingUniqueness enforces one-token/one-scope across every
 // domain. Keyed by (Domain, Message, SignatureField): the same proto field may
 // appear in different domains only if those are deliberately separate
-// contracts (today Message.thinking_signature is request-only). Duplicate
-// bindings within one key, or duplicate content refs within one binding, leave
-// the host without a unique enforcement contract.
+// contracts. Duplicate bindings within one key, or duplicate content refs
+// within one binding, leave the host without a unique enforcement contract.
 func validateSignatureBindingUniqueness() error {
 	type bindingKey struct {
 		domain SignatureDomain
