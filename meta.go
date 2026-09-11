@@ -23,14 +23,9 @@ import (
 // permission — or a host failure. error means the call itself could not be
 // made, or its reply was invalid.
 //
-// v1 collapsed these, so ~30 `if err != nil` checks across the official plugins
-// were dead code and a refusal was indistinguishable from an empty value.
-//
 // ABSENCE IS NOT EMPTINESS. A key that does not exist returns a HostError with
 // code NOT_FOUND; a key holding an empty string returns success with an empty
-// value. An earlier draft of this file allowed storing an empty value AND
-// documented a miss as returning empty, which made the two indistinguishable —
-// exactly the v1 ambiguity v1 exists to remove. Use IsNotFound to branch.
+// value. Use IsNotFound to branch.
 
 // IsNotFound reports whether a HostError means the key does not exist, as
 // opposed to any other refusal such as a missing permission.
@@ -57,10 +52,9 @@ func MetaGet(key string) (string, *pbv1.HostError, error) {
 
 // MetaSet writes one of this plugin's request-scoped keys.
 //
-// An empty value stores an empty value. It is not a delete — conflating the two
-// is what left v1 unable to express "I looked, and the answer was nothing".
-// After MetaSet(k, ""), MetaGet(k) succeeds with an empty value rather than
-// reporting NOT_FOUND.
+// An empty value stores an empty value; it is not a delete. After
+// MetaSet(k, ""), MetaGet(k) succeeds with an empty value rather than reporting
+// NOT_FOUND.
 func MetaSet(key, value string) (*pbv1.HostError, error) {
 	_, herr, err := HostCall("env.meta_set", &pbv1.MetaSetArgs{Key: key, Value: value})
 	return herr, err

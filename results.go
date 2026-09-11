@@ -9,27 +9,16 @@ import (
 
 // What a hook returns.
 //
-// v1 returned bare messages and attached meaning to nil: a nil request meant
-// pass through, an all-defaults StreamEventResult meant "not handled", and
-// three of five hooks carried a `handled` bool to disambiguate a wire artifact.
-// An author had to know all of that, and the most common mistake — building a
-// result by hand and forgetting `handled` — silently did nothing.
-//
-// These types say what they mean. The zero value is a pass, because a plugin
-// that returns before deciding anything should change nothing, and because
-// `return Result{}, err` on an error path is the reflex.
+// Each hook has a result type whose constructors name the available actions.
+// The zero value is a pass, so a plugin that returns before deciding anything
+// changes nothing and `return Result{}, err` works naturally on an error path.
 //
 // Nothing here is a proto message. Authors never touch an envelope: the
 // trampolines frame these, validate them, and hand the host bytes.
 //
-// A constructor given nil records an error rather than reinterpreting it. An
-// earlier draft turned ReplaceRequest(nil) into a pass, which is worse than it
-// sounds: a sanitizer that fails and returns nil would then have sent the
-// UNSANITIZED request upstream, silently, with the plugin's failure_mode never
-// consulted. Reinterpreting an invalid argument hides the author's bug and
-// converts it into the least safe outcome. The trampoline surfaces the error,
-// the guest traps, and failure_mode decides — which is what a plugin declaring
-// block asked for.
+// A constructor given nil records an error rather than reinterpreting it. This
+// prevents a failed sanitizer from accidentally passing the unsanitized input.
+// The trampoline surfaces the error, the guest traps, and failure_mode decides.
 
 // RequestResult is what a run_before_request handler returns.
 type RequestResult struct {
@@ -40,9 +29,7 @@ type RequestResult struct {
 // PassRequest leaves the request as the host built it.
 //
 // Produces no frame at all: the hook returns zero bytes, which is the ABI's
-// pass-through and its only encoding. An earlier draft emitted an explicit
-// PASS frame, which marshalled to zero bytes anyway — two spellings of one
-// thing, one of which could not be told from the other.
+// pass-through and its only encoding.
 func PassRequest() RequestResult { return RequestResult{} }
 
 // ReplaceRequest sends req upstream instead of what the host had.
@@ -103,9 +90,8 @@ func PassEvent() StreamResult { return StreamResult{} }
 
 // SuppressEvent drops the event, emitting nothing.
 //
-// Use this rather than emitting an empty list: a REPLACE with no events emits
-// nothing too, and one action with two encodings is what the v1 contract exists
-// to remove. The host rejects the empty form.
+// Use this rather than emitting an empty replacement list. The host rejects
+// that ambiguous form.
 func SuppressEvent() StreamResult {
 	return StreamResult{inner: &pbv1.HookResult{
 		Action: &pbv1.HookResult_Suppress{Suppress: &pbv1.Suppress{}},
