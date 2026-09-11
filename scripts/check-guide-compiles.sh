@@ -12,6 +12,12 @@
 #
 # Partial snippets (signatures, fragments) are deliberately not built: they do
 # not claim to compile.
+#
+# -buildvcs=false on both builds: the generated module lives under a temp
+# directory, and if any ANCESTOR of that directory is a git repository, the
+# toolchain tries to stamp VCS information it has no business reading and
+# fails with "error obtaining VCS status". A documentation compiler must
+# diagnose tutorial code, not the VCS state of whatever contains $TMPDIR.
 set -euo pipefail
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -60,12 +66,12 @@ MOD
   }
   if [[ "$(basename "$dir")" == test* ]]; then
     # Compile the test binary on the host; run nothing.
-    (cd "$dir" && go test -run '^$' -count=1 ./... >/dev/null) || {
+    (cd "$dir" && go test -buildvcs=false -run '^$' -count=1 ./... >/dev/null) || {
       echo "FAIL: a docs/WRITING_A_PLUGIN.md test program does not compile ($dir)" >&2
       failures=$((failures + 1))
     }
   else
-    (cd "$dir" && GOOS=wasip1 GOARCH=wasm go build -o /dev/null ./...) || {
+    (cd "$dir" && GOOS=wasip1 GOARCH=wasm go build -buildvcs=false -o /dev/null ./...) || {
       echo "FAIL: a docs/WRITING_A_PLUGIN.md plugin program does not compile for wasip1/wasm ($dir)" >&2
       failures=$((failures + 1))
     }
