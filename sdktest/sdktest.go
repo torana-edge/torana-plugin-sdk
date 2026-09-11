@@ -292,16 +292,11 @@ func (h *Harness) StubPromptCachePolicy(fn func(*pbv1.PromptCachePolicyGetArgs) 
 }
 
 // DenyPermission makes cmd answer with the host's permission-denied envelope,
-// so a plugin's handling of a refused capability is testable. Typed v1 commands
-// get a HostCallResult error arm; transitional JSON commands keep the legacy
-// denial string.
+// so a plugin's handling of a refused capability is testable.
 func (h *Harness) DenyPermission(cmd string) *Harness {
 	return h.StubHostCall(cmd, func(string) (string, error) {
-		if typedHostReply(cmd) {
-			return string(hostCallResultError(
-				pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "permission denied")), nil
-		}
-		return `{"status":"error","message":"permission denied"}`, nil
+		return string(hostCallResultError(
+			pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "permission denied")), nil
 	})
 }
 
@@ -421,52 +416,25 @@ func (h *Harness) hostCallBytes(cmd string, args []byte) ([]byte, error) {
 	h.mu.Unlock()
 
 	argsStr := string(args)
-	var res string
 	if stub != nil {
-		var err error
-		res, err = stub(argsStr)
-		if err != nil {
-			return nil, err
-		}
-	} else if typedHostReply(cmd) {
-		raw, err := h.builtinTyped(cmd, args)
+		res, err := stub(argsStr)
 		if err != nil {
 			return nil, err
 		}
 		h.mu.Lock()
-		h.calls = append(h.calls, HostCallEntry{Command: cmd, Args: argsStr, Result: string(raw)})
+		h.calls = append(h.calls, HostCallEntry{Command: cmd, Args: argsStr, Result: res})
 		h.mu.Unlock()
-		return raw, nil
-	} else {
-		res = h.builtin(cmd, argsStr)
+		return []byte(res), nil
 	}
 
+	raw, err := h.builtinTyped(cmd, args)
+	if err != nil {
+		return nil, err
+	}
 	h.mu.Lock()
-	h.calls = append(h.calls, HostCallEntry{Command: cmd, Args: argsStr, Result: res})
+	h.calls = append(h.calls, HostCallEntry{Command: cmd, Args: argsStr, Result: string(raw)})
 	h.mu.Unlock()
-	return []byte(res), nil
-}
-
-func typedHostReply(cmd string) bool {
-	switch cmd {
-	case "env.block_request", "env.respond_request", "env.route_request",
-		"env.set_identity", pbv1.MetaAppendCommand,
-		"env.meta_get", "env.meta_set", "env.cache_get", "env.cache_set",
-		"env.shared_cache_get", "env.shared_cache_set",
-		"env.state_get", "env.state_set", "env.state_delete", "env.state_keys",
-		"env.now", "env.plugin_config",
-		"env.original_request", "env.original_response",
-		"env.credential_get", "env.file_append", "env.file_read",
-		"env.file_write", "env.file_list", "env.file_delete", "env.http_request",
-		"env.model_complete", "env.model_pricing", "env.cache_policy":
-		return true
-	default:
-		// Extension commands (torana_*, verify_virtual_key) also speak the v1
-		// result envelope — only their ARGUMENT body is opaque. Framing them
-		// as legacy JSON would make HostCallExtension unusable here, which is
-		// how the typed meta/cache helpers were unusable before.
-		return isExtensionCommand(cmd)
-	}
+	return raw, nil
 }
 
 // isExtensionCommand reports whether cmd is a host-feature call rather than a
@@ -792,107 +760,6 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 			"extension command "+cmd+" is not configured in sdktest; StubHostCall it"), nil
 	}
 	return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_FOUND, "unknown typed command"), nil
-}
-
-// builtin answers the commands the harness can emulate faithfully. Replies
-// match internal/wasm/runtime.go byte for byte, including its error envelopes
-// and its several inconsistent shapes — a harness that answered more tidily
-// than the host would let tests pass against responses no plugin will ever
-// see in production.
-func (h *Harness) builtin(cmd, args string) string {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	switch cmd {
-	case "env.plugin_config":
-		return h.config
-
-	case "env.meta_set":
-		k, v, ok := decodeKV(args)
-		if !ok {
-			return `{"status":"error","message":"invalid payload"}`
-		}
-		h.meta[k] = v
-		return `{"status":"ok"}`
-	case "env.meta_get":
-		return h.meta[args]
-
-	case "env.cache_set", "env.shared_cache_set":
-		k, v, ok := decodeKV(args)
-		if !ok {
-			return `{"status":"error","message":"invalid payload"}`
-		}
-		h.cache[k] = v
-		return `{"status":"ok"}`
-	case "env.cache_get", "env.shared_cache_get":
-		return h.cache[args]
-
-	case "env.state_set":
-		k, v, ok := decodeKV(args)
-		if !ok {
-			return `{"status":"error","message":"invalid payload"}`
-		}
-		if !h.StateConfigured {
-			return `{"status":"error","message":"durable plugin state is not configured"}`
-		}
-		if v == "" {
-			delete(h.state, k)
-		} else {
-			h.state[k] = v
-		}
-		return `{"status":"ok"}`
-	case "env.state_get":
-		if !h.StateConfigured {
-			return ""
-		}
-		return h.state[args]
-	case "env.state_keys":
-		if !h.StateConfigured {
-			return "[]"
-		}
-		keys := make([]string, 0, len(h.state))
-		for k := range h.state {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		b, _ := json.Marshal(keys)
-		return string(b)
-
-	case "env.now":
-		return strconv.FormatInt(h.now(), 10)
-
-	case "env.original_request":
-		return string(h.original)
-	case "env.original_response":
-		return string(h.origResp)
-
-	// Unconfigured-host answers, matching runtime.go exactly. Stub these when
-	// a test needs them to succeed.
-	case "torana_evaluate_compaction":
-		return `{"apply":false,"reason":"no economics configured"}`
-	case "torana_record_savings", "torana_plugin_counter":
-		return `{"status":"ok"}`
-	}
-	return fmt.Sprintf(`{"status":"error","message":"unknown command %q"}`, cmd)
-}
-
-func decodeKV(args string) (string, string, bool) {
-	var kv struct {
-		Key   string `json:"key"`
-		Value any    `json:"value"`
-	}
-	if err := json.Unmarshal([]byte(args), &kv); err != nil {
-		return "", "", false
-	}
-	switch v := kv.Value.(type) {
-	case nil:
-		return kv.Key, "", true
-	case string:
-		return kv.Key, v, true
-	default:
-		b, _ := json.Marshal(v)
-		return kv.Key, string(b), true
-	}
 }
 
 // CheckManifest cross-checks plugin.json against what the plugin actually
