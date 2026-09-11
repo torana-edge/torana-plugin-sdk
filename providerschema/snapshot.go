@@ -118,11 +118,12 @@ var schemaCarrierDecisions = map[string]string{
 // agentPlatformArms are Part data arms of the agent-platform surface. They
 // are NOT present in any vendored artifact (the absence guard parses the
 // artifacts' oneof members and tokenizes the exact proto spellings); they
-// are a REVIEWED non-descriptor decision, cited from the agent-platform
-// surface by the reviewing round (SDK_SIGNED_PART_CHECKPOINT.md §0) and
-// carried like the other future/unknown arms. A snapshot refresh must
-// confirm them before any generated table can claim descriptor provenance
-// for them.
+// are a deliberate non-descriptor entry, taken from the agent-platform
+// surface and carried like the other future/unknown arms.
+//
+// That is the part to be careful with: these two rows have no descriptor
+// behind them, so a snapshot refresh must confirm them before any generated
+// table can claim descriptor provenance for them.
 var agentPlatformArms = []SchemaNode{
 	{ID: "part.arm.toolCall", Member: "toolCall", Kind: "message", Oneof: "data", Surfaces: []string{"agent-platform"}},
 	{ID: "part.arm.toolResponse", Member: "toolResponse", Kind: "message", Oneof: "data", Surfaces: []string{"agent-platform"}},
