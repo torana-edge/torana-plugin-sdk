@@ -80,8 +80,21 @@ func init() {
 		modified := false
 
 		for _, msg := range req.Messages {
-			if msg.Role == "user" && strings.Contains(msg.Content, "SECRET") {
-				msg.Content = strings.ReplaceAll(msg.Content, "SECRET", "[REDACTED]")
+			if msg.Role != "user" {
+				continue
+			}
+			// A message body is an ORDERED BLOCK LIST, not a string. Walk the
+			// blocks and rewrite each text block in place, so thinking, tool
+			// use, images and provider-specific arms keep their positions.
+			for i, block := range msg.Blocks {
+				text := block.GetText()
+				if text == nil || !strings.Contains(text.Text, "SECRET") {
+					continue
+				}
+				redacted := strings.ReplaceAll(text.Text, "SECRET", "[REDACTED]")
+				if err := sdk.SetTextAt(msg, i, redacted); err != nil {
+					return sdk.RequestResult{}, err
+				}
 				modified = true
 			}
 		}
@@ -131,10 +144,17 @@ Every plugin directory must contain a `plugin.json` file describing its metadata
     { "name": "run_before_request" }
   ],
   "permissions": [
+    { "name": "ir.messages.write.user", "description": "Redact secrets from user message text" },
     { "name": "env.log", "description": "Emit diagnostic logs" }
   ]
 }
 ```
+
+Every field the plugin writes must be covered by a grant it requests here
+**and** the operator approves. The hook above rewrites user text, so
+`ir.messages.write.user` is not optional decoration: without it the host
+refuses the replacement and the plugin's `failure_mode` decides what the
+caller gets.
 
 ### Manifest Schema Reference
 
@@ -520,7 +540,7 @@ extension helpers such as `sdk.SendRequest` own their extension framing.
 | --- | --- | --- |
 | `env.background_tick` | `sdk.OnTick` | Run on a timer with no request in flight. See [PLUGIN_SEMANTICS §5](PLUGIN_SEMANTICS.md) for what is unavailable inside a tick. |
 | `env.host_call.torana_send_request` | `sdk.SendRequest` | Send your own provider request. **Spends the operator's money** — requires a per-plugin budget in `plugins.runtime.egress` or it is refused. |
-| `env.now` | `sdk.Now` | Read the host clock. WASI gives a guest none. **Never write this into a request** — see the determinism warning below. |
+| `env.now` | `sdk.Now` | Read the host clock through a permission-gated host call, so a test can control it (the `sdktest` harness has `SetNow`). **Never write this into a request** — see the determinism warning below. |
 
 **Economics**
 
@@ -606,6 +626,42 @@ if errors.Is(err, sdk.ErrStateUnavailable) {
 - `StateSetJSON` may validly succeed with an empty result value — setters
   have no result payload, so an empty value is a successful ack, not an
   error.
+
+### Decoding JSON you did not write: `strictjson`
+
+A plugin that reads JSON off the wire and re-emits it must not change it on the
+way through. `encoding/json` is built to be forgiving, and every one of those
+conveniences is a silent rewrite of someone else's bytes:
+
+| `encoding/json` | What that costs a plugin |
+|---|---|
+| replaces invalid UTF-8 with U+FFFD | two different inputs decode to the same text |
+| keeps the **last** of duplicate members | the request you forward is not the one you were given |
+| decodes numbers as `float64` | `9007199254740993` re-emits as `9007199254740992` |
+| ignores data after the top-level value | a second, unnoticed document rides along |
+
+`github.com/torana-edge/torana-plugin-sdk/strictjson` refuses each of these
+instead:
+
+```go
+import "github.com/torana-edge/torana-plugin-sdk/strictjson"
+
+// A lossless object: numbers keep their exact lexeme through json.Number,
+// duplicates are rejected at every nesting level, and trailing data is an
+// error. "null" decodes to a nil map with no error, so you decide whether
+// absence is tolerable.
+args, err := strictjson.DecodeObject([]byte(argsJSON))
+
+// A closed object: the same refusals, plus unknown and null members.
+// Presence is preserved — a member written as "" or false is reported
+// present, one that was never written is not.
+raw, err := strictjson.DecodeObjectStrict(body, "version", "tools")
+```
+
+Use `DecodeObject` for data whose shape you do not own (tool arguments, a
+model's JSON output) and `DecodeObjectStrict` for a document you define (your
+own config envelope, a response from a service you specified).
+
 
 ## 5. Describing your configuration (`schema.json`)
 
@@ -753,9 +809,16 @@ func TestBlocksOnDetectedPII(t *testing.T) {
 		return &pbv1.ModelCompleteResult{Content: `{"pii":true,"findings":[{"type":"email","line":1}]}`}, nil, nil
 	})
 
-	res := h.BeforeRequest(&pbv1.ChatRequest{Messages: []*pbv1.Message{
-		{Role: "tool", Content: "contact: someone@example.com"},
-	}})
+	res := h.BeforeRequest(&pbv1.ChatRequest{Messages: []*pbv1.Message{{
+		Role: "user",
+		// The body is the ordered block list. There is no flat Content
+		// field to set — one text block is the shortest valid body.
+		Blocks: []*pbv1.RequestBlock{{
+			Kind: &pbv1.RequestBlock_Text{
+				Text: &pbv1.RequestTextBlock{Text: "contact: someone@example.com"},
+			},
+		}},
+	}}})
 
 	if len(h.BlockCalls()) == 0 {
 		t.Fatal("expected the request to be blocked")
