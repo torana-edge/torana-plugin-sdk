@@ -343,9 +343,11 @@ func TestNotFoundIsDistinctFromNotConfigured(t *testing.T) {
 // Responses expose response facts through a dedicated message.
 func TestChatResponseCarriesResponseFacts(t *testing.T) {
 	resp := &v1.ChatResponse{
-		Model:          "claude-sonnet-4",
-		Id:             "msg_01",
-		Message:        &v1.ResponseMessage{Content: proto.String("done")},
+		Model: "claude-sonnet-4",
+		Id:    "msg_01",
+		Message: &v1.ResponseMessage{Blocks: []*v1.ResponseBlock{{Kind: &v1.ResponseBlock_Text{
+			Text: &v1.ResponseTextBlock{Text: "done"},
+		}}}},
 		FinishReason:   "end_turn",
 		Usage:          &v1.Usage{InputTokens: 10, OutputTokens: 3},
 		UpstreamStatus: 200,
@@ -359,7 +361,7 @@ func TestChatResponseCarriesResponseFacts(t *testing.T) {
 	if err := proto.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Message.GetContent() != "done" || got.UpstreamStatus != 200 || got.Usage.GetOutputTokens() != 3 {
+	if got.Message.GetBlocks()[0].GetText().GetText() != "done" || got.UpstreamStatus != 200 || got.Usage.GetOutputTokens() != 3 {
 		t.Fatalf("response did not round-trip: %+v", &got)
 	}
 }

@@ -35,6 +35,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strconv"
 
@@ -195,6 +196,13 @@ func ToolResultContentFingerprint(content []*pbv1.ToolResultContentBlock) ([32]b
 // validateStrictObject checks the shared strict JSON-text rules and the
 // top-level object shape.
 func validateStrictObject(raw []byte) error {
+	// jsontext validates the stricter object rules used by the ABI (including
+	// duplicate members), but it deliberately is not a complete JSON grammar
+	// validator. Check the grammar first so malformed numbers such as 1-2 can
+	// never acquire a stable content fingerprint.
+	if !json.Valid(raw) {
+		return fmt.Errorf("invalid JSON")
+	}
 	if err := jsontext.Validate(raw); err != nil {
 		return err
 	}
@@ -218,6 +226,12 @@ func RequestBlocksFingerprint(msg *pbv1.Message) (string, error) {
 	if msg == nil {
 		return "", fmt.Errorf("request blocks fingerprint: nil message")
 	}
+	validateOptionalObject := func(raw []byte) error {
+		if len(raw) == 0 {
+			return nil
+		}
+		return validateStrictObject(raw)
+	}
 	h := sha256.New()
 	frame := func(tag, value string) {
 		h.Write([]byte(tag))
@@ -240,6 +254,9 @@ func RequestBlocksFingerprint(msg *pbv1.Message) (string, error) {
 			if k.Text == nil {
 				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] typed-nil text arm", i)
 			}
+			if err := validateOptionalObject(k.Text.PartMetadataJson); err != nil {
+				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] text metadata: %w", i, err)
+			}
 			frame("text", k.Text.Text)
 			frame("sig", k.Text.Signature)
 			frameBytes("pmeta", k.Text.PartMetadataJson)
@@ -247,6 +264,9 @@ func RequestBlocksFingerprint(msg *pbv1.Message) (string, error) {
 			frame("kind", "thinking")
 			if k.Thinking == nil {
 				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] typed-nil thinking arm", i)
+			}
+			if err := validateOptionalObject(k.Thinking.PartMetadataJson); err != nil {
+				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] thinking metadata: %w", i, err)
 			}
 			frame("text", k.Thinking.Text)
 			frame("sig", k.Thinking.Signature)
@@ -261,6 +281,14 @@ func RequestBlocksFingerprint(msg *pbv1.Message) (string, error) {
 			frame("kind", "tool_use")
 			if k.ToolUse == nil {
 				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] typed-nil tool_use arm", i)
+			}
+			if len(k.ToolUse.ArgumentsJson) != 0 {
+				if err := validateStrictObject(k.ToolUse.ArgumentsJson); err != nil {
+					return "", fmt.Errorf("request blocks fingerprint: blocks[%d] arguments: %w", i, err)
+				}
+			}
+			if err := validateOptionalObject(k.ToolUse.PartMetadataJson); err != nil {
+				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] tool metadata: %w", i, err)
 			}
 			frame("id", k.ToolUse.Id)
 			frame("name", k.ToolUse.Name)
@@ -278,6 +306,9 @@ func RequestBlocksFingerprint(msg *pbv1.Message) (string, error) {
 			frame("kind", "tool_result")
 			if k.ToolResult == nil {
 				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] typed-nil tool_result arm", i)
+			}
+			if err := validateOptionalObject(k.ToolResult.PartMetadataJson); err != nil {
+				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] result metadata: %w", i, err)
 			}
 			frame("tcid", k.ToolResult.ToolCallId)
 			frame("tname", k.ToolResult.ToolName)
@@ -314,11 +345,20 @@ func RequestBlocksFingerprint(msg *pbv1.Message) (string, error) {
 			if k.CacheBreakpoint == nil {
 				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] typed-nil cache arm", i)
 			}
+			if err := validateStrictObject(k.CacheBreakpoint.MarkerJson); err != nil {
+				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] cache marker: %w", i, err)
+			}
 			frameBytes("marker", k.CacheBreakpoint.MarkerJson)
 		case *pbv1.RequestBlock_Unknown:
 			frame("kind", "unknown")
 			if k.Unknown == nil {
 				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] typed-nil unknown arm", i)
+			}
+			if err := validateStrictObject(k.Unknown.PayloadJson); err != nil {
+				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] unknown payload: %w", i, err)
+			}
+			if err := validateOptionalObject(k.Unknown.PartMetadataJson); err != nil {
+				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] unknown metadata: %w", i, err)
 			}
 			frame("kind", k.Unknown.Kind)
 			frameBytes("payload", k.Unknown.PayloadJson)
@@ -328,6 +368,9 @@ func RequestBlocksFingerprint(msg *pbv1.Message) (string, error) {
 			frame("kind", "trailing")
 			if k.TrailingSignature == nil {
 				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] typed-nil trailing arm", i)
+			}
+			if err := validateOptionalObject(k.TrailingSignature.PartMetadataJson); err != nil {
+				return "", fmt.Errorf("request blocks fingerprint: blocks[%d] trailing metadata: %w", i, err)
 			}
 			frame("sig", k.TrailingSignature.Signature)
 			frameBytes("pmeta", k.TrailingSignature.PartMetadataJson)

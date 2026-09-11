@@ -134,7 +134,11 @@ macro_rules! export_plugin_v1 {
 
         #[no_mangle]
         pub extern "C" fn run_hook(ptr: u32, len: u32) -> u64 {
-            let output = $crate::__dispatch_v1($crate::__input(ptr, len), $hooks, $handler)
+            // SAFETY: ptr/len are the guest-memory allocation populated by
+            // the Torana host for this invocation and are consumed before
+            // the hook returns.
+            let input = unsafe { $crate::__input(ptr, len) };
+            let output = $crate::__dispatch_v1(input, $hooks, $handler)
                 .unwrap_or_else(|error| panic!("{error}"));
             $crate::__result(&output)
         }
@@ -240,20 +244,13 @@ fn dealloc_bytes(p: *mut u8, size: usize) {
 ///
 /// # Safety
 ///
-/// This is a safe function that dereferences a raw pointer, which it can only
-/// do soundly because of who calls it: the generated hook wrappers, with `ptr`
-/// and `len` exactly as the host passed them across the ABI. Calling it with
-/// any other values is undefined behaviour.
-///
-/// It is deliberately NOT an `unsafe fn`. Marking it so would force an `unsafe`
-/// block into every macro expansion, and therefore into plugins that declare
-/// `#![forbid(unsafe_code)]` — which would break them for no gain in real
-/// safety. The proper fix is for the macros to hand over a lifetime-bound
-/// slice; that is a larger change than this one.
+/// `ptr..ptr+len` must denote readable guest memory for the returned borrow's
+/// lifetime. The memory must not be mutated or freed during that lifetime.
+/// Only the generated hook wrapper should call this function.
 ///
 /// The leading underscores mark it as ABI plumbing rather than API.
 #[doc(hidden)]
-pub fn __input(ptr: u32, len: u32) -> &'static [u8] {
+pub unsafe fn __input<'a>(ptr: u32, len: u32) -> &'a [u8] {
     if ptr == 0 || len == 0 {
         return &[];
     }
@@ -292,23 +289,6 @@ fn copy_to_owned_buffer(bytes: &[u8]) -> (*mut u8, usize) {
     // is exactly what `slice::from_raw_parts_mut(..).copy_from_slice(..)` did.
     unsafe { ptr::copy_nonoverlapping(bytes.as_ptr(), dst, bytes.len()) };
     (dst, bytes.len())
-}
-
-// Compatibility shims for the pre-rename names. These are #[doc(hidden)] but
-// `pub`, and under Cargo's 0.x rules a patch bump is a compatible update — so a
-// crate calling them directly would break on `cargo update` with no version
-// signal. Two lines each is cheaper than that.
-
-#[doc(hidden)]
-#[deprecated(note = "renamed to __input: this is ABI plumbing, not API")]
-pub fn input(ptr: u32, len: u32) -> &'static [u8] {
-    __input(ptr, len)
-}
-
-#[doc(hidden)]
-#[deprecated(note = "renamed to __result: this is ABI plumbing, not API")]
-pub fn result(bytes: &[u8]) -> u64 {
-    __result(bytes)
 }
 
 /// Packs a pointer and length into the single u64 an ABI hook returns:
@@ -425,7 +405,9 @@ pub fn host_call<M: prost::Message>(
     }
     let ptr = (packed >> 32) as u32;
     let len = packed as u32;
-    let bytes = __input(ptr, len).to_vec();
+    // SAFETY: raw_host_call returns a host-owned result buffer valid until
+    // dealloc below; copy it before releasing that allocation.
+    let bytes = unsafe { __input(ptr, len) }.to_vec();
     dealloc(ptr, len);
     decode_host_call_result(&bytes)
 }
@@ -784,9 +766,13 @@ mod tests {
 
     #[test]
     fn input_of_an_empty_or_null_buffer_is_an_empty_slice() {
-        assert!(__input(0, 0).is_empty());
-        assert!(__input(0, 10).is_empty());
-        assert!(__input(10, 0).is_empty());
+        // SAFETY: zero-length/null inputs are explicitly accepted without a
+        // dereference by the ABI helper.
+        unsafe {
+            assert!(__input(0, 0).is_empty());
+            assert!(__input(0, 10).is_empty());
+            assert!(__input(10, 0).is_empty());
+        }
     }
 
     fn pass(_input: pbv1::HookInput) -> Result<Option<pbv1::HookResult>, String> {

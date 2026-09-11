@@ -233,6 +233,12 @@ func TestRequestBlocksFingerprintTotality(t *testing.T) {
 				{Kind: &pbv1.RequestBlock_Unknown{}},
 			},
 		},
+		"malformed numeric tail": {
+			Role: "user",
+			Blocks: []*pbv1.RequestBlock{{Kind: &pbv1.RequestBlock_Unknown{Unknown: &pbv1.RequestUnknownBlock{
+				Kind: "future", PayloadJson: []byte(`{"n":1-2}`),
+			}}}},
+		},
 		"nested nil element": {
 			Role: "user",
 			Blocks: []*pbv1.RequestBlock{

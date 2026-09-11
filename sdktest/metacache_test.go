@@ -236,6 +236,24 @@ func TestMetaAndCacheAreSeparateStores(t *testing.T) {
 	})
 }
 
+func TestPluginAndSharedCacheAreSeparateStores(t *testing.T) {
+	sdktest.New(t).Run(func() {
+		if herr, err := sdk.CacheSet("same", "private"); err != nil || herr != nil {
+			t.Fatalf("CacheSet: err=%v herr=%v", err, herr)
+		}
+		if _, herr, err := sdk.SharedCacheGet("same"); err != nil || herr == nil || !sdk.IsNotFound(herr) {
+			t.Fatalf("private cache leaked into shared cache: err=%v herr=%v", err, herr)
+		}
+		if herr, err := sdk.SharedCacheSet("same", "shared"); err != nil || herr != nil {
+			t.Fatalf("SharedCacheSet: err=%v herr=%v", err, herr)
+		}
+		got, herr, err := sdk.CacheGet("same")
+		if err != nil || herr != nil || got != "private" {
+			t.Fatalf("shared cache overwrote private cache: got=%q err=%v herr=%v", got, err, herr)
+		}
+	})
+}
+
 // A transport failure must reach the caller as an error, not be flattened into
 // NOT_FOUND or an empty success. Those wrappers each collapse three channels
 // into fewer, and a plugin that reads a transport fault as a cache miss will

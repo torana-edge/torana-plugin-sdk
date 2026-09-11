@@ -85,9 +85,14 @@ type Harness struct {
 	t    testing.TB
 	host *sdk.TestHost
 
+	// scopeMu serializes the complete request-metadata install, dispatch,
+	// capture, and restore transaction. It must remain distinct from mu:
+	// host calls made during the dispatch acquire mu themselves.
+	scopeMu     sync.Mutex
 	mu          sync.Mutex
 	meta        map[string]string
 	cache       map[string]string
+	sharedCache map[string]string
 	state       map[string]string
 	files       map[string][]byte
 	credentials map[string][]byte
@@ -134,6 +139,7 @@ func New(t testing.TB) *Harness {
 		t:               t,
 		meta:            map[string]string{},
 		cache:           map[string]string{},
+		sharedCache:     map[string]string{},
 		state:           map[string]string{},
 		files:           map[string][]byte{},
 		credentials:     map[string][]byte{},
@@ -685,7 +691,7 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 		if err := proto.Unmarshal(args, &a); err != nil || a.Validate() != nil {
 			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid CacheGetArgs"), nil
 		}
-		v, ok := h.cache[a.Key]
+		v, ok := h.sharedCache[a.Key]
 		if !ok {
 			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_FOUND, "cache key not found"), nil
 		}
@@ -695,7 +701,7 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 		if err := proto.Unmarshal(args, &a); err != nil || a.Validate() != nil {
 			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid CacheSetArgs"), nil
 		}
-		h.cache[a.Key] = a.Value
+		h.sharedCache[a.Key] = a.Value
 		return hostCallResultValue(nil), nil
 
 	case "env.state_get":

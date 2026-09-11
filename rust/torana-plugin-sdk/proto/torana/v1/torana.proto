@@ -259,7 +259,7 @@ message ToolResultCacheBreakpoint {
   bytes marker_json = 1;
 }
 
-// A tool call on the RESPONSE path (ResponseMessage) or the stream
+// A tool call on the RESPONSE path (ResponseBlock) or the stream
 // (ToolCallRef). Request-side tool calls use RequestToolUseBlock; this type
 // deliberately has no request-domain role.
 message ToolCall {
@@ -327,26 +327,30 @@ message ChatRequest {
   bytes torana_meta_json = 11;
 }
 
-// The assistant's reply on the non-streaming response path.
-//
-// Deliberately narrower than Message. The request-only ordered-body fields
-// (blocks and every block kind, cache breakpoints, tool-result identity) are
-// omitted so the authoring API cannot autocomplete silent no-ops. When the
-// host later observes and can write those back, add them as additive fields
-// with deliberate policies — do not reuse Message here.
+// One ordered, writable element of a non-streaming assistant response.
+// Response blocks deliberately expose only wire facts the host can apply.
+message ResponseBlock {
+  oneof kind {
+    ResponseTextBlock text = 1;
+    ToolCall tool_call = 2;
+  }
+}
+
+// A provider text slot. Explicit empty text is distinct from no text block.
+message ResponseTextBlock {
+  string text = 1;
+}
+
+// The assistant's reply on the non-streaming response path. Its body has one
+// ordered authority: blocks. This preserves interleaved text/tool positions
+// and separate text parts instead of flattening them into competing fields.
 message ResponseMessage {
-  // Present only when the host has a writable text slot on the provider body.
-  // Absence means "no text part exists", which is distinct from the empty
-  // string. Presence itself is host-owned (fixed across accepted→output);
-  // the string value is governed by ir.messages.write.assistant when present
-  // on both sides.
-  optional string content = 1;
-  // Fixed cardinality and positional order: output element N mutates accepted
-  // element N. Nested ToolCall.id is host-owned; name and arguments_json are
-  // assistant-writable in place. For calls with no stable provider ID,
-  // positional identity is all the wire can prove — a semantic swap of two
-  // wholly writable anonymous calls is indistinguishable from rewriting both.
-  repeated ToolCall tool_calls = 2;
+  reserved 1, 2;
+  reserved "content", "tool_calls";
+  // Fixed cardinality, arm topology, and positional order: output block N
+  // mutates accepted block N. Text values and tool name/arguments are
+  // assistant-writable; tool identity and signatures remain host-owned.
+  repeated ResponseBlock blocks = 3;
 }
 
 // Canonical representation of a completed, non-streamed response.
