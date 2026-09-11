@@ -11,21 +11,25 @@ import (
 
 // Durable plugin state
 //
-// A plugin has three places to keep things, and choosing wrongly is a common
+// A plugin has four places to keep things, and choosing wrongly is a common
 // source of silent misbehaviour:
 //
-//	Meta   (env.meta_*)    per request, private to this plugin. Gone when the
-//	                       request ends. For carrying data between hooks of one
-//	                       request — fragment buffers, tool-call tracking.
-//	Cache  (env.cache_*)   across requests, TTL'd, and SHARED by every plugin.
-//	                       The channel plugins cooperate through. Prefix your
-//	                       keys; anyone can read them.
-//	State  (env.state_*)   across requests AND across restarts, private to this
-//	                       plugin, no expiry. For things a plugin must still
-//	                       have after the proxy is redeployed.
+//   - Meta (env.meta_*): per request and private to this plugin. Gone when the
+//     request ends. For carrying fragment buffers or tool-call tracking between
+//     hooks of one request.
+//   - Cache (env.cache_*): across requests, TTL'd, and private to this plugin.
+//     For reusable data whose lifetime may depend on the configured backend.
+//   - Shared (env.shared_cache_*): across requests, TTL'd, and shared by every
+//     plugin granted access. For deliberate producer/consumer protocols;
+//     prefix keys to avoid collisions.
+//   - State (env.state_*): across requests and restarts, private to this plugin,
+//     and without expiry. For data a plugin must retain after redeployment.
 //
-// State is the only one that survives a restart, and the only one where a
-// plugin's neighbours cannot read its keys.
+// State is the only scope designed to retain data across restarts. Cache
+// persistence is backend- and TTL-dependent: an in-memory cache does not
+// survive a process restart, while a Redis-backed cache may. Private versus
+// shared describes namespace visibility, not persistence: Meta, Cache, and
+// State are plugin-private; only Shared is a cross-plugin namespace.
 //
 // It requires the env.state_get / env.state_set / env.state_keys permissions.
 // Nothing expires on its own: a plugin that writes per-conversation keys must
@@ -100,9 +104,8 @@ func StateKeys() ([]string, *pbv1.HostError, error) {
 
 // StateGetJSON reads a key and decodes it into v.
 //
-// found is false when the key does not exist, and v is left untouched. This is
-// now answered by NOT_FOUND rather than by the value being empty, so a stored
-// empty JSON document is no longer mistaken for absence.
+// found is false when the key does not exist, and v is left untouched. Absence
+// is reported by NOT_FOUND rather than inferred from an empty value.
 //
 // Any refusal other than absence is returned as an error: a plugin that treats
 // a denied capability as "not stored yet" will quietly rewrite state it could
@@ -137,8 +140,7 @@ func StateGetJSON(key string, v any) (found bool, err error) {
 //     without string matching — advisory (NOT_CONFIGURED/UNAVAILABLE) versus
 //     contract/protocol (PERMISSION_DENIED/INVALID_ARGUMENT/INTERNAL) versus
 //     absence (NOT_FOUND);
-//   - errors.Is(err, ErrStateUnavailable) stays true for NOT_CONFIGURED, as
-//     that sentinel's documentation has always promised.
+//   - errors.Is(err, ErrStateUnavailable) stays true for NOT_CONFIGURED.
 //
 // A malformed or empty host reply is a protocol defect and deliberately does
 // NOT produce a refusal: nothing was classified, so errors.As must not match.
@@ -171,10 +173,10 @@ func StateSetJSON(key string, v any) error {
 
 // Now returns the host's wall-clock time in Unix milliseconds.
 //
-// WASI preview1 gives a plugin no clock, deliberately — a sandbox withholds
-// ambient authority, and time is ambient authority. Plugins that reason about
-// elapsed time (cache lifetimes, deadlines, rate windows) need this; those that
-// do not should not request it.
+// This permission-gated clock is controllable through sdktest.SetNow, so plugin
+// tests can exercise time-dependent behaviour deterministically. Plugins that
+// reason about elapsed time (cache lifetimes, deadlines, rate windows) need
+// this; those that do not should not request it.
 //
 // Requires the env.now permission, and returns an error when it is not granted
 // or when the host clock cannot be read.
