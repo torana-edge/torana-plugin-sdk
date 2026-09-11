@@ -702,8 +702,8 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED,
 				"durable plugin state is not configured"), nil
 		}
-		// An empty value STORES an empty value. v1 deleted the key here, which
-		// is exactly why state now has a separate delete command.
+		// An empty value STORES an empty value. The old helper deleted the key
+		// here, which is exactly why state has a separate delete command.
 		h.state[a.Key] = a.Value
 		return hostCallResultValue(nil), nil
 

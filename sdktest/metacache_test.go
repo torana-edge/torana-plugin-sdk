@@ -68,7 +68,8 @@ func TestSharedCacheSetThenGetUsesExplicitCommands(t *testing.T) {
 
 // The distinction this change exists to preserve. A missing key and a stored
 // empty string must not produce the same answer, or a plugin cannot tell
-// "nothing stored" from "I stored nothing" — the v1 ambiguity the typed ABI removes.
+// "nothing stored" from "I stored nothing" — the ambiguity the typed result
+// contract removes.
 func TestAbsenceIsNotEmptiness(t *testing.T) {
 	for _, store := range []struct {
 		name string

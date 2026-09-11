@@ -13,7 +13,7 @@ import (
 // The two public host-call paths must stay disjoint.
 //
 // If HostCallExtension accepted env.* commands it would be an untyped back door
-// to verdicts, metadata, cache and state — every typed contract in v1 could be
+// to verdicts, metadata, cache and state — every typed core contract could be
 // routed around by a plugin that found this function first. The guest-side
 // check is not the security boundary (the host gates on the grant), but it is
 // what stops an author reaching for it by accident.
