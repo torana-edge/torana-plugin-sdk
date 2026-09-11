@@ -896,9 +896,7 @@ func decodeKV(args string) (string, string, bool) {
 }
 
 // CheckManifest cross-checks plugin.json against what the plugin actually
-// registered. Both directions fail silently in production: a declared hook
-// with no handler loads healthy and never acts, and a registered handler for
-// an undeclared hook is never dispatched.
+// registered, catching locally a mismatch the host would reject at load.
 func CheckManifest(t testing.TB, dir string) {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(dir, "plugin.json"))

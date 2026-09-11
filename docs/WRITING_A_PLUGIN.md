@@ -871,9 +871,9 @@ turns.
 
 ### Cross-check your manifest
 
-A declared hook with no registered handler loads healthy and never acts. A
-registered handler for an undeclared hook is never dispatched. Both fail
-silently in production; one line catches either:
+The host rejects a bundle when its declared hooks and exported hook bitmap do
+not agree. Catch that mismatch in the source checkout, before packaging or
+installation, with one line:
 
 ```go
 func TestManifestMatchesRegistrations(t *testing.T) {

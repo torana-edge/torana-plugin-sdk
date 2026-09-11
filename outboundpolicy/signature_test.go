@@ -290,10 +290,10 @@ func TestValidateRejectsDuplicateRequestBinding(t *testing.T) {
 
 	conflicting := SignatureBinding{
 		Domain:         SignatureDomainRequest,
-		Message:        "torana.v1.Message",
-		SignatureField: "thinking_signature",
+		Message:        "torana.v1.RequestThinkingBlock",
+		SignatureField: "signature",
 		Content: []SignatureContentRef{
-			{Scope: SignatureScopeSameMessage, Field: "thinking"},
+			{Scope: SignatureScopeSameMessage, Field: "text"},
 		},
 	}
 	signatureBindings = append(append([]SignatureBinding{}, original...), conflicting)
@@ -302,7 +302,7 @@ func TestValidateRejectsDuplicateRequestBinding(t *testing.T) {
 	if err == nil {
 		t.Fatal("a duplicate request-domain binding was accepted; one token would have two scopes")
 	}
-	if !strings.Contains(err.Error(), "Message.thinking_signature") {
+	if !strings.Contains(err.Error(), "RequestThinkingBlock.signature") {
 		t.Fatalf("error does not name the offending field: %v", err)
 	}
 }
@@ -391,15 +391,23 @@ func TestConcurrentToolFixtureCoversBothIndexes(t *testing.T) {
 		if len(f.Accepted) == 0 || len(f.Returned) == 0 {
 			continue
 		}
-		// The concurrent shape is the one whose accepted stream opens two tool
-		// blocks before either closes.
-		var sawStarts []int32
+		// The concurrent shape is one whose accepted stream has two tool blocks
+		// open at the same time. Merely counting starts would also accept two
+		// sequential, non-overlapping calls.
+		open := map[int32]bool{}
+		overlapped := false
 		for _, ev := range f.Accepted {
-			if s, ok := ev.Event.(*pbv1.StreamEvent_ContentBlockStart); ok && s.ContentBlockStart.GetToolCall() != nil {
-				sawStarts = append(sawStarts, s.ContentBlockStart.Index)
+			switch e := ev.Event.(type) {
+			case *pbv1.StreamEvent_ContentBlockStart:
+				if e.ContentBlockStart.GetToolCall() != nil {
+					open[e.ContentBlockStart.Index] = true
+					overlapped = overlapped || len(open) >= 2
+				}
+			case *pbv1.StreamEvent_ContentBlockStop:
+				delete(open, e.ContentBlockStop.Index)
 			}
 		}
-		if len(sawStarts) >= 2 {
+		if overlapped {
 			concurrent = append(concurrent, f)
 		}
 	}

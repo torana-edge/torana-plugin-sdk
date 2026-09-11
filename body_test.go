@@ -130,7 +130,8 @@ func TestReplaceAllText(t *testing.T) {
 }
 
 func TestToolCallsAndResults(t *testing.T) {
-	calls := ToolCalls(helperMsg())
+	msg := helperMsg()
+	calls := ToolCalls(msg)
 	if len(calls) != 1 || calls[0].Block != 2 || calls[0].Id != "t1" || calls[0].Name != "read" {
 		t.Fatalf("calls: %+v", calls)
 	}
@@ -139,7 +140,7 @@ func TestToolCallsAndResults(t *testing.T) {
 	}
 	// Copied view: mutating the view must not touch the message.
 	calls[0].Arguments[0] = 'X'
-	if got := helperMsg().Blocks[2].GetToolUse().ArgumentsJson; string(got) != `{"path":"x"}` {
+	if got := msg.Blocks[2].GetToolUse().ArgumentsJson; string(got) != `{"path":"x"}` {
 		t.Fatal("view shares memory with the message")
 	}
 
