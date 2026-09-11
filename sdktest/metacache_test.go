@@ -298,3 +298,41 @@ func TestMalformedReplyIsNotAValue(t *testing.T) {
 		}
 	})
 }
+
+// The harness must be able to seed and read everything the SDK lets a plugin
+// use. The private and shared caches are separate stores, and for one release
+// only the private one could be seeded — so a plugin calling SharedCacheGet
+// could not be tested at all. It broke an official plugin's suite four tests
+// at a time, and each failure looked like the plugin declining to use a cached
+// value rather than never having been shown one.
+func TestSharedCacheIsSeedableAndReadable(t *testing.T) {
+	h := sdktest.New(t)
+	h.SeedSharedCache("intent:call_1", "find the bug")
+
+	// The private store must NOT satisfy a shared read: they are different
+	// stores, and seeding the wrong one should stay visibly wrong.
+	if _, ok := h.Cache("intent:call_1"); ok {
+		t.Error("SeedSharedCache wrote into the private cache; the two stores are not separate")
+	}
+
+	h.Run(func() {
+		got, herr, err := sdk.SharedCacheGet("intent:call_1")
+		if err != nil || herr != nil {
+			t.Fatalf("SharedCacheGet on a seeded key: err=%v herr=%v", err, herr)
+		}
+		if got != "find the bug" {
+			t.Fatalf("SharedCacheGet = %q, want %q", got, "find the bug")
+		}
+		if herr, err := sdk.SharedCacheSet("derived:call_1", got+"/derived"); err != nil || herr != nil {
+			t.Fatalf("SharedCacheSet: err=%v herr=%v", err, herr)
+		}
+	})
+
+	got, ok := h.SharedCache("derived:call_1")
+	if !ok {
+		t.Fatal("what the plugin published to the shared cache is not readable back")
+	}
+	if got != "find the bug/derived" {
+		t.Errorf("SharedCache = %q, want %q", got, "find the bug/derived")
+	}
+}
