@@ -38,8 +38,8 @@ func TestStateAbsenceIsNotEmptiness(t *testing.T) {
 	})
 }
 
-// v1 deleted a key by setting it to "", which made storing an empty value
-// impossible and contradicted meta and cache. The two are now separate
+// The old state helper deleted a key by setting it to "", which made storing an
+// empty value impossible and contradicted meta and cache. The two are separate
 // operations and must stay so.
 func TestStateSetEmptyDoesNotDelete(t *testing.T) {
 	sdktest.New(t).Run(func() {
@@ -111,8 +111,8 @@ func TestUnconfiguredStateIsDistinctFromAbsence(t *testing.T) {
 	})
 }
 
-// StateGetJSON must distinguish absence from a stored empty document. v1 could
-// not: it decided by whether the raw value was "".
+// StateGetJSON must distinguish absence from a stored empty document. The old
+// untyped reply could not: it decided by whether the raw value was "".
 func TestStateGetJSONDistinguishesAbsenceFromEmptyDocument(t *testing.T) {
 	sdktest.New(t).Run(func() {
 		var v map[string]any

@@ -237,8 +237,8 @@ prefer `failure_mode: "block"` when silent pass-through would be unsafe.
 
 Every capability must be requested in `plugin.json` **and** approved with the
 rest of the declared set against your exact bundle digest. A denied capability
-does not trap — typed host calls return `*HostError`, transitional JSON helpers
-surface permission denied — so a plugin should degrade rather than assume.
+does not trap: core and extension host calls return a classified `*HostError`,
+so a plugin should degrade rather than assume.
 **Verdicts — change what happens to the request**
 
 | Capability | SDK | Description |
