@@ -74,9 +74,7 @@ import (
 //     parent and recursively account for added/removed nested fields.
 //   - PolicyHostOwned on a message: the whole subtree is immutable; any
 //     nested change/remove/add rejects.
-//   - Scalar fields apply their own policy directly. Optional scalars with
-//     PolicySection (e.g. ResponseMessage.content): presence is host-owned /
-//     fixed; the value is section-writable only when present on both sides.
+//   - Scalar fields apply their own policy directly.
 //
 // Registries are package-private. Constructors are package-private. Public
 // accessors return values/clones so importers cannot mutate the authority
@@ -921,12 +919,19 @@ var chatResponseFieldPolicies = map[string]FieldPolicy{
 }
 
 var responseMessageFieldPolicies = map[string]FieldPolicy{
-	// Presence is host-owned/fixed; value is assistant-writable when present
-	// on both sides (see package comment optional-scalar rule).
-	"content": sectionPolicy(plugin_sdk.SectionMessagesAssistant),
-	// Fixed cardinality/order: recurse into ToolCall children for in-place
-	// name/arguments edits. Positional identity for anonymous (empty-ID) calls.
-	"tool_calls": fixedContainerPolicy(),
+	// Fixed cardinality/order: recurse into blocks for in-place text/tool edits.
+	"blocks": fixedContainerPolicy(),
+}
+
+var responseBlockFieldPolicies = map[string]FieldPolicy{
+	// Arm topology is fixed by the host response verifier. With the same arm,
+	// recurse to the writable leaf policy.
+	"text":      containerPolicy(),
+	"tool_call": containerPolicy(),
+}
+
+var responseTextBlockFieldPolicies = map[string]FieldPolicy{
+	"text": sectionPolicy(plugin_sdk.SectionMessagesAssistant),
 }
 
 var responseToolCallFieldPolicies = map[string]FieldPolicy{
@@ -1016,6 +1021,8 @@ var hookResultActionPolicies = map[string]FieldPolicy{
 var outboundMessageFieldPolicies = map[protoreflect.FullName]map[string]FieldPolicy{
 	"torana.v1.ChatResponse":      chatResponseFieldPolicies,
 	"torana.v1.ResponseMessage":   responseMessageFieldPolicies,
+	"torana.v1.ResponseBlock":     responseBlockFieldPolicies,
+	"torana.v1.ResponseTextBlock": responseTextBlockFieldPolicies,
 	"torana.v1.ToolCall":          responseToolCallFieldPolicies,
 	"torana.v1.Usage":             usageFieldPolicies,
 	"torana.v1.StreamEvent":       streamEventVariantPolicies,
@@ -1464,6 +1471,8 @@ func outboundDescriptors() map[protoreflect.FullName]protoreflect.MessageDescrip
 		&pbv1.ChatRequest{},
 		&pbv1.Message{},
 		&pbv1.ResponseMessage{},
+		&pbv1.ResponseBlock{},
+		&pbv1.ResponseTextBlock{},
 		&pbv1.ToolCall{},
 		&pbv1.ToolCallDelta{},
 		&pbv1.ToolCallRef{},

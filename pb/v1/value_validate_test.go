@@ -236,14 +236,15 @@ func TestRemainingTypedNilStreamAndBlockVariants(t *testing.T) {
 }
 
 func TestReplaceResponseValidatesNestedToolCalls(t *testing.T) {
-	okContent := "hi"
 	ok := &v1.HookResult{Action: &v1.HookResult_ReplaceResponse{
 		ReplaceResponse: &v1.ChatResponse{
 			Message: &v1.ResponseMessage{
-				Content: &okContent,
-				ToolCalls: []*v1.ToolCall{{
-					Id: "c1", Name: "read", ArgumentsJson: []byte(`{"p":1}`),
-				}},
+				Blocks: []*v1.ResponseBlock{
+					{Kind: &v1.ResponseBlock_Text{Text: &v1.ResponseTextBlock{Text: "hi"}}},
+					{Kind: &v1.ResponseBlock_ToolCall{ToolCall: &v1.ToolCall{
+						Id: "c1", Name: "read", ArgumentsJson: []byte(`{"p":1}`),
+					}}},
+				},
 			},
 		},
 	}}
@@ -259,35 +260,35 @@ func TestReplaceResponseValidatesNestedToolCalls(t *testing.T) {
 		{
 			name: "empty tool name",
 			resp: &v1.ChatResponse{Message: &v1.ResponseMessage{
-				ToolCalls: []*v1.ToolCall{{Id: "c1", Name: "", ArgumentsJson: []byte(`{}`)}},
+				Blocks: []*v1.ResponseBlock{{Kind: &v1.ResponseBlock_ToolCall{ToolCall: &v1.ToolCall{Id: "c1", Name: "", ArgumentsJson: []byte(`{}`)}}}},
 			}},
 			want: "empty name",
 		},
 		{
 			name: "empty arguments json",
 			resp: &v1.ChatResponse{Message: &v1.ResponseMessage{
-				ToolCalls: []*v1.ToolCall{{Id: "c1", Name: "read", ArgumentsJson: nil}},
+				Blocks: []*v1.ResponseBlock{{Kind: &v1.ResponseBlock_ToolCall{ToolCall: &v1.ToolCall{Id: "c1", Name: "read", ArgumentsJson: nil}}}},
 			}},
 			want: "non-empty JSON object",
 		},
 		{
 			name: "invalid arguments json",
 			resp: &v1.ChatResponse{Message: &v1.ResponseMessage{
-				ToolCalls: []*v1.ToolCall{{Id: "c1", Name: "read", ArgumentsJson: []byte(`{`)}},
+				Blocks: []*v1.ResponseBlock{{Kind: &v1.ResponseBlock_ToolCall{ToolCall: &v1.ToolCall{Id: "c1", Name: "read", ArgumentsJson: []byte(`{`)}}}},
 			}},
 			want: "valid JSON",
 		},
 		{
 			name: "arguments not object",
 			resp: &v1.ChatResponse{Message: &v1.ResponseMessage{
-				ToolCalls: []*v1.ToolCall{{Id: "c1", Name: "read", ArgumentsJson: []byte(`[1]`)}},
+				Blocks: []*v1.ResponseBlock{{Kind: &v1.ResponseBlock_ToolCall{ToolCall: &v1.ToolCall{Id: "c1", Name: "read", ArgumentsJson: []byte(`[1]`)}}}},
 			}},
 			want: "JSON object",
 		},
 		{
 			name: "nil tool call element",
 			resp: &v1.ChatResponse{Message: &v1.ResponseMessage{
-				ToolCalls: []*v1.ToolCall{nil},
+				Blocks: []*v1.ResponseBlock{{Kind: &v1.ResponseBlock_ToolCall{ToolCall: nil}}},
 			}},
 			want: "nil",
 		},
@@ -303,13 +304,9 @@ func TestReplaceResponseValidatesNestedToolCalls(t *testing.T) {
 	}
 }
 
-func TestResponseMessageContentPresence(t *testing.T) {
-	empty := ""
-	msg := &v1.ResponseMessage{Content: &empty}
-	if !msg.HasContent() {
-		t.Fatal("empty string with presence must report HasContent")
-	}
-	if (&v1.ResponseMessage{}).HasContent() {
-		t.Fatal("absent content must not report HasContent")
+func TestResponseMessageEmptyTextBlockPresence(t *testing.T) {
+	msg := &v1.ResponseMessage{Blocks: []*v1.ResponseBlock{{Kind: &v1.ResponseBlock_Text{Text: &v1.ResponseTextBlock{}}}}}
+	if got := msg.Blocks[0].GetText(); got == nil || got.Text != "" {
+		t.Fatal("explicit empty response text block lost presence")
 	}
 }

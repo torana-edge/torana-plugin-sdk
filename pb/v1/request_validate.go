@@ -74,7 +74,7 @@ package v1
 // walk — Go strings are NOT valid UTF-8 by construction, only wire-decoded
 // protobuf strings are).
 //
-// Generic ToolCall is RESPONSE-side only (ResponseMessage.tool_calls and the
+// Generic ToolCall is RESPONSE-side only (ResponseBlock.tool_call and the
 // stream's ToolCallRef); request tool calls are RequestToolUseBlock blocks.
 
 import (
@@ -82,6 +82,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"reflect"
 	"unicode/utf8"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -111,7 +112,7 @@ var requestJSONFields = map[string]jsonFieldRule{
 	"torana.v1.RequestCacheBreakpoint.marker_json":    {shape: "object", required: true},
 	"torana.v1.ToolResultUnknownBlock.payload_json":   {shape: "object", required: true},
 	"torana.v1.ToolResultCacheBreakpoint.marker_json": {shape: "object", required: true},
-	// Response-side ToolCall (ResponseMessage.tool_calls): declared for
+	// Response-side ToolCall (ResponseBlock.tool_call): declared for
 	// inventory totality; the request validator never walks it — the
 	// response validator governs its shape.
 	"torana.v1.ToolCall.arguments_json":    {shape: "object", required: true},
@@ -214,7 +215,7 @@ var requestScalarRules = map[string]string{
 	"torana.v1.RequestUnknownBlock.signature": "text-utf8",
 	// RequestTrailingSignatureBlock
 	"torana.v1.RequestTrailingSignatureBlock.signature": "text-required-utf8",
-	// ToolCall — RESPONSE-side only now (ResponseMessage.tool_calls). ID is
+	// ToolCall — RESPONSE-side only now (ResponseBlock.tool_call). ID is
 	// host-owned and may legitimately be absent for anonymous response
 	// calls; requiredness is the response validator's job.
 	"torana.v1.ToolCall.id":        "text-utf8",
@@ -406,7 +407,7 @@ func validateMessageReplacement(m *Message, i int) error {
 	// block) is meaningless and refused absolutely.
 	hasCoveredBlock := false
 	for _, b := range m.Blocks {
-		if b == nil {
+		if b == nil || nilOneofArm(b.Kind) {
 			continue
 		}
 		if b.GetText() != nil || b.GetThinking() != nil {
@@ -436,6 +437,9 @@ func validateRequestBlock(b *RequestBlock, mi string, bi, blockCount int, role s
 	what := fmt.Sprintf("chat request replacement messages[%s].blocks[%d]", mi, bi)
 	if err := checkNoUnknown(b.ProtoReflect(), what); err != nil {
 		return err
+	}
+	if nilOneofArm(b.Kind) {
+		return fmt.Errorf("%s has a nil or typed-nil kind arm", what)
 	}
 	switch k := b.Kind.(type) {
 	case *RequestBlock_Text:
@@ -588,9 +592,26 @@ func validateRequestBlock(b *RequestBlock, mi string, bi, blockCount int, role s
 		}
 		return validateJSONField(ts.PartMetadataJson, what+".trailing_signature.part_metadata_json",
 			requestJSONFields["torana.v1.RequestTrailingSignatureBlock.part_metadata_json"])
+	case *RequestBlock_Refusal:
+		if k.Refusal == nil {
+			return fmt.Errorf("%s refusal arm is a typed nil", what)
+		}
+		return checkNoUnknown(k.Refusal.ProtoReflect(), what+".refusal")
 	default:
 		return fmt.Errorf("%s has no kind arm", what)
 	}
+}
+
+// A protobuf oneof is an interface. Hand-written Go callers can assign a
+// typed-nil wrapper to it even though protobuf decoding never produces that
+// shape. Generated GetX methods dereference the wrapper, so public validators
+// must reject it before calling any getter.
+func nilOneofArm(v any) bool {
+	if v == nil {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	return rv.Kind() == reflect.Ptr && rv.IsNil()
 }
 
 // validateToolResultContentBlock applies the nested tool-result grammar:

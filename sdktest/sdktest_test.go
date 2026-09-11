@@ -250,13 +250,14 @@ func TestStreamHandlerAssemblesToolCall(t *testing.T) {
 		ContentBlockStop: &pbv1.ContentBlockStop{Index: 0},
 	}}
 
-	if r := h.StreamChunk(start); !r.Suppressed {
+	request := h.NewRequest()
+	if r := request.StreamChunk(start); !r.Suppressed {
 		t.Fatal("start should suppress while assembling")
 	}
-	if r := h.StreamChunk(delta); !r.Suppressed {
+	if r := request.StreamChunk(delta); !r.Suppressed {
 		t.Fatal("delta should suppress")
 	}
-	r := h.StreamChunk(stop)
+	r := request.StreamChunk(stop)
 	if r.Err != nil {
 		t.Fatal(r.Err)
 	}
@@ -322,8 +323,9 @@ func TestStreamHandlerPassSuppressFailOpen(t *testing.T) {
 				return tc.action(call)
 			})
 			s.Register()
-			feedToolCall(t, h, 0, `{"x":1}`)
-			r := h.StreamChunk(&pbv1.StreamEvent{Event: &pbv1.StreamEvent_ContentBlockStop{
+			request := h.NewRequest()
+			feedToolCall(t, request, 0, `{"x":1}`)
+			r := request.StreamChunk(&pbv1.StreamEvent{Event: &pbv1.StreamEvent_ContentBlockStop{
 				ContentBlockStop: &pbv1.ContentBlockStop{Index: 0},
 			}})
 			tc.check(t, r)
@@ -366,10 +368,11 @@ func TestStreamAssemblerFeedSplitFragments(t *testing.T) {
 	})
 	s.Register()
 
-	h.StreamChunk(toolStart(1, "t"))
-	h.StreamChunk(toolDelta(1, `{"a":`))
-	h.StreamChunk(toolDelta(1, `1}`))
-	r := h.StreamChunk(toolStop(1))
+	request := h.NewRequest()
+	request.StreamChunk(toolStart(1, "t"))
+	request.StreamChunk(toolDelta(1, `{"a":`))
+	request.StreamChunk(toolDelta(1, `1}`))
+	r := request.StreamChunk(toolStop(1))
 	if r.Err != nil {
 		t.Fatal(r.Err)
 	}
@@ -431,10 +434,11 @@ func TestStreamCorruptStopDoesNotPassFragmentAlone(t *testing.T) {
 		})
 		return string(raw), nil
 	})
-	if r := h.StreamChunk(toolStart(0, "t")); r.Err != nil {
+	request := h.NewRequest()
+	if r := request.StreamChunk(toolStart(0, "t")); r.Err != nil {
 		t.Fatal(r.Err)
 	}
-	r := h.StreamChunk(toolStop(0))
+	r := request.StreamChunk(toolStop(0))
 	if r.Err == nil {
 		t.Fatal("corrupt frame must fail closed")
 	}
@@ -491,9 +495,10 @@ func TestSignedToolCallContract(t *testing.T) {
 					}},
 				},
 			}}
-			h.StreamChunk(start)
-			h.StreamChunk(toolDelta(0, `{"x":1}`))
-			r := h.StreamChunk(toolStop(0))
+			request := h.NewRequest()
+			request.StreamChunk(start)
+			request.StreamChunk(toolDelta(0, `{"x":1}`))
+			r := request.StreamChunk(toolStop(0))
 			if r.Err != nil {
 				t.Fatal(r.Err)
 			}
@@ -550,12 +555,12 @@ func TestHTTPAndTick(t *testing.T) {
 	}
 }
 
-func feedToolCall(t *testing.T, h *sdktest.Harness, index int32, args string) {
+func feedToolCall(t *testing.T, request *sdktest.Request, index int32, args string) {
 	t.Helper()
-	if r := h.StreamChunk(toolStart(index, "tool")); !r.Suppressed {
+	if r := request.StreamChunk(toolStart(index, "tool")); !r.Suppressed {
 		t.Fatal(r)
 	}
-	if r := h.StreamChunk(toolDelta(index, args)); !r.Suppressed {
+	if r := request.StreamChunk(toolDelta(index, args)); !r.Suppressed {
 		t.Fatal(r)
 	}
 }

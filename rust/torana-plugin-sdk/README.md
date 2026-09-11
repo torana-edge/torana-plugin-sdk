@@ -11,7 +11,7 @@ Add the crate and build for WASI Preview 1:
 crate-type = ["cdylib"]
 
 [dependencies]
-torana-plugin-sdk = "0.3"
+torana-plugin-sdk = "0.4"
 ```
 
 ```bash

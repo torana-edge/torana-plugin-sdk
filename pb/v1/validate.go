@@ -231,29 +231,44 @@ func validateToolArgumentsJSON(raw []byte) error {
 	return nil
 }
 
-// HasContent reports whether content presence is set. Absence means the host
-// has no writable text slot; the empty string with presence means an empty
-// writable text part.
-func (x *ResponseMessage) HasContent() bool {
-	return x != nil && x.Content != nil
-}
-
 // Validate reports whether a response message is structurally applicable.
-// Content presence comparisons against an accepted response belong to the
-// host verifier; this checks only absolute well-formedness.
+// Block topology comparisons against an accepted response belong to the host
+// verifier; this checks only absolute well-formedness.
 func (x *ResponseMessage) Validate() error {
 	if x == nil {
 		return fmt.Errorf("response message is nil")
 	}
-	for i, tc := range x.ToolCalls {
-		if tc == nil {
-			return fmt.Errorf("response message tool_calls[%d] is nil", i)
+	for i, block := range x.Blocks {
+		if block == nil {
+			return fmt.Errorf("response message blocks[%d] is nil", i)
 		}
-		if err := tc.Validate(); err != nil {
-			return fmt.Errorf("response message tool_calls[%d]: %w", i, err)
+		if err := block.Validate(); err != nil {
+			return fmt.Errorf("response message blocks[%d]: %w", i, err)
 		}
 	}
 	return nil
+}
+
+// Validate reports whether one ordered response body block has a concrete,
+// well-formed arm.
+func (x *ResponseBlock) Validate() error {
+	if x == nil || x.Kind == nil || nilOneofArm(x.Kind) {
+		return fmt.Errorf("response block has no kind")
+	}
+	switch kind := x.Kind.(type) {
+	case *ResponseBlock_Text:
+		if kind.Text == nil {
+			return fmt.Errorf("response text block is nil")
+		}
+		return nil
+	case *ResponseBlock_ToolCall:
+		if kind.ToolCall == nil {
+			return fmt.Errorf("response tool-call block is nil")
+		}
+		return kind.ToolCall.Validate()
+	default:
+		return fmt.Errorf("response block has unknown kind %T", kind)
+	}
 }
 
 // Validate reports whether a ChatResponse replacement is structurally

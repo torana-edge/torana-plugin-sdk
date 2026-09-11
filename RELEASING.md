@@ -37,7 +37,7 @@ not merely two crates that happen to compile.
 
 1. **Bump `rust/torana-plugin-sdk/Cargo.toml`** to the version you are about to
    tag, without the `v`. Public Go tags already run through `v0.2.0`, so the
-   next coordinated Go/Rust release is `v0.3.0`. ABI and package versions are
+   next coordinated Go/Rust release is `v0.4.0`. ABI and package versions are
    independent: ABI v1 does not imply SDK v0.1. Commit the version to `main`.
 2. **Verify** — `go test ./...`, `cargo test --manifest-path rust/torana-plugin-sdk/Cargo.toml`,
    and a `GOOS=wasip1 GOARCH=wasm go build ./...` (a compile check of the SDK

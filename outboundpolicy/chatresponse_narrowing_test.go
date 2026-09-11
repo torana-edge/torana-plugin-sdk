@@ -11,13 +11,17 @@ func TestChatResponseNarrowedPolicyContract(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	content, ok := OutboundFieldPolicy("torana.v1.ResponseMessage", "content")
+	blocks, ok := OutboundFieldPolicy("torana.v1.ResponseMessage", "blocks")
 	if !ok {
-		t.Fatal("ResponseMessage.content missing from inventory")
+		t.Fatal("ResponseMessage.blocks missing from inventory")
 	}
-	sec, ok := content.Section()
-	if content.Kind() != PolicySection || !ok || sec != plugin_sdk.SectionMessagesAssistant {
-		t.Fatal("ResponseMessage.content must be assistant section (value writable when present)")
+	if !blocks.IsFixedContainer() {
+		t.Fatal("ResponseMessage.blocks must be PolicyFixedContainer")
+	}
+	content, ok := OutboundFieldPolicy("torana.v1.ResponseTextBlock", "text")
+	sec, sectionOK := content.Section()
+	if !ok || content.Kind() != PolicySection || !sectionOK || sec != plugin_sdk.SectionMessagesAssistant {
+		t.Fatal("ResponseTextBlock.text must be assistant-writable")
 	}
 
 	name, _ := OutboundFieldPolicy("torana.v1.ToolCall", "name")
@@ -31,11 +35,7 @@ func TestChatResponseNarrowedPolicyContract(t *testing.T) {
 		t.Fatal("ToolCall.arguments_json must map to SectionMessagesAssistant")
 	}
 
-	toolCalls, ok := OutboundFieldPolicy("torana.v1.ResponseMessage", "tool_calls")
-	if !ok || !toolCalls.IsFixedContainer() {
-		t.Fatal("ResponseMessage.tool_calls must be PolicyFixedContainer")
-	}
-	if toolCalls.IsContainer() {
+	if blocks.IsContainer() {
 		t.Fatal("PolicyFixedContainer must not report as ordinary PolicyContainer")
 	}
 
