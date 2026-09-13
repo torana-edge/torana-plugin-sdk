@@ -921,3 +921,12 @@ responses, and includes the descriptor in the digest-bound approval.
 
 See [AGENT_CONTROL_PLANE.md](https://github.com/torana-edge/torana-edge/blob/main/docs/AGENT_CONTROL_PLANE.md) for the descriptor schema,
 dispatch contract, validation rules, and a complete curl example.
+
+### Explicit tool failures
+
+`ToolResults` preserves the optional `is_error` flag in the copied
+`ToolResultView.IsError` pointer. Compaction must leave explicit failures
+verbatim, even when the tool name and diagnostic text look successful. Use
+`result.MustStayExact(resolvedToolName, text)` before cache lookup, model
+completion, mutation, or savings reporting. An absent flag and explicit false
+remain distinct values; neither overrides the existing name/text safety checks.

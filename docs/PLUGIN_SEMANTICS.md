@@ -391,3 +391,12 @@ is the provider default `WHEN_IDLE`). All six Part-mapped messages carry
 `part_metadata_json` (strict JSON object when present; the provider's
 `partMetadata` struct, which is legal on ANY Part, is preserved on text,
 thinking, tool-use, tool-result, unknown, and the trailing standalone).
+
+### Explicit tool failures
+
+`ToolResults` preserves the optional `is_error` flag in the copied
+`ToolResultView.IsError` pointer. Compaction must leave explicit failures
+verbatim, even when the tool name and diagnostic text look successful. Use
+`result.MustStayExact(resolvedToolName, text)` before cache lookup, model
+completion, mutation, or savings reporting. An absent flag and explicit false
+remain distinct values; neither overrides the existing name/text safety checks.

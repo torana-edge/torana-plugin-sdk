@@ -344,9 +344,11 @@ func ToolCalls(msg *pbv1.Message) []ToolCallView {
 // ToolResultView is a copied view of one tool-result block.
 type ToolResultView struct {
 	// Block is the block index inside Message.blocks.
-	Block          int
-	ToolCallId     string
-	ToolName       string
+	Block      int
+	ToolCallId string
+	ToolName   string
+	// IsError preserves presence as well as value. Explicit failures must stay exact.
+	IsError        *bool
 	Content        []ToolResultContentView // ordered nested content, copied
 	InvocationKind pbv1.ToolInvocationKind
 }
@@ -369,6 +371,10 @@ func ToolResults(msg *pbv1.Message) []ToolResultView {
 	for i, b := range msg.Blocks {
 		if tr := b.GetToolResult(); tr != nil {
 			v := ToolResultView{Block: i, ToolCallId: tr.ToolCallId, ToolName: tr.ToolName, InvocationKind: tr.InvocationKind}
+			if tr.IsError != nil {
+				isError := *tr.IsError
+				v.IsError = &isError
+			}
 			for _, c := range tr.Content {
 				v.Content = append(v.Content, toolResultContentView(c))
 			}

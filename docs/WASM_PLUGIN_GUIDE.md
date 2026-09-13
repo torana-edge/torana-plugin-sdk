@@ -192,3 +192,12 @@ or explicitly budgeted provider egress. Return pass-through when idle and a
 11. Are absence and present-empty values kept distinct?
 12. Does a compiled guest run through the real host conformance harness, not
     merely compile?
+
+### Explicit tool failures
+
+`ToolResults` preserves the optional `is_error` flag in the copied
+`ToolResultView.IsError` pointer. Compaction must leave explicit failures
+verbatim, even when the tool name and diagnostic text look successful. Use
+`result.MustStayExact(resolvedToolName, text)` before cache lookup, model
+completion, mutation, or savings reporting. An absent flag and explicit false
+remain distinct values; neither overrides the existing name/text safety checks.
