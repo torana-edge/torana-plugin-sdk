@@ -7,8 +7,6 @@ import (
 	"sync"
 	"unsafe"
 
-	"google.golang.org/protobuf/proto"
-
 	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
