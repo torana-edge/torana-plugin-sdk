@@ -9,6 +9,8 @@ use core::{ptr, slice};
 
 #[cfg(not(target_arch = "wasm32"))]
 thread_local! { static NATIVE_HOST: std::cell::RefCell<Option<Box<dyn Fn(&str, &[u8]) -> Result<Vec<u8>, HostCallError>>>> = const { std::cell::RefCell::new(None) }; }
+#[cfg(not(target_arch = "wasm32"))]
+thread_local! { static EXECUTION_CTX: std::cell::RefCell<Option<(u64, pbv1::ExecutionInfo)>> = const { std::cell::RefCell::new(None) }; }
 
 #[doc(hidden)]
 pub use prost;
@@ -230,6 +232,26 @@ pub fn hook_of(input: &pbv1::HookInput) -> Result<pbv1::Hook, String> {
         Some(Payload::HttpRequest(_)) => Ok(pbv1::Hook::OnHttpRequest),
         Some(Payload::TickRequest(_)) => Ok(pbv1::Hook::OnTick),
         None => Err("torana sdk: HookInput requires a payload".to_owned()),
+    }
+}
+pub fn execution() -> Option<pbv1::ExecutionInfo> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        return EXECUTION_CTX.with(|x| x.borrow().as_ref().map(|(_, e)| e.clone()));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        None
+    }
+}
+pub fn request_id() -> Option<u64> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        return EXECUTION_CTX.with(|x| x.borrow().as_ref().map(|(id, _)| *id));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        None
     }
 }
 
@@ -759,7 +781,9 @@ pub fn log(message: &str, level: i32) {
         return;
     }
     #[cfg(target_arch = "wasm32")]
-    unsafe { host_log(level, message.as_ptr() as u32, message.len() as u32) }
+    unsafe {
+        host_log(level, message.as_ptr() as u32, message.len() as u32)
+    }
     #[cfg(not(target_arch = "wasm32"))]
     let _ = level;
 }
@@ -1114,6 +1138,147 @@ pub fn cache_delete(key: &str) -> Result<(), HostCallError> {
         &pbv1::CacheDeleteArgs { key: key.into() },
     )
     .map(|_| ())
+}
+pub fn state_keys() -> Result<Vec<String>, HostCallError> {
+    use prost::Message;
+    let b = host_call(
+        "env.state_keys",
+        &pbv1::StateScanArgs {
+            prefix: String::new(),
+            cursor: String::new(),
+            limit: 256,
+        },
+    )?;
+    Ok(pbv1::StateScanResult::decode(b.as_slice())
+        .map_err(|e| HostCallError::Protocol(e.to_string()))?
+        .entries
+        .into_iter()
+        .map(|e| e.key)
+        .collect())
+}
+pub fn state_get_versioned(key: &str) -> Result<Option<pbv1::StateValue>, HostCallError> {
+    use prost::Message;
+    match host_call(
+        "env.state_get_versioned",
+        &pbv1::StateGetArgs { key: key.into() },
+    ) {
+        Ok(b) => Ok(Some(
+            pbv1::StateValue::decode(b.as_slice())
+                .map_err(|e| HostCallError::Protocol(e.to_string()))?,
+        )),
+        Err(HostCallError::Refused(e)) if e.code == pbv1::ErrorCode::NotFound as i32 => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+pub fn state_compare_and_set(
+    key: &str,
+    value: &str,
+    expected_version: Option<&str>,
+) -> Result<pbv1::StateMutationResult, HostCallError> {
+    use prost::Message;
+    let b = host_call(
+        "env.state_compare_and_set",
+        &pbv1::StateCompareAndSetArgs {
+            key: key.into(),
+            value: value.into(),
+            expected_version: expected_version.map(str::to_owned),
+        },
+    )?;
+    Ok(pbv1::StateMutationResult::decode(b.as_slice())
+        .map_err(|e| HostCallError::Protocol(e.to_string()))?)
+}
+pub fn state_compare_and_delete(
+    key: &str,
+    expected_version: &str,
+) -> Result<pbv1::StateMutationResult, HostCallError> {
+    use prost::Message;
+    let b = host_call(
+        "env.state_compare_and_delete",
+        &pbv1::StateCompareAndDeleteArgs {
+            key: key.into(),
+            expected_version: expected_version.into(),
+        },
+    )?;
+    Ok(pbv1::StateMutationResult::decode(b.as_slice())
+        .map_err(|e| HostCallError::Protocol(e.to_string()))?)
+}
+pub fn state_scan(
+    prefix: &str,
+    cursor: &str,
+    limit: u32,
+) -> Result<pbv1::StateScanResult, HostCallError> {
+    use prost::Message;
+    if !(1..=256).contains(&limit) {
+        return Err(HostCallError::Protocol(
+            "state scan limit must be 1..256".into(),
+        ));
+    }
+    let b = host_call(
+        "env.state_scan",
+        &pbv1::StateScanArgs {
+            prefix: prefix.into(),
+            cursor: cursor.into(),
+            limit,
+        },
+    )?;
+    Ok(pbv1::StateScanResult::decode(b.as_slice())
+        .map_err(|e| HostCallError::Protocol(e.to_string()))?)
+}
+pub fn shared_cache_get(key: &str) -> Result<Option<String>, HostCallError> {
+    cache_get_named("env.shared_cache_get", key)
+}
+pub fn shared_cache_set(key: &str, value: &str, ttl_ms: Option<u64>) -> Result<(), HostCallError> {
+    host_call(
+        "env.shared_cache_set",
+        &pbv1::CacheSetArgs {
+            key: key.into(),
+            value: value.into(),
+            ttl_ms,
+        },
+    )
+    .map(|_| ())
+}
+pub fn shared_cache_delete(key: &str) -> Result<(), HostCallError> {
+    host_call(
+        "env.shared_cache_delete",
+        &pbv1::CacheDeleteArgs { key: key.into() },
+    )
+    .map(|_| ())
+}
+fn cache_get_named(command: &str, key: &str) -> Result<Option<String>, HostCallError> {
+    match host_call(command, &pbv1::CacheGetArgs { key: key.into() })? {
+        v if v.is_empty() => Ok(Some(String::new())),
+        v => String::from_utf8(v)
+            .map(Some)
+            .map_err(|_| HostCallError::Protocol("cache value is not UTF-8".into())),
+    }
+}
+pub fn respond_request(response: pbv1::SyntheticResponse) -> Result<(), HostCallError> {
+    host_call("env.respond_request", &response).map(|_| ())
+}
+pub fn respond_text(content: &str) -> Result<(), HostCallError> {
+    respond_request(pbv1::SyntheticResponse {
+        message: Some(pbv1::ResponseMessage {
+            blocks: vec![pbv1::ResponseBlock {
+                kind: Some(pbv1::response_block::Kind::Text(pbv1::ResponseTextBlock {
+                    text: content.into(),
+                })),
+            }],
+        }),
+        finish_reason: "stop".into(),
+    })
+}
+pub fn get_resource_info(kind: &str, name: &str) -> Result<pbv1::ResourceInfo, HostCallError> {
+    use prost::Message;
+    let b = host_call(
+        "env.resource_info",
+        &pbv1::ResourceInfoArgs {
+            kind: kind.into(),
+            name: name.into(),
+        },
+    )?;
+    Ok(pbv1::ResourceInfo::decode(b.as_slice())
+        .map_err(|e| HostCallError::Protocol(e.to_string()))?)
 }
 pub fn block_request(status: i32, code: &str, message: &str) -> Result<(), HostCallError> {
     host_call(
