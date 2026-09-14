@@ -79,6 +79,7 @@ type HostCallEntry struct {
 	Args      string
 	Result    string
 	Effective bool
+	index     int
 }
 
 // Harness is a fake Torana host. Create one with New.
@@ -174,11 +175,17 @@ func New(t testing.TB) *Harness {
 		Log: func(msg string, level int32) {
 			h.mu.Lock()
 			defer h.mu.Unlock()
+			if h.permissions != nil && !h.permissions["env.log"] {
+				return
+			}
 			h.logs = append(h.logs, LogEntry{Message: msg, Level: level})
 		},
 		Metric: func(name string, typ int32, value float64, labels map[string]string) {
 			h.mu.Lock()
 			defer h.mu.Unlock()
+			if h.permissions != nil && !h.permissions["env.emit_metric"] {
+				return
+			}
 			h.metrics = append(h.metrics, MetricEntry{Name: name, Type: typ, Value: value, Labels: labels})
 		},
 	}
@@ -518,6 +525,7 @@ func (h *Harness) hostCallBytes(cmd string, args []byte) ([]byte, error) {
 		if !ok || !containsString(spec.Hooks, h.active.invocationHook) {
 			denied := []byte(HostResultError(pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "command unavailable in this hook"))
 			entry := HostCallEntry{Command: cmd, Args: string(args), Result: string(denied)}
+			entry.index = len(h.calls)
 			h.calls = append(h.calls, entry)
 			h.active.calls = append(h.active.calls, entry)
 			h.mu.Unlock()
@@ -529,6 +537,7 @@ func (h *Harness) hostCallBytes(cmd string, args []byte) ([]byte, error) {
 		if !ok || !h.permissions[permission] {
 			denied := []byte(HostResultError(pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "permission denied"))
 			entry := HostCallEntry{Command: cmd, Args: string(args), Result: string(denied)}
+			entry.index = len(h.calls)
 			h.calls = append(h.calls, entry)
 			if h.active != nil {
 				h.active.calls = append(h.active.calls, entry)
@@ -545,6 +554,7 @@ func (h *Harness) hostCallBytes(cmd string, args []byte) ([]byte, error) {
 		if err != nil {
 			h.mu.Lock()
 			entry := HostCallEntry{Command: cmd, Args: argsStr, Result: "<transport error>"}
+			entry.index = len(h.calls)
 			h.calls = append(h.calls, entry)
 			if h.active != nil {
 				h.active.calls = append(h.active.calls, entry)
@@ -554,6 +564,7 @@ func (h *Harness) hostCallBytes(cmd string, args []byte) ([]byte, error) {
 		}
 		h.mu.Lock()
 		entry := HostCallEntry{Command: cmd, Args: argsStr, Result: res, Effective: hostResultAccepted([]byte(res))}
+		entry.index = len(h.calls)
 		h.calls = append(h.calls, entry)
 		if h.active != nil {
 			h.active.calls = append(h.active.calls, entry)
@@ -574,6 +585,7 @@ func (h *Harness) hostCallBytes(cmd string, args []byte) ([]byte, error) {
 	}
 	h.mu.Lock()
 	entry := HostCallEntry{Command: cmd, Args: argsStr, Result: string(raw), Effective: hostResultAccepted(raw)}
+	entry.index = len(h.calls)
 	h.calls = append(h.calls, entry)
 	if h.active != nil {
 		h.active.calls = append(h.active.calls, entry)

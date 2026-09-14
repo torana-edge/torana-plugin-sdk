@@ -24,7 +24,6 @@ type Request struct {
 	meta           map[string]string
 	calls          []HostCallEntry
 	accepted       []HostCallEntry
-	callbackFailed bool
 	invocationHook string
 }
 
@@ -35,37 +34,58 @@ func (h *Harness) NewRequest() *Request {
 }
 
 func (r *Request) with(fn func()) {
-	r.h.scopeMu.Lock()
-	defer r.h.scopeMu.Unlock()
-
-	r.h.mu.Lock()
-	previous := r.h.meta
-	previousActive := r.h.active
-	r.h.meta = r.meta
-	r.h.active = r
-	r.h.mu.Unlock()
-	defer func() {
+	r.h.with(func() {
 		r.h.mu.Lock()
-		r.meta = r.h.meta
-		r.h.meta = previous
-		r.h.active = previousActive
+		previous, previousActive := r.h.meta, r.h.active
+		r.h.meta, r.h.active = r.meta, r
 		r.h.mu.Unlock()
-	}()
+		defer func() {
+			r.h.mu.Lock()
+			r.meta = r.h.meta
+			r.h.meta, r.h.active = previous, previousActive
+			r.h.mu.Unlock()
+		}()
+		fn()
+	})
+}
 
-	r.h.with(fn)
+// dispatch mirrors one host invocation, including outcome rollback on traps.
+func (r *Request) dispatch(in *pbv1.HookInput, hook string) (raw []byte, err error) {
+	r.with(func() {
+		previous := r.invocationHook
+		r.invocationHook = hook
+		start := len(r.accepted)
+		defer func() {
+			if failure := recover(); failure != nil {
+				err = fmt.Errorf("sdktest: handler panic: %v", failure)
+			}
+			r.finalize(start, err)
+			r.invocationHook = previous
+		}()
+		raw, err = sdk.DispatchHook(in)
+	})
+	return
 }
 
 // Run executes code inside this request's host and observation scope.
 func (r *Request) Run(fn func()) { r.with(fn) }
 
 // Calls returns calls observed in this request scope.
-func (r *Request) Calls() []HostCallEntry { return append([]HostCallEntry(nil), r.calls...) }
+func (r *Request) Calls() []HostCallEntry {
+	r.h.mu.Lock()
+	defer r.h.mu.Unlock()
+	return append([]HostCallEntry(nil), r.calls...)
+}
 
 // AcceptedCalls returns successful value-arm calls observed in this scope.
-func (r *Request) AcceptedCalls() []HostCallEntry { return append([]HostCallEntry(nil), r.accepted...) }
+func (r *Request) AcceptedCalls() []HostCallEntry {
+	r.h.mu.Lock()
+	defer r.h.mu.Unlock()
+	return append([]HostCallEntry(nil), r.accepted...)
+}
 func (r *Request) EffectiveBlockCalls() []HostCallEntry {
 	var out []HostCallEntry
-	for _, c := range r.accepted {
+	for _, c := range r.AcceptedCalls() {
 		if c.Command == "env.block_request" && c.Effective {
 			out = append(out, c)
 		}
@@ -74,7 +94,7 @@ func (r *Request) EffectiveBlockCalls() []HostCallEntry {
 }
 func (r *Request) EffectiveRespondCalls() []HostCallEntry {
 	var out []HostCallEntry
-	for _, c := range r.accepted {
+	for _, c := range r.AcceptedCalls() {
 		if c.Command == "env.respond_request" && c.Effective {
 			out = append(out, c)
 		}
@@ -83,7 +103,7 @@ func (r *Request) EffectiveRespondCalls() []HostCallEntry {
 }
 func (r *Request) EffectiveRouteCalls() []HostCallEntry {
 	var out []HostCallEntry
-	for _, c := range r.accepted {
+	for _, c := range r.AcceptedCalls() {
 		if c.Command == "env.route_request" && c.Effective {
 			out = append(out, c)
 		}
@@ -92,12 +112,26 @@ func (r *Request) EffectiveRouteCalls() []HostCallEntry {
 }
 
 func (r *Request) finalize(start int, err error) {
+	r.h.mu.Lock()
+	defer r.h.mu.Unlock()
 	if err == nil {
 		return
 	}
 	for i := start; i < len(r.accepted); i++ {
 		if r.accepted[i].Command == "env.respond_request" || r.accepted[i].Command == "env.route_request" {
 			r.accepted[i].Effective = false
+			index := r.accepted[i].index
+			r.h.calls[index].Effective = false
+			for j := range r.calls {
+				if r.calls[j].index == index {
+					r.calls[j].Effective = false
+				}
+			}
+			for j := range r.h.accepted {
+				if r.h.accepted[j].index == index {
+					r.h.accepted[j].Effective = false
+				}
+			}
 		}
 	}
 }
@@ -120,9 +154,6 @@ func (r *Request) BeforeRequest(req *pbv1.ChatRequest) RequestResult {
 	if !r.h.hookAllowed("run_before_request") {
 		return RequestResult{Err: fmt.Errorf("sdktest: hook run_before_request is not declared")}
 	}
-	if !r.h.hookAllowed("run_before_request") {
-		return RequestResult{Err: fmt.Errorf("sdktest: hook run_before_request is not declared")}
-	}
 	h := r.h
 	h.t.Helper()
 	if sdk.RegisteredBeforeRequest() == nil {
@@ -134,14 +165,8 @@ func (r *Request) BeforeRequest(req *pbv1.ChatRequest) RequestResult {
 		RequestId:        r.requestID,
 		Payload:          &pbv1.HookInput_ChatRequest{ChatRequest: req},
 	}
-	r.invocationHook = "run_before_request"
-	start := len(r.accepted)
-	var raw []byte
-	var err error
-	r.with(func() { raw, err = sdk.DispatchHook(in) })
+	raw, err := r.dispatch(in, "run_before_request")
 	res := RequestResult{Err: err, PassedThrough: err == nil && len(raw) == 0}
-	r.callbackFailed = err != nil
-	r.finalize(start, err)
 	if err != nil || len(raw) == 0 {
 		return res
 	}
@@ -181,9 +206,6 @@ func (r *Request) AfterResponse(resp *pbv1.ChatResponse, mutable bool) ResponseR
 	if !r.h.hookAllowed("run_after_response") {
 		return ResponseResult{Err: fmt.Errorf("sdktest: hook run_after_response is not declared")}
 	}
-	if !r.h.hookAllowed("run_after_response") {
-		return ResponseResult{Err: fmt.Errorf("sdktest: hook run_after_response is not declared")}
-	}
 	h := r.h
 	h.t.Helper()
 	if sdk.RegisteredAfterResponse() == nil {
@@ -197,14 +219,8 @@ func (r *Request) AfterResponse(resp *pbv1.ChatResponse, mutable bool) ResponseR
 			Mutable:  mutable,
 		}},
 	}
-	r.invocationHook = "run_after_response"
-	start := len(r.accepted)
-	var raw []byte
-	var err error
-	r.with(func() { raw, err = sdk.DispatchHook(in) })
+	raw, err := r.dispatch(in, "run_after_response")
 	res := ResponseResult{Err: err, Mutable: mutable, PassedThrough: err == nil && len(raw) == 0}
-	r.callbackFailed = err != nil
-	r.finalize(start, err)
 	if err != nil || len(raw) == 0 {
 		return res
 	}
@@ -241,9 +257,6 @@ func (r *Request) StreamChunk(ev *pbv1.StreamEvent) StreamResult {
 	if !r.h.hookAllowed("run_on_stream_chunk") {
 		return StreamResult{Err: fmt.Errorf("sdktest: hook run_on_stream_chunk is not declared")}
 	}
-	if !r.h.hookAllowed("run_on_stream_chunk") {
-		return StreamResult{Err: fmt.Errorf("sdktest: hook run_on_stream_chunk is not declared")}
-	}
 	h := r.h
 	h.t.Helper()
 	if sdk.RegisteredStreamChunk() == nil {
@@ -254,14 +267,8 @@ func (r *Request) StreamChunk(ev *pbv1.StreamEvent) StreamResult {
 		RequestId:        r.requestID,
 		Payload:          &pbv1.HookInput_StreamEvent{StreamEvent: ev},
 	}
-	r.invocationHook = "run_on_stream_chunk"
-	start := len(r.accepted)
-	var raw []byte
-	var err error
-	r.with(func() { raw, err = sdk.DispatchHook(in) })
+	raw, err := r.dispatch(in, "run_on_stream_chunk")
 	res := StreamResult{Err: err, PassedThrough: err == nil && len(raw) == 0}
-	r.callbackFailed = err != nil
-	r.finalize(start, err)
 	if err != nil || len(raw) == 0 {
 		return res
 	}
@@ -299,9 +306,6 @@ func (r *Request) HTTPRequest(req *pbv1.HttpRequest) HTTPResult {
 	if !r.h.hookAllowed("run_on_http_request") {
 		return HTTPResult{Err: fmt.Errorf("sdktest: hook run_on_http_request is not declared")}
 	}
-	if !r.h.hookAllowed("run_on_http_request") {
-		return HTTPResult{Err: fmt.Errorf("sdktest: hook run_on_http_request is not declared")}
-	}
 	h := r.h
 	h.t.Helper()
 	if sdk.RegisteredHTTPRequest() == nil {
@@ -312,9 +316,7 @@ func (r *Request) HTTPRequest(req *pbv1.HttpRequest) HTTPResult {
 		RequestId:        r.requestID,
 		Payload:          &pbv1.HookInput_HttpRequest{HttpRequest: req},
 	}
-	var raw []byte
-	var err error
-	r.with(func() { raw, err = sdk.DispatchHook(in) })
+	raw, err := r.dispatch(in, "run_on_http_request")
 	res := HTTPResult{Err: err, PassedThrough: err == nil && len(raw) == 0}
 	if err != nil || len(raw) == 0 {
 		return res
@@ -346,9 +348,6 @@ func (r *Request) Tick(req *pbv1.TickRequest) TickResult {
 	if !r.h.hookAllowed("run_on_tick") {
 		return TickResult{Err: fmt.Errorf("sdktest: hook run_on_tick is not declared")}
 	}
-	if !r.h.hookAllowed("run_on_tick") {
-		return TickResult{Err: fmt.Errorf("sdktest: hook run_on_tick is not declared")}
-	}
 	h := r.h
 	h.t.Helper()
 	if sdk.RegisteredTick() == nil {
@@ -359,9 +358,7 @@ func (r *Request) Tick(req *pbv1.TickRequest) TickResult {
 		RequestId:        r.requestID,
 		Payload:          &pbv1.HookInput_TickRequest{TickRequest: req},
 	}
-	var raw []byte
-	var err error
-	r.with(func() { raw, err = sdk.DispatchHook(in) })
+	raw, err := r.dispatch(in, "run_on_tick")
 	res := TickResult{Err: err, PassedThrough: err == nil && len(raw) == 0}
 	if err != nil || len(raw) == 0 {
 		return res
