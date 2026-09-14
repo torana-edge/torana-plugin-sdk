@@ -100,11 +100,13 @@ func (x *ResourceInfoArgs) Validate() error {
 	if err := validateClosed(x); err != nil {
 		return err
 	}
-	if err := validateSlot("resource", x.Name); err != nil {
-		return err
-	}
 	switch x.Kind {
-	case "credential", "file", "http", "model", "pricing", "cache_policy":
+	case "file":
+		return validateLogicalPath("resource", x.Name, false)
+	case "credential", "http", "model", "pricing", "cache_policy":
+		if err := validateSlot("resource", x.Name); err != nil {
+			return err
+		}
 		return nil
 	default:
 		return fmt.Errorf("unknown resource kind")

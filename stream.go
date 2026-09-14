@@ -76,10 +76,8 @@ func (a *StreamAssembler) Feed(ev *pbv1.StreamEvent) FeedResult {
 		if err != nil {
 			return FeedResult{Err: err}
 		}
-		if _, herr, err := MetaAppend(start.Index, frame); err != nil {
+		if _, err := MetaAppend(start.Index, frame); err != nil {
 			return FeedResult{Err: err}
-		} else if herr != nil {
-			return FeedResult{Err: fmt.Errorf("meta_append: %s", herr.Message)}
 		}
 		return FeedResult{Suppress: true}
 
@@ -94,21 +92,16 @@ func (a *StreamAssembler) Feed(ev *pbv1.StreamEvent) FeedResult {
 		if len(fragment) == 0 {
 			return FeedResult{Suppress: true}
 		}
-		if _, herr, err := MetaAppend(d.Index, []byte(fragment)); err != nil {
+		if _, err := MetaAppend(d.Index, []byte(fragment)); err != nil {
 			return FeedResult{Err: err}
-		} else if herr != nil {
-			return FeedResult{Err: fmt.Errorf("meta_append: %s", herr.Message)}
 		}
 		return FeedResult{Suppress: true}
 
 	case *pbv1.StreamEvent_ContentBlockStop:
 		stop := e.ContentBlockStop
-		buf, herr, err := MetaAppend(stop.Index, nil)
+		buf, err := MetaAppend(stop.Index, nil)
 		if err != nil {
 			return FeedResult{Err: err}
-		}
-		if herr != nil {
-			return FeedResult{Err: fmt.Errorf("meta_append read: %s", herr.Message)}
 		}
 		if len(buf) == 0 {
 			// No buffer for this index — not a tool block we started.

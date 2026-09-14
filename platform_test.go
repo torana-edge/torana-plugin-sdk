@@ -100,8 +100,8 @@ func TestPlatformHelpersUseTypedCommands(t *testing.T) {
 		if err := WriteFile("state.json", []byte("{}")); err != nil {
 			t.Fatalf("WriteFile = %v", err)
 		}
-		if paths, herr, err := ListFiles(""); err != nil || herr != nil || !reflect.DeepEqual(paths, []string{"usage.jsonl"}) {
-			t.Fatalf("ListFiles = %v, %v, %v", paths, herr, err)
+		if paths, err := ListFiles(""); err != nil || !reflect.DeepEqual(paths, []string{"usage.jsonl"}) {
+			t.Fatalf("ListFiles = %v, %v", paths, err)
 		}
 		if err := DeleteFile("state.json"); err != nil {
 			t.Fatalf("DeleteFile = %v", err)

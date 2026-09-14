@@ -18,9 +18,9 @@ func TestPlatformCapabilityState(t *testing.T) {
 		if err := sdk.AppendFile("usage.jsonl", []byte("two\n")); err != nil {
 			t.Fatalf("AppendFile = %v", err)
 		}
-		paths, refusal, err := sdk.ListFiles("usage")
-		if err != nil || refusal != nil || len(paths) != 1 || paths[0] != "usage.jsonl" {
-			t.Fatalf("ListFiles = %v, %v, %v", paths, refusal, err)
+		paths, err := sdk.ListFiles("usage")
+		if err != nil || len(paths) != 1 || paths[0] != "usage.jsonl" {
+			t.Fatalf("ListFiles = %v, %v", paths, err)
 		}
 		if _, err := sdk.HTTPRequest(&pbv1.OutboundHTTPRequestArgs{Endpoint: "service", Method: "GET", Path: "/"}); err == nil {
 			t.Fatal("unconfigured HTTP request unexpectedly succeeded")

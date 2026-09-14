@@ -507,7 +507,11 @@ func (h *Harness) hostCallBytes(cmd string, args []byte) ([]byte, error) {
 
 func hostResultAccepted(raw []byte) bool {
 	var r pbv1.HostCallResult
-	return proto.Unmarshal(raw, &r) == nil && r.GetValue() != nil
+	if proto.Unmarshal(raw, &r) != nil {
+		return false
+	}
+	_, ok := r.Result.(*pbv1.HostCallResult_Value)
+	return ok
 }
 func (h *Harness) AcceptedCalls() []HostCallEntry {
 	h.mu.Lock()
@@ -878,16 +882,18 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 		}
 		entries := make([]*pbv1.StateEntry, 0)
 		for k, v := range h.state {
-			if strings.HasPrefix(k, a.Prefix) {
+			if strings.HasPrefix(k, a.Prefix) && (a.Cursor == "" || k > a.Cursor) {
 				ver := h.stateVersion[k]
 				entries = append(entries, &pbv1.StateEntry{Key: k, Value: &pbv1.StateValue{Value: v, Version: ver}})
 			}
 		}
 		sort.Slice(entries, func(i, j int) bool { return entries[i].Key < entries[j].Key })
+		next := ""
 		if a.Limit > 0 && uint32(len(entries)) > a.Limit {
+			next = entries[a.Limit-1].Key
 			entries = entries[:a.Limit]
 		}
-		b, _ := proto.Marshal(&pbv1.StateScanResult{Entries: entries})
+		b, _ := proto.Marshal(&pbv1.StateScanResult{Entries: entries, NextCursor: next})
 		return hostCallResultValue(b), nil
 
 	case "env.state_delete":
@@ -963,6 +969,9 @@ func CheckManifest(t testing.TB, dir string) {
 		Hooks []struct {
 			Name string `json:"name"`
 		} `json:"hooks"`
+		Permissions []struct {
+			Name string `json:"name"`
+		} `json:"permissions"`
 	}
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatalf("sdktest: parse manifest: %v", err)
@@ -987,6 +996,11 @@ func CheckManifest(t testing.TB, dir string) {
 		if !declared[name] {
 			t.Errorf("a handler is registered for %q but plugin.json does not declare it — "+
 				"the host skips undeclared hooks, so this handler would never be called", name)
+		}
+	}
+	for _, permission := range m.Permissions {
+		if !sdk.IsPermission(permission.Name) {
+			t.Errorf("plugin.json declares unknown permission %q", permission.Name)
 		}
 	}
 }

@@ -20,10 +20,11 @@ type CommandSpec struct {
 }
 
 type capabilityCatalog struct {
-	Hooks          []string          `json:"hooks"`
-	HookGrants     map[string]string `json:"hook_grants"`
-	MetadataGrants []string          `json:"metadata_grants"`
-	Commands       []CommandSpec     `json:"commands"`
+	Hooks            []string          `json:"hooks"`
+	HookGrants       map[string]string `json:"hook_grants"`
+	MetadataGrants   []string          `json:"metadata_grants"`
+	WritePermissions []string          `json:"write_permissions"`
+	Commands         []CommandSpec     `json:"commands"`
 }
 
 //go:embed capabilities.json
@@ -56,7 +57,7 @@ func catalogPermissions() []string {
 	for _, p := range catalog.MetadataGrants {
 		set[p] = true
 	}
-	for _, p := range WritePermissions {
+	for _, p := range catalog.WritePermissions {
 		set[p] = true
 	}
 	out := make([]string, 0, len(set))

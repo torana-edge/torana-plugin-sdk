@@ -30,23 +30,22 @@
   "commands": [
     {
       "command": "env.block_request",
+      "permission": "env.block_request",
       "arguments": "BlockRequestArgs",
       "result": "empty",
-      "permission": "env.block_request",
       "hooks": [
         "run_before_request"
       ],
       "helpers": [
         "BlockRequest",
         "MustBlockRequest"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.cache_delete",
+      "permission": "env.cache_set",
       "arguments": "CacheDeleteArgs",
       "result": "empty",
-      "permission": "env.cache_set",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -56,14 +55,13 @@
       ],
       "helpers": [
         "CacheDelete"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.cache_get",
+      "permission": "env.cache_get",
       "arguments": "CacheGetArgs",
       "result": "utf8",
-      "permission": "env.cache_get",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -73,14 +71,13 @@
       ],
       "helpers": [
         "CacheGet"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.cache_policy",
+      "permission": "env.cache_policy",
       "arguments": "PromptCachePolicyGetArgs",
       "result": "PromptCachePolicy",
-      "permission": "env.cache_policy",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -90,14 +87,13 @@
       ],
       "helpers": [
         "GetPromptCachePolicy"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.cache_set",
+      "permission": "env.cache_set",
       "arguments": "CacheSetArgs",
       "result": "empty",
-      "permission": "env.cache_set",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -108,14 +104,13 @@
       "helpers": [
         "CacheSet",
         "CacheSetTTL"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.credential_get",
+      "permission": "env.credential_get",
       "arguments": "CredentialGetArgs",
       "result": "bytes",
-      "permission": "env.credential_get",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -125,14 +120,13 @@
       ],
       "helpers": [
         "GetCredential"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.emit_metric",
+      "permission": "env.emit_metric",
       "arguments": "import",
       "result": "empty",
-      "permission": "env.emit_metric",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -142,14 +136,13 @@
       ],
       "helpers": [
         "EmitMetric"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.file_append",
+      "permission": "env.file_append",
       "arguments": "FileAppendArgs",
       "result": "empty",
-      "permission": "env.file_append",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -159,14 +152,13 @@
       ],
       "helpers": [
         "AppendFile"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.file_delete",
+      "permission": "env.file_delete",
       "arguments": "FileDeleteArgs",
       "result": "empty",
-      "permission": "env.file_delete",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -176,14 +168,13 @@
       ],
       "helpers": [
         "DeleteFile"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.file_list",
+      "permission": "env.file_list",
       "arguments": "FileListArgs",
       "result": "json-string-list",
-      "permission": "env.file_list",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -193,14 +184,13 @@
       ],
       "helpers": [
         "ListFiles"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.file_read",
+      "permission": "env.file_read",
       "arguments": "FileReadArgs",
       "result": "bytes",
-      "permission": "env.file_read",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -210,14 +200,13 @@
       ],
       "helpers": [
         "ReadFile"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.file_write",
+      "permission": "env.file_write",
       "arguments": "FileWriteArgs",
       "result": "empty",
-      "permission": "env.file_write",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -227,14 +216,13 @@
       ],
       "helpers": [
         "WriteFile"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.http_request",
+      "permission": "env.http_request",
       "arguments": "OutboundHTTPRequestArgs",
       "result": "OutboundHTTPResponse",
-      "permission": "env.http_request",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -244,14 +232,13 @@
       ],
       "helpers": [
         "HTTPRequest"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.log",
+      "permission": "env.log",
       "arguments": "import",
       "result": "empty",
-      "permission": "env.log",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -261,14 +248,13 @@
       ],
       "helpers": [
         "Log"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.meta_append",
+      "permission": "env.meta_set",
       "arguments": "MetaAppendArgs",
       "result": "bytes",
-      "permission": "env.meta_set",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -278,14 +264,13 @@
       ],
       "helpers": [
         "MetaAppend"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.meta_get",
+      "permission": "env.meta_get",
       "arguments": "MetaGetArgs",
       "result": "utf8",
-      "permission": "env.meta_get",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -295,14 +280,13 @@
       ],
       "helpers": [
         "MetaGet"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.meta_set",
+      "permission": "env.meta_set",
       "arguments": "MetaSetArgs",
       "result": "empty",
-      "permission": "env.meta_set",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -312,14 +296,13 @@
       ],
       "helpers": [
         "MetaSet"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.model_complete",
+      "permission": "env.model_complete",
       "arguments": "ModelCompleteArgs",
       "result": "ModelCompleteResult",
-      "permission": "env.model_complete",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -329,14 +312,13 @@
       ],
       "helpers": [
         "ModelComplete"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.model_pricing",
+      "permission": "env.model_pricing",
       "arguments": "ModelPricingGetArgs",
       "result": "ModelPricing",
-      "permission": "env.model_pricing",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -346,14 +328,13 @@
       ],
       "helpers": [
         "GetModelPricing"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.now",
+      "permission": "env.now",
       "arguments": "none",
       "result": "unix-ms",
-      "permission": "env.now",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -363,14 +344,13 @@
       ],
       "helpers": [
         "Now"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.original_request",
+      "permission": "env.original_request",
       "arguments": "none",
       "result": "bytes",
-      "permission": "env.original_request",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -378,28 +358,26 @@
       ],
       "helpers": [
         "OriginalRequest"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.original_response",
+      "permission": "env.original_response",
       "arguments": "none",
       "result": "bytes",
-      "permission": "env.original_response",
       "hooks": [
         "run_after_response",
         "run_on_stream_chunk"
       ],
       "helpers": [
         "OriginalResponse"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.plugin_config",
+      "permission": "env.plugin_config",
       "arguments": "none",
       "result": "json-object",
-      "permission": "env.plugin_config",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -409,14 +387,13 @@
       ],
       "helpers": [
         "PluginConfig"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.resource_info",
+      "permission": "env.resource_info",
       "arguments": "ResourceInfoArgs",
       "result": "ResourceInfo",
-      "permission": "env.resource_info",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -426,14 +403,13 @@
       ],
       "helpers": [
         "GetResourceInfo"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.respond_request",
+      "permission": "env.respond_request",
       "arguments": "RespondRequestArgs",
       "result": "empty",
-      "permission": "env.respond_request",
       "hooks": [
         "run_before_request"
       ],
@@ -442,42 +418,39 @@
         "RespondText",
         "MustRespondRequest",
         "MustRespondText"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.route_request",
+      "permission": "env.route_request",
       "arguments": "RouteRequestArgs",
       "result": "empty",
-      "permission": "env.route_request",
       "hooks": [
         "run_before_request"
       ],
       "helpers": [
         "RouteRequest",
         "MustRouteRequest"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.set_identity",
+      "permission": "env.set_identity",
       "arguments": "SetIdentityArgs",
       "result": "empty",
-      "permission": "env.set_identity",
       "hooks": [
         "run_before_request"
       ],
       "helpers": [
         "SetIdentity",
         "MustSetIdentity"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.shared_cache_delete",
+      "permission": "env.shared_cache_set",
       "arguments": "CacheDeleteArgs",
       "result": "empty",
-      "permission": "env.shared_cache_set",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -487,14 +460,13 @@
       ],
       "helpers": [
         "SharedCacheDelete"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.shared_cache_get",
+      "permission": "env.shared_cache_get",
       "arguments": "CacheGetArgs",
       "result": "utf8",
-      "permission": "env.shared_cache_get",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -504,14 +476,13 @@
       ],
       "helpers": [
         "SharedCacheGet"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.shared_cache_set",
+      "permission": "env.shared_cache_set",
       "arguments": "CacheSetArgs",
       "result": "empty",
-      "permission": "env.shared_cache_set",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -522,14 +493,13 @@
       "helpers": [
         "SharedCacheSet",
         "SharedCacheSetTTL"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.state_compare_and_delete",
+      "permission": "env.state_set",
       "arguments": "StateCompareAndDeleteArgs",
       "result": "StateMutationResult",
-      "permission": "env.state_set",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -539,14 +509,13 @@
       ],
       "helpers": [
         "StateCompareAndDelete"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.state_compare_and_set",
+      "permission": "env.state_set",
       "arguments": "StateCompareAndSetArgs",
       "result": "StateMutationResult",
-      "permission": "env.state_set",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -556,14 +525,13 @@
       ],
       "helpers": [
         "StateCompareAndSet"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.state_delete",
+      "permission": "env.state_set",
       "arguments": "StateDeleteArgs",
       "result": "empty",
-      "permission": "env.state_set",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -573,14 +541,13 @@
       ],
       "helpers": [
         "StateDelete"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.state_get",
+      "permission": "env.state_get",
       "arguments": "StateGetArgs",
       "result": "utf8",
-      "permission": "env.state_get",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -591,14 +558,13 @@
       "helpers": [
         "StateGet",
         "StateGetJSON"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.state_get_versioned",
+      "permission": "env.state_get",
       "arguments": "StateGetArgs",
       "result": "StateValue",
-      "permission": "env.state_get",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -608,14 +574,13 @@
       ],
       "helpers": [
         "StateGetVersioned"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.state_keys",
+      "permission": "env.state_keys",
       "arguments": "none",
       "result": "json-string-list",
-      "permission": "env.state_keys",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -625,14 +590,13 @@
       ],
       "helpers": [
         "StateKeys"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.state_scan",
+      "permission": "env.state_keys",
       "arguments": "StateScanArgs",
       "result": "StateScanResult",
-      "permission": "env.state_keys",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -642,14 +606,13 @@
       ],
       "helpers": [
         "StateScan"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "env.state_set",
+      "permission": "env.state_set",
       "arguments": "StateSetArgs",
       "result": "empty",
-      "permission": "env.state_set",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -660,14 +623,13 @@
       "helpers": [
         "StateSet",
         "StateSetJSON"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "torana_evaluate_compaction",
+      "permission": "env.host_call.torana_evaluate_compaction",
       "arguments": "compaction-json",
       "result": "compaction-json",
-      "permission": "env.host_call.torana_evaluate_compaction",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -677,14 +639,13 @@
       ],
       "helpers": [
         "EvaluateCompaction"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "torana_plugin_counter",
+      "permission": "env.host_call.torana_plugin_counter",
       "arguments": "counter-json",
       "result": "empty",
-      "permission": "env.host_call.torana_plugin_counter",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -694,14 +655,13 @@
       ],
       "helpers": [
         "RecordCounter"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "torana_record_savings",
+      "permission": "env.host_call.torana_record_savings",
       "arguments": "savings-json",
       "result": "empty",
-      "permission": "env.host_call.torana_record_savings",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -711,14 +671,13 @@
       ],
       "helpers": [
         "RecordSavings"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "torana_send_request",
+      "permission": "env.host_call.torana_send_request",
       "arguments": "egress-json",
       "result": "egress-json",
-      "permission": "env.host_call.torana_send_request",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -728,14 +687,13 @@
       ],
       "helpers": [
         "SendRequest"
-      ],
-      "implemented": true
+      ]
     },
     {
       "command": "verify_virtual_key",
+      "permission": "env.host_call.verify_virtual_key",
       "arguments": "virtual-key-json",
       "result": "identity-json",
-      "permission": "env.host_call.verify_virtual_key",
       "hooks": [
         "run_before_request",
         "run_after_response",
@@ -745,8 +703,7 @@
       ],
       "helpers": [
         "VerifyVirtualKey"
-      ],
-      "implemented": true
+      ]
     }
   ]
 }

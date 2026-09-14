@@ -31,16 +31,16 @@ func WriteFile(path string, data []byte) error {
 }
 
 // ListFiles lists declared files under prefix in stable lexical order.
-func ListFiles(prefix string) ([]string, *pbv1.HostError, error) {
-	value, herr, err := hostCallChecked("env.file_list", &pbv1.FileListArgs{Prefix: prefix})
-	if err != nil || herr != nil {
-		return nil, herr, err
+func ListFiles(prefix string) ([]string, error) {
+	value, _, err := checkedHostCallValue("env.file_list", &pbv1.FileListArgs{Prefix: prefix})
+	if err != nil {
+		return nil, err
 	}
 	var result pbv1.FileListResult
 	if err := proto.Unmarshal(value, &result); err != nil {
-		return nil, nil, fmt.Errorf("torana: decode file list: %w", err)
+		return nil, fmt.Errorf("torana: decode file list: %w", err)
 	}
-	return append([]string(nil), result.Paths...), nil, nil
+	return append([]string(nil), result.Paths...), nil
 }
 
 // DeleteFile removes a declared plugin-private file. Missing files succeed.
