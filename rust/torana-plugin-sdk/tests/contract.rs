@@ -37,6 +37,32 @@ fn rejects_missing_after_response_and_invalid_http_result() {
 }
 
 #[test]
+fn hook_input_requires_revision_and_valid_stream_event() {
+    let valid = pbv1::HookInput {
+        contract_revision: 1,
+        payload: Some(pbv1::hook_input::Payload::StreamEvent(pbv1::StreamEvent {
+            event: Some(pbv1::stream_event::Event::TextDelta("x".into())),
+        })),
+        ..Default::default()
+    }
+    .encode_to_vec();
+    assert!(__dispatch_v1(&valid, torana_plugin_sdk::HOOK_ON_STREAM_CHUNK, pass).is_ok());
+
+    let mut wrong_revision = valid.clone();
+    wrong_revision[0] = 0x08;
+    wrong_revision[1] = 2;
+    assert!(__dispatch_v1(&wrong_revision, torana_plugin_sdk::HOOK_ON_STREAM_CHUNK, pass).is_err());
+
+    let empty_event = pbv1::HookInput {
+        contract_revision: 1,
+        payload: Some(pbv1::hook_input::Payload::StreamEvent(Default::default())),
+        ..Default::default()
+    }
+    .encode_to_vec();
+    assert!(__dispatch_v1(&empty_event, torana_plugin_sdk::HOOK_ON_STREAM_CHUNK, pass).is_err());
+}
+
+#[test]
 fn rejects_unknown_nested_request_fields_before_prost_decode() {
     let request = vec![0xa2, 0x06, 0x01, b'x']; // field 100, bytes "x"
     let mut input = vec![0x22, request.len() as u8];

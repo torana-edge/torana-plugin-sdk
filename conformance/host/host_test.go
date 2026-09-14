@@ -227,8 +227,9 @@ func exerciseRunHook(t *testing.T, path string) []loggedMessage {
 		}
 	}
 	payload, err := proto.Marshal(&pbv1.HookInput{
-		RequestId: 1,
-		Payload:   &pbv1.HookInput_ChatRequest{ChatRequest: &pbv1.ChatRequest{Model: "conformance"}},
+		ContractRevision: 1,
+		RequestId:        1,
+		Payload:          &pbv1.HookInput_ChatRequest{ChatRequest: &pbv1.ChatRequest{Model: "conformance"}},
 	})
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)

@@ -709,6 +709,9 @@ fn validate_response(response: &pbv1::ChatResponse) -> Result<(), String> {
 
 fn validate_input(input: &pbv1::HookInput, raw: &[u8]) -> Result<(), String> {
     __validate_wire_message(raw, ".torana.v1.HookInput")?;
+    if input.contract_revision != 1 {
+        return Err(format!("torana sdk: unsupported contract revision {}", input.contract_revision));
+    }
     match input.payload.as_ref() {
         Some(pbv1::hook_input::Payload::ChatRequest(r)) => validate_chat_request(r),
         Some(pbv1::hook_input::Payload::AfterResponse(r)) => {
@@ -721,9 +724,48 @@ fn validate_input(input: &pbv1::HookInput, raw: &[u8]) -> Result<(), String> {
         Some(pbv1::hook_input::Payload::HttpRequest(r)) => {
             json_object(&r.headers_json, "HttpRequest.headers_json")
         }
-        Some(pbv1::hook_input::Payload::StreamEvent(_))
-        | Some(pbv1::hook_input::Payload::TickRequest(_)) => Ok(()),
+        Some(pbv1::hook_input::Payload::StreamEvent(event)) => validate_stream_event(event),
+        Some(pbv1::hook_input::Payload::TickRequest(_)) => Ok(()),
         None => Err("torana sdk: HookInput requires a payload".into()),
+    }
+}
+
+fn validate_stream_event(event: &pbv1::StreamEvent) -> Result<(), String> {
+    use pbv1::stream_event::Event;
+    match event.event.as_ref() {
+        None => Err("torana sdk: stream event carries no event".into()),
+        Some(Event::ToolCallDelta(delta)) => {
+            if delta.index < 0 {
+                Err("torana sdk: tool call delta index must be non-negative".into())
+            } else if delta.input_text_delta.is_some() && !delta.arguments_delta.is_empty() {
+                Err("torana sdk: tool call delta cannot carry both argument forms".into())
+            } else {
+                Ok(())
+            }
+        }
+        Some(Event::ContentBlockStart(start)) => {
+            if start.index < 0 || start.block.is_none() {
+                return Err("torana sdk: content block start requires non-negative index and block".into());
+            }
+            if let Some(pbv1::content_block_start::Block::ToolCall(call)) = start.block.as_ref() {
+                if call.id.is_empty() || call.name.is_empty() {
+                    return Err("torana sdk: tool call start requires id and name".into());
+                }
+                if !matches!(call.invocation_kind, 1 | 2) {
+                    return Err("torana sdk: invalid tool invocation kind".into());
+                }
+            }
+            if let Some(pbv1::content_block_start::Block::Provider(provider)) = start.block.as_ref() {
+                if provider.kind.is_empty() {
+                    return Err("torana sdk: provider block kind is required".into());
+                }
+            }
+            Ok(())
+        }
+        Some(Event::ContentBlockStop(stop)) if stop.index < 0 => {
+            Err("torana sdk: content block stop index must be non-negative".into())
+        }
+        Some(_) => Ok(()),
     }
 }
 

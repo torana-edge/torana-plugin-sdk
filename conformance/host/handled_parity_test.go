@@ -20,14 +20,16 @@ func TestPassThroughVersusServeHTTP(t *testing.T) {
 	}
 
 	tickPayload, err := proto.Marshal(&pbv1.HookInput{
-		RequestId: 1,
-		Payload:   &pbv1.HookInput_TickRequest{TickRequest: &pbv1.TickRequest{TickId: 1}},
+		ContractRevision: 1,
+		RequestId:        1,
+		Payload:          &pbv1.HookInput_TickRequest{TickRequest: &pbv1.TickRequest{TickId: 1}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	httpPayload, err := proto.Marshal(&pbv1.HookInput{
-		RequestId: 1,
+		ContractRevision: 1,
+		RequestId:        1,
 		Payload: &pbv1.HookInput_HttpRequest{HttpRequest: &pbv1.HttpRequest{
 			Method: "GET", Path: "/",
 		}},
