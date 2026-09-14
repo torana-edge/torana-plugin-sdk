@@ -36,13 +36,6 @@ pub enum HostCallError {
     Protocol(String),
 }
 
-/// A deterministic host implementation for native unit tests. Production
-/// guests use the WASI import path; tests can inject a command router without
-/// linking a WASM host.
-pub struct NativeHost<F> {
-    call: F,
-}
-
 /// Installs a native transport for the duration of a test. The guard restores
 /// the previous transport on drop and storage is thread-local.
 pub struct NativeHostGuard;
@@ -58,89 +51,6 @@ where
 impl Drop for NativeHostGuard {
     fn drop(&mut self) {
         NATIVE_HOST.with(|slot| *slot.borrow_mut() = None);
-    }
-}
-
-impl<F> NativeHost<F>
-where
-    F: Fn(&str, &[u8]) -> Result<Vec<u8>, HostCallError>,
-{
-    pub fn new(call: F) -> Self {
-        Self { call }
-    }
-
-    pub fn call<M: prost::Message>(
-        &self,
-        command: &str,
-        arguments: &M,
-    ) -> Result<Vec<u8>, HostCallError> {
-        (self.call)(command, &arguments.encode_to_vec())
-    }
-
-    pub fn call_value<M: prost::Message, R: prost::Message + Default>(
-        &self,
-        command: &str,
-        arguments: &M,
-    ) -> Result<R, HostCallError> {
-        let bytes = self.call(command, arguments)?;
-        R::decode(bytes.as_slice())
-            .map_err(|e| HostCallError::Protocol(format!("decode {command} result: {e}")))
-    }
-
-    pub fn meta_get(&self, key: &str) -> Result<Vec<u8>, HostCallError> {
-        self.call_result("env.meta_get", &pbv1::MetaGetArgs { key: key.into() })
-    }
-    pub fn meta_set(&self, key: &str, value: &str) -> Result<(), HostCallError> {
-        self.call_result(
-            "env.meta_set",
-            &pbv1::MetaSetArgs {
-                key: key.into(),
-                value: value.into(),
-            },
-        )
-        .map(|_| ())
-    }
-    pub fn cache_get(&self, key: &str) -> Result<Vec<u8>, HostCallError> {
-        self.call_result("env.cache_get", &pbv1::CacheGetArgs { key: key.into() })
-    }
-    pub fn cache_set(&self, key: &str, value: &str) -> Result<(), HostCallError> {
-        self.call_result(
-            "env.cache_set",
-            &pbv1::CacheSetArgs {
-                key: key.into(),
-                value: value.into(),
-                ttl_ms: None,
-            },
-        )
-        .map(|_| ())
-    }
-    pub fn state_get(&self, key: &str) -> Result<Vec<u8>, HostCallError> {
-        self.call_result("env.state_get", &pbv1::StateGetArgs { key: key.into() })
-    }
-    pub fn state_set(&self, key: &str, value: &str) -> Result<(), HostCallError> {
-        self.call_result(
-            "env.state_set",
-            &pbv1::StateSetArgs {
-                key: key.into(),
-                value: value.into(),
-            },
-        )
-        .map(|_| ())
-    }
-    pub fn state_delete(&self, key: &str) -> Result<(), HostCallError> {
-        self.call_result(
-            "env.state_delete",
-            &pbv1::StateDeleteArgs { key: key.into() },
-        )
-        .map(|_| ())
-    }
-    fn call_result<M: prost::Message>(
-        &self,
-        command: &str,
-        args: &M,
-    ) -> Result<Vec<u8>, HostCallError> {
-        let frame = self.call(command, args)?;
-        decode_host_call_result(&frame)
     }
 }
 
@@ -710,7 +620,10 @@ fn validate_response(response: &pbv1::ChatResponse) -> Result<(), String> {
 fn validate_input(input: &pbv1::HookInput, raw: &[u8]) -> Result<(), String> {
     __validate_wire_message(raw, ".torana.v1.HookInput")?;
     if input.contract_revision != 1 {
-        return Err(format!("torana sdk: unsupported contract revision {}", input.contract_revision));
+        return Err(format!(
+            "torana sdk: unsupported contract revision {}",
+            input.contract_revision
+        ));
     }
     match input.payload.as_ref() {
         Some(pbv1::hook_input::Payload::ChatRequest(r)) => validate_chat_request(r),
@@ -745,7 +658,9 @@ fn validate_stream_event(event: &pbv1::StreamEvent) -> Result<(), String> {
         }
         Some(Event::ContentBlockStart(start)) => {
             if start.index < 0 || start.block.is_none() {
-                return Err("torana sdk: content block start requires non-negative index and block".into());
+                return Err(
+                    "torana sdk: content block start requires non-negative index and block".into(),
+                );
             }
             if let Some(pbv1::content_block_start::Block::ToolCall(call)) = start.block.as_ref() {
                 if call.id.is_empty() || call.name.is_empty() {
@@ -755,7 +670,8 @@ fn validate_stream_event(event: &pbv1::StreamEvent) -> Result<(), String> {
                     return Err("torana sdk: invalid tool invocation kind".into());
                 }
             }
-            if let Some(pbv1::content_block_start::Block::Provider(provider)) = start.block.as_ref() {
+            if let Some(pbv1::content_block_start::Block::Provider(provider)) = start.block.as_ref()
+            {
                 if provider.kind.is_empty() {
                     return Err("torana sdk: provider block kind is required".into());
                 }
@@ -772,7 +688,10 @@ fn validate_stream_event(event: &pbv1::StreamEvent) -> Result<(), String> {
 #[doc(hidden)]
 pub fn __validate_wire_message(mut bytes: &[u8], name: &str) -> Result<(), String> {
     use prost::Message;
-    use prost_types::{field_descriptor_proto::Type, FileDescriptorSet};
+    use prost_types::{
+        field_descriptor_proto::{Label, Type},
+        FileDescriptorSet,
+    };
     static SET: std::sync::OnceLock<Result<FileDescriptorSet, String>> = std::sync::OnceLock::new();
     let set = SET
         .get_or_init(|| {
@@ -798,6 +717,7 @@ pub fn __validate_wire_message(mut bytes: &[u8], name: &str) -> Result<(), Strin
         })
         .ok_or_else(|| format!("torana sdk: unknown message descriptor {name}"))?;
     let mut seen_oneof = std::collections::HashSet::new();
+    let mut seen_singular = std::collections::HashSet::new();
     while !bytes.is_empty() {
         let (key, n) = read_varint_raw(bytes)?;
         bytes = &bytes[n..];
@@ -808,6 +728,11 @@ pub fn __validate_wire_message(mut bytes: &[u8], name: &str) -> Result<(), Strin
             .iter()
             .find(|f| f.number == Some(number))
             .ok_or_else(|| format!("torana sdk: unknown field {number} in {name}"))?;
+        if field.label.and_then(|label| Label::try_from(label).ok()) != Some(Label::Repeated)
+            && !seen_singular.insert(number)
+        {
+            return Err(format!("torana sdk: duplicate field {number} in {name}"));
+        }
         let expected = match field.r#type.and_then(Type::from_i32) {
             Some(Type::Double) | Some(Type::Fixed64) | Some(Type::Sfixed64) => 1,
             Some(Type::Float) | Some(Type::Fixed32) | Some(Type::Sfixed32) => 5,
@@ -1227,11 +1152,21 @@ pub fn emit_metric(name: &str, kind: MetricKind, value: f64, labels: &serde_json
     let _ = (name, kind, value, labels);
 }
 
-pub fn debug(message: &str) { log(message, LogLevel::Debug); }
-pub fn info(message: &str) { log(message, LogLevel::Info); }
-pub fn counter(name: &str, value: f64, labels: &serde_json::Value) { emit_metric(name, MetricKind::Counter, value, labels); }
-pub fn histogram(name: &str, value: f64, labels: &serde_json::Value) { emit_metric(name, MetricKind::Histogram, value, labels); }
-pub fn gauge(name: &str, value: f64, labels: &serde_json::Value) { emit_metric(name, MetricKind::Gauge, value, labels); }
+pub fn debug(message: &str) {
+    log(message, LogLevel::Debug);
+}
+pub fn info(message: &str) {
+    log(message, LogLevel::Info);
+}
+pub fn counter(name: &str, value: f64, labels: &serde_json::Value) {
+    emit_metric(name, MetricKind::Counter, value, labels);
+}
+pub fn histogram(name: &str, value: f64, labels: &serde_json::Value) {
+    emit_metric(name, MetricKind::Histogram, value, labels);
+}
+pub fn gauge(name: &str, value: f64, labels: &serde_json::Value) {
+    emit_metric(name, MetricKind::Gauge, value, labels);
+}
 
 pub fn decode_host_call_result(bytes: &[u8]) -> Result<Vec<u8>, HostCallError> {
     use pbv1::host_call_result::Result as ResultArm;
@@ -1315,6 +1250,7 @@ pub fn host_call<M: prost::Message>(
     arguments: &M,
 ) -> Result<Vec<u8>, HostCallError> {
     let arguments = arguments.encode_to_vec();
+    validate_host_arguments(command, &arguments)?;
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(result) =
         NATIVE_HOST.with(|slot| slot.borrow().as_ref().map(|f| f(command, &arguments)))
@@ -1350,6 +1286,140 @@ pub fn host_call<M: prost::Message>(
     }
 }
 
+fn validate_host_arguments(command: &str, bytes: &[u8]) -> Result<(), HostCallError> {
+    macro_rules! decode {
+        ($ty:ty) => {
+            <$ty>::decode(bytes)
+                .map_err(|e| HostCallError::Protocol(format!("decode {command} arguments: {e}")))?
+        };
+    }
+    let bad = |message: &str| HostCallError::Protocol(format!("{command} arguments: {message}"));
+    match command {
+        "env.meta_get" => {
+            if decode!(pbv1::MetaGetArgs).key.is_empty() {
+                return Err(bad("key is required"));
+            }
+        }
+        "env.meta_set" => {
+            if decode!(pbv1::MetaSetArgs).key.is_empty() {
+                return Err(bad("key is required"));
+            }
+        }
+        "env.state_get" | "env.state_get_versioned" => {
+            if decode!(pbv1::StateGetArgs).key.is_empty() {
+                return Err(bad("key is required"));
+            }
+        }
+        "env.state_set" => {
+            if decode!(pbv1::StateSetArgs).key.is_empty() {
+                return Err(bad("key is required"));
+            }
+        }
+        "env.state_delete" => {
+            if decode!(pbv1::StateDeleteArgs).key.is_empty() {
+                return Err(bad("key is required"));
+            }
+        }
+        "env.cache_get" | "env.shared_cache_get" => {
+            if decode!(pbv1::CacheGetArgs).key.is_empty() {
+                return Err(bad("key is required"));
+            }
+        }
+        "env.cache_set" | "env.shared_cache_set" => {
+            let a = decode!(pbv1::CacheSetArgs);
+            if a.key.is_empty() {
+                return Err(bad("key is required"));
+            }
+            if a.ttl_ms == Some(0) {
+                return Err(bad("ttl_ms must be positive"));
+            }
+        }
+        "env.cache_delete" | "env.shared_cache_delete" => {
+            if decode!(pbv1::CacheDeleteArgs).key.is_empty() {
+                return Err(bad("key is required"));
+            }
+        }
+        "env.state_compare_and_set" => {
+            if decode!(pbv1::StateCompareAndSetArgs).key.is_empty() {
+                return Err(bad("key is required"));
+            }
+        }
+        "env.state_compare_and_delete" => {
+            let a = decode!(pbv1::StateCompareAndDeleteArgs);
+            if a.key.is_empty() || a.expected_version.is_empty() {
+                return Err(bad("key and expected_version are required"));
+            }
+        }
+        "env.state_scan" => {
+            if !(1..=256).contains(&decode!(pbv1::StateScanArgs).limit) {
+                return Err(bad("limit must be 1..256"));
+            }
+        }
+        "env.model_complete" => {
+            let a = decode!(pbv1::ModelCompleteArgs);
+            if !valid_resource_name(&a.service)
+                || a.messages.is_empty()
+                || a.max_tokens == Some(0)
+                || a.temperature.is_some_and(|v| !v.is_finite())
+            {
+                return Err(bad("request violates the model contract"));
+            }
+        }
+        "env.http_request" => {
+            let a = decode!(pbv1::OutboundHttpRequestArgs);
+            let method_ok =
+                !a.method.is_empty() && a.method.bytes().all(|b| b.is_ascii_uppercase());
+            let path_ok =
+                a.path.starts_with('/') && !a.path.starts_with("//") && !a.path.contains('#');
+            if !valid_resource_name(&a.endpoint)
+                || !method_ok
+                || !path_ok
+                || !valid_http_headers(&a.headers)
+            {
+                return Err(bad("request violates the HTTP contract"));
+            }
+        }
+        "env.model_pricing" => {
+            if !valid_resource_name(&decode!(pbv1::ModelPricingGetArgs).resource) {
+                return Err(bad("resource is invalid"));
+            }
+        }
+        "env.cache_policy" => {
+            if !valid_resource_name(&decode!(pbv1::PromptCachePolicyGetArgs).resource) {
+                return Err(bad("resource is invalid"));
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn valid_http_headers(headers: &[pbv1::HttpHeader]) -> bool {
+    let mut seen = std::collections::HashSet::new();
+    headers.iter().all(|header| {
+        let name = header.name.to_ascii_lowercase();
+        !header.name.is_empty()
+            && header.name.is_ascii()
+            && header
+                .name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
+            && seen.insert(name)
+            && header
+                .values
+                .iter()
+                .all(|value| !value.contains(['\r', '\n']))
+    })
+}
+
+fn decode_host_value<R: prost::Message + Default>(
+    bytes: &[u8],
+    protobuf_name: &str,
+) -> Result<R, HostCallError> {
+    __validate_wire_message(bytes, protobuf_name).map_err(HostCallError::Protocol)?;
+    R::decode(bytes).map_err(|e| HostCallError::Protocol(format!("decode {protobuf_name}: {e}")))
+}
+
 /// Resolves one operator-bound credential slot. Treat the returned bytes as a
 /// secret and do not place them in logs or diagnostic errors.
 pub fn get_credential(slot: &str) -> Result<Vec<u8>, HostCallError> {
@@ -1362,11 +1432,15 @@ pub fn get_credential(slot: &str) -> Result<Vec<u8>, HostCallError> {
 }
 
 pub fn meta_get(key: &str) -> Result<Option<String>, HostCallError> {
-    match host_call("env.meta_get", &pbv1::MetaGetArgs { key: key.into() })? {
-        v if v.is_empty() => Ok(Some(String::new())),
-        v => String::from_utf8(v)
-            .map(Some)
-            .map_err(|_| HostCallError::Protocol("meta value is not UTF-8".into())),
+    match host_call("env.meta_get", &pbv1::MetaGetArgs { key: key.into() }) {
+        Err(HostCallError::Refused(e)) if e.code == pbv1::ErrorCode::NotFound as i32 => Ok(None),
+        Err(e) => Err(e),
+        Ok(v) => match v {
+            v if v.is_empty() => Ok(Some(String::new())),
+            v => String::from_utf8(v)
+                .map(Some)
+                .map_err(|_| HostCallError::Protocol("meta value is not UTF-8".into())),
+        },
     }
 }
 pub fn meta_set(key: &str, value: &str) -> Result<(), HostCallError> {
@@ -1389,11 +1463,15 @@ pub fn meta_append(block_index: i32, fragment: &[u8]) -> Result<Vec<u8>, HostCal
     )
 }
 pub fn state_get(key: &str) -> Result<Option<String>, HostCallError> {
-    match host_call("env.state_get", &pbv1::StateGetArgs { key: key.into() })? {
-        v if v.is_empty() => Ok(Some(String::new())),
-        v => String::from_utf8(v)
-            .map(Some)
-            .map_err(|_| HostCallError::Protocol("state value is not UTF-8".into())),
+    match host_call("env.state_get", &pbv1::StateGetArgs { key: key.into() }) {
+        Err(HostCallError::Refused(e)) if e.code == pbv1::ErrorCode::NotFound as i32 => Ok(None),
+        Err(e) => Err(e),
+        Ok(v) => match v {
+            v if v.is_empty() => Ok(Some(String::new())),
+            v => String::from_utf8(v)
+                .map(Some)
+                .map_err(|_| HostCallError::Protocol("state value is not UTF-8".into())),
+        },
     }
 }
 pub fn state_set(key: &str, value: &str) -> Result<(), HostCallError> {
@@ -1414,12 +1492,7 @@ pub fn state_delete(key: &str) -> Result<(), HostCallError> {
     .map(|_| ())
 }
 pub fn cache_get(key: &str) -> Result<Option<String>, HostCallError> {
-    match host_call("env.cache_get", &pbv1::CacheGetArgs { key: key.into() })? {
-        v if v.is_empty() => Ok(Some(String::new())),
-        v => String::from_utf8(v)
-            .map(Some)
-            .map_err(|_| HostCallError::Protocol("cache value is not UTF-8".into())),
-    }
+    cache_get_named("env.cache_get", key)
 }
 pub fn cache_set(key: &str, value: &str, ttl_ms: Option<u64>) -> Result<(), HostCallError> {
     host_call(
@@ -1440,32 +1513,27 @@ pub fn cache_delete(key: &str) -> Result<(), HostCallError> {
     .map(|_| ())
 }
 pub fn state_keys() -> Result<Vec<String>, HostCallError> {
-    use prost::Message;
-    let b = host_call(
-        "env.state_keys",
-        &pbv1::StateScanArgs {
-            prefix: String::new(),
-            cursor: String::new(),
-            limit: 256,
-        },
-    )?;
-    Ok(pbv1::StateScanResult::decode(b.as_slice())
-        .map_err(|e| HostCallError::Protocol(e.to_string()))?
-        .entries
-        .into_iter()
-        .map(|e| e.key)
-        .collect())
+    let b = host_call("env.state_keys", &EmptyArgs {})?;
+    let value = strict_json(&b)
+        .map_err(|e| HostCallError::Protocol(format!("state keys are invalid JSON: {e}")))?;
+    let array = value
+        .as_array()
+        .ok_or_else(|| HostCallError::Protocol("state keys must be a JSON array".into()))?;
+    array
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| HostCallError::Protocol("state key must be a string".into()))
+        })
+        .collect()
 }
 pub fn state_get_versioned(key: &str) -> Result<Option<pbv1::StateValue>, HostCallError> {
-    use prost::Message;
     match host_call(
         "env.state_get_versioned",
         &pbv1::StateGetArgs { key: key.into() },
     ) {
-        Ok(b) => Ok(Some(
-            pbv1::StateValue::decode(b.as_slice())
-                .map_err(|e| HostCallError::Protocol(e.to_string()))?,
-        )),
+        Ok(b) => Ok(Some(decode_host_value(&b, ".torana.v1.StateValue")?)),
         Err(HostCallError::Refused(e)) if e.code == pbv1::ErrorCode::NotFound as i32 => Ok(None),
         Err(e) => Err(e),
     }
@@ -1475,7 +1543,6 @@ pub fn state_compare_and_set(
     value: &str,
     expected_version: Option<&str>,
 ) -> Result<pbv1::StateMutationResult, HostCallError> {
-    use prost::Message;
     let b = host_call(
         "env.state_compare_and_set",
         &pbv1::StateCompareAndSetArgs {
@@ -1484,14 +1551,19 @@ pub fn state_compare_and_set(
             expected_version: expected_version.map(str::to_owned),
         },
     )?;
-    Ok(pbv1::StateMutationResult::decode(b.as_slice())
-        .map_err(|e| HostCallError::Protocol(e.to_string()))?)
+    let result: pbv1::StateMutationResult =
+        decode_host_value(&b, ".torana.v1.StateMutationResult")?;
+    if result.applied && result.version.is_none() {
+        return Err(HostCallError::Protocol(
+            "applied state mutation requires version".into(),
+        ));
+    }
+    Ok(result)
 }
 pub fn state_compare_and_delete(
     key: &str,
     expected_version: &str,
 ) -> Result<pbv1::StateMutationResult, HostCallError> {
-    use prost::Message;
     let b = host_call(
         "env.state_compare_and_delete",
         &pbv1::StateCompareAndDeleteArgs {
@@ -1499,15 +1571,13 @@ pub fn state_compare_and_delete(
             expected_version: expected_version.into(),
         },
     )?;
-    Ok(pbv1::StateMutationResult::decode(b.as_slice())
-        .map_err(|e| HostCallError::Protocol(e.to_string()))?)
+    decode_host_value(&b, ".torana.v1.StateMutationResult")
 }
 pub fn state_scan(
     prefix: &str,
     cursor: &str,
     limit: u32,
 ) -> Result<pbv1::StateScanResult, HostCallError> {
-    use prost::Message;
     if !(1..=256).contains(&limit) {
         return Err(HostCallError::Protocol(
             "state scan limit must be 1..256".into(),
@@ -1521,8 +1591,15 @@ pub fn state_scan(
             limit,
         },
     )?;
-    Ok(pbv1::StateScanResult::decode(b.as_slice())
-        .map_err(|e| HostCallError::Protocol(e.to_string()))?)
+    let result: pbv1::StateScanResult = decode_host_value(&b, ".torana.v1.StateScanResult")?;
+    if result.entries.iter().any(|entry| {
+        entry.key.is_empty() || entry.value.as_ref().is_none_or(|v| v.version.is_empty())
+    }) {
+        return Err(HostCallError::Protocol(
+            "state scan returned an invalid entry".into(),
+        ));
+    }
+    Ok(result)
 }
 pub fn shared_cache_get(key: &str) -> Result<Option<String>, HostCallError> {
     cache_get_named("env.shared_cache_get", key)
@@ -1546,9 +1623,11 @@ pub fn shared_cache_delete(key: &str) -> Result<(), HostCallError> {
     .map(|_| ())
 }
 fn cache_get_named(command: &str, key: &str) -> Result<Option<String>, HostCallError> {
-    match host_call(command, &pbv1::CacheGetArgs { key: key.into() })? {
-        v if v.is_empty() => Ok(Some(String::new())),
-        v => String::from_utf8(v)
+    match host_call(command, &pbv1::CacheGetArgs { key: key.into() }) {
+        Err(HostCallError::Refused(e)) if e.code == pbv1::ErrorCode::NotFound as i32 => Ok(None),
+        Err(e) => Err(e),
+        Ok(v) if v.is_empty() => Ok(Some(String::new())),
+        Ok(v) => String::from_utf8(v)
             .map(Some)
             .map_err(|_| HostCallError::Protocol("cache value is not UTF-8".into())),
     }
@@ -1607,7 +1686,6 @@ pub fn respond_text(content: &str) -> Result<(), HostCallError> {
     })
 }
 pub fn get_resource_info(kind: &str, name: &str) -> Result<pbv1::ResourceInfo, HostCallError> {
-    use prost::Message;
     let b = host_call(
         "env.resource_info",
         &pbv1::ResourceInfoArgs {
@@ -1615,8 +1693,7 @@ pub fn get_resource_info(kind: &str, name: &str) -> Result<pbv1::ResourceInfo, H
             name: name.into(),
         },
     )?;
-    Ok(pbv1::ResourceInfo::decode(b.as_slice())
-        .map_err(|e| HostCallError::Protocol(e.to_string()))?)
+    decode_host_value(&b, ".torana.v1.ResourceInfo")
 }
 pub fn block_request(status: i32, code: &str, message: &str) -> Result<(), HostCallError> {
     host_call(
@@ -1820,6 +1897,11 @@ pub fn plugin_config<T: serde::de::DeserializeOwned>() -> Result<T, HostCallErro
     let bytes = host_call("env.plugin_config", &EmptyArgs {})?;
     let value = strict_json(&bytes)
         .map_err(|e| HostCallError::Protocol(format!("plugin config is invalid JSON: {e}")))?;
+    if !value.is_object() {
+        return Err(HostCallError::Protocol(
+            "plugin config must be a JSON object".into(),
+        ));
+    }
     serde_json::from_value(value)
         .map_err(|e| HostCallError::Protocol(format!("plugin config has wrong shape: {e}")))
 }
@@ -1856,16 +1938,14 @@ pub fn write_file(path: &str, data: &[u8]) -> Result<(), HostCallError> {
 }
 
 pub fn list_files(prefix: &str) -> Result<Vec<String>, HostCallError> {
-    use prost::Message;
     let value = host_call(
         "env.file_list",
         &pbv1::FileListArgs {
             prefix: prefix.to_owned(),
         },
     )?;
-    pbv1::FileListResult::decode(value.as_slice())
+    decode_host_value::<pbv1::FileListResult>(&value, ".torana.v1.FileListResult")
         .map(|result| result.paths)
-        .map_err(|error| HostCallError::Protocol(format!("decode FileListResult: {error}")))
 }
 
 pub fn delete_file(path: &str) -> Result<(), HostCallError> {
@@ -1881,16 +1961,19 @@ pub fn delete_file(path: &str) -> Result<(), HostCallError> {
 pub fn http_request(
     request: &pbv1::OutboundHttpRequestArgs,
 ) -> Result<pbv1::OutboundHttpResponse, HostCallError> {
-    use prost::Message;
     let value = host_call("env.http_request", request)?;
-    let response = pbv1::OutboundHttpResponse::decode(value.as_slice()).map_err(|error| {
-        HostCallError::Protocol(format!("decode OutboundHTTPResponse: {error}"))
-    })?;
+    let response: pbv1::OutboundHttpResponse =
+        decode_host_value(&value, ".torana.v1.OutboundHTTPResponse")?;
     if !(100..=599).contains(&response.status) {
         return Err(HostCallError::Protocol(format!(
             "OutboundHTTPResponse status {} is invalid",
             response.status
         )));
+    }
+    if !valid_http_headers(&response.headers) {
+        return Err(HostCallError::Protocol(
+            "OutboundHTTPResponse headers are invalid".into(),
+        ));
     }
     Ok(response)
 }
@@ -1900,7 +1983,6 @@ pub fn http_request(
 pub fn model_complete(
     request: &pbv1::ModelCompleteArgs,
 ) -> Result<pbv1::ModelCompleteResult, HostCallError> {
-    use prost::Message;
     if !valid_resource_name(&request.service)
         || request.messages.is_empty()
         || request
@@ -1915,8 +1997,21 @@ pub fn model_complete(
         ));
     }
     let value = host_call("env.model_complete", request)?;
-    pbv1::ModelCompleteResult::decode(value.as_slice())
-        .map_err(|error| HostCallError::Protocol(format!("decode ModelCompleteResult: {error}")))
+    let result: pbv1::ModelCompleteResult =
+        decode_host_value(&value, ".torana.v1.ModelCompleteResult")?;
+    if result.message.as_ref().is_none_or(|message| {
+        message.blocks.is_empty() || message.blocks.iter().any(|block| block.kind.is_none())
+    }) || result.usage.as_ref().is_some_and(|usage| {
+        usage.input_tokens < 0
+            || usage.output_tokens < 0
+            || usage.cache_read_tokens < 0
+            || usage.cache_write_tokens < 0
+    }) {
+        return Err(HostCallError::Protocol(
+            "ModelCompleteResult violates the SDK contract".into(),
+        ));
+    }
+    Ok(result)
 }
 
 pub fn model_complete_text(request: &pbv1::ModelCompleteArgs) -> Result<String, HostCallError> {
@@ -1946,7 +2041,6 @@ pub fn model_complete_text(request: &pbv1::ModelCompleteArgs) -> Result<String, 
 /// Resolves one operator-bound pricing resource. `None` means an unknown rate;
 /// `Some(0.0)` is an explicitly free rate.
 pub fn get_model_pricing(resource: &str) -> Result<pbv1::ModelPricing, HostCallError> {
-    use prost::Message;
     if !valid_resource_name(resource) {
         return Err(HostCallError::Protocol(
             "model pricing resource is required".to_owned(),
@@ -1958,8 +2052,7 @@ pub fn get_model_pricing(resource: &str) -> Result<pbv1::ModelPricing, HostCallE
             resource: resource.to_owned(),
         },
     )?;
-    let pricing = pbv1::ModelPricing::decode(value.as_slice())
-        .map_err(|error| HostCallError::Protocol(format!("decode ModelPricing: {error}")))?;
+    let pricing: pbv1::ModelPricing = decode_host_value(&value, ".torana.v1.ModelPricing")?;
     for rate in [
         pricing.input_usd_per_mtok,
         pricing.output_usd_per_mtok,
@@ -1979,7 +2072,6 @@ pub fn get_model_pricing(resource: &str) -> Result<pbv1::ModelPricing, HostCallE
 /// only its declared slot; provider, model, routing, prices, and lifetime
 /// semantics are owned by the binding.
 pub fn get_prompt_cache_policy(resource: &str) -> Result<pbv1::PromptCachePolicy, HostCallError> {
-    use prost::Message;
     if !valid_resource_name(resource) {
         return Err(HostCallError::Protocol(
             "prompt cache policy resource is required".to_owned(),
@@ -1991,8 +2083,8 @@ pub fn get_prompt_cache_policy(resource: &str) -> Result<pbv1::PromptCachePolicy
             resource: resource.to_owned(),
         },
     )?;
-    let policy = pbv1::PromptCachePolicy::decode(value.as_slice())
-        .map_err(|error| HostCallError::Protocol(format!("decode PromptCachePolicy: {error}")))?;
+    let policy: pbv1::PromptCachePolicy =
+        decode_host_value(&value, ".torana.v1.PromptCachePolicy")?;
     validate_prompt_cache_policy(&policy)?;
     Ok(policy)
 }
@@ -2314,6 +2406,96 @@ mod tests {
             decode_host_call_result(&[0x1a, 0x00]),
             Err(HostCallError::Protocol(_))
         ));
+    }
+
+    fn native_value(value: Vec<u8>) -> Result<Vec<u8>, HostCallError> {
+        Ok(pbv1::HostCallResult {
+            result: Some(pbv1::host_call_result::Result::Value(value)),
+        }
+        .encode_to_vec())
+    }
+
+    #[test]
+    fn option_getters_distinguish_not_found_from_empty() {
+        use std::cell::Cell;
+        let calls = Cell::new(0);
+        let _guard = install_native_host(move |_, _| {
+            let call = calls.get();
+            calls.set(call + 1);
+            if call == 0 {
+                Ok(pbv1::HostCallResult {
+                    result: Some(pbv1::host_call_result::Result::Error(pbv1::HostError {
+                        code: pbv1::ErrorCode::NotFound as i32,
+                        message: "missing".into(),
+                    })),
+                }
+                .encode_to_vec())
+            } else {
+                native_value(Vec::new())
+            }
+        });
+        assert_eq!(meta_get("key").unwrap(), None);
+        assert_eq!(meta_get("key").unwrap(), Some(String::new()));
+    }
+
+    #[test]
+    fn state_keys_uses_empty_args_and_host_json_shape() {
+        let _guard = install_native_host(|command, arguments| {
+            assert_eq!(command, "env.state_keys");
+            assert!(
+                arguments.is_empty(),
+                "Empty protobuf arguments must encode empty"
+            );
+            native_value(br#"["a","empty"]"#.to_vec())
+        });
+        assert_eq!(state_keys().unwrap(), vec!["a", "empty"]);
+    }
+
+    #[test]
+    fn plugin_config_requires_an_object() {
+        let _guard = install_native_host(|command, _| {
+            assert_eq!(command, "env.plugin_config");
+            native_value(br#"[]"#.to_vec())
+        });
+        assert!(
+            matches!(plugin_config::<serde_json::Value>(), Err(HostCallError::Protocol(message)) if message.contains("JSON object"))
+        );
+    }
+
+    #[test]
+    fn invalid_arguments_do_not_reach_the_transport() {
+        let _guard = install_native_host(|_, _| panic!("invalid call reached transport"));
+        assert!(matches!(cache_get(""), Err(HostCallError::Protocol(_))));
+        let invalid = pbv1::OutboundHttpRequestArgs {
+            endpoint: "api".into(),
+            method: "post".into(),
+            path: "/".into(),
+            headers: vec![],
+            body: vec![],
+            timeout_ms: 0,
+        };
+        assert!(matches!(
+            http_request(&invalid),
+            Err(HostCallError::Protocol(_))
+        ));
+    }
+
+    #[test]
+    fn typed_results_reject_unknown_nested_fields() {
+        // status=200, headers[0] is an HTTPHeader containing unknown field 99.
+        let malformed = vec![0x08, 0xc8, 0x01, 0x12, 0x03, 0x9a, 0x06, 0x00];
+        let _guard = install_native_host(move |_, _| native_value(malformed.clone()));
+        let request = pbv1::OutboundHttpRequestArgs {
+            endpoint: "api".into(),
+            method: "GET".into(),
+            path: "/".into(),
+            headers: vec![],
+            body: vec![],
+            timeout_ms: 0,
+        };
+        assert!(
+            matches!(http_request(&request), Err(HostCallError::Protocol(message)) if message.contains("unknown field"))
+        );
     }
 
     #[test]
