@@ -1491,7 +1491,45 @@ fn cache_get_named(command: &str, key: &str) -> Result<Option<String>, HostCallE
     }
 }
 pub fn respond_request(response: pbv1::SyntheticResponse) -> Result<(), HostCallError> {
+    validate_synthetic_response(&response).map_err(HostCallError::Protocol)?;
     host_call("env.respond_request", &response).map(|_| ())
+}
+
+fn validate_synthetic_response(response: &pbv1::SyntheticResponse) -> Result<(), String> {
+    let message = response
+        .message
+        .as_ref()
+        .ok_or("synthetic response requires a message")?;
+    if message.blocks.is_empty() {
+        return Err("synthetic response requires at least one block".into());
+    }
+    let mut has_tools = false;
+    for block in &message.blocks {
+        let Some(kind) = block.kind.as_ref() else {
+            return Err("synthetic response contains an empty block".into());
+        };
+        match kind {
+            pbv1::response_block::Kind::Text(_) => {}
+            pbv1::response_block::Kind::ToolCall(call) => {
+                has_tools = true;
+                if !call.id.is_empty() || !call.signature.is_empty() {
+                    return Err("synthetic tool IDs/signatures are host-owned".into());
+                }
+                if call.name.is_empty() {
+                    return Err("synthetic tool name is required".into());
+                }
+                if call.arguments_json.is_empty() {
+                    return Err("synthetic tool arguments are required".into());
+                }
+                json_object(&call.arguments_json, "tool arguments_json")?;
+            }
+        }
+    }
+    let expected = if has_tools { "tool_calls" } else { "stop" };
+    if response.finish_reason != expected {
+        return Err("synthetic finish_reason disagrees with tool-call presence".into());
+    }
+    Ok(())
 }
 pub fn respond_text(content: &str) -> Result<(), HostCallError> {
     respond_request(pbv1::SyntheticResponse {

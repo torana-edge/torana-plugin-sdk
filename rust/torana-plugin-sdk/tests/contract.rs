@@ -416,3 +416,50 @@ fn plugin_config_is_strict_and_typed() {
     });
     assert!(torana_plugin_sdk::plugin_config::<C>().is_err());
 }
+
+#[test]
+fn synthetic_response_accepts_text_and_function_tools_only() {
+    let _guard = torana_plugin_sdk::install_native_host(|_, _| {
+        Ok(pbv1::HostCallResult {
+            result: Some(pbv1::host_call_result::Result::Value(vec![])),
+        }
+        .encode_to_vec())
+    });
+    let text = pbv1::SyntheticResponse {
+        message: Some(pbv1::ResponseMessage {
+            blocks: vec![pbv1::ResponseBlock {
+                kind: Some(pbv1::response_block::Kind::Text(pbv1::ResponseTextBlock {
+                    text: "ok".into(),
+                })),
+            }],
+        }),
+        finish_reason: "stop".into(),
+    };
+    assert!(torana_plugin_sdk::respond_request(text).is_ok());
+    let tool = pbv1::SyntheticResponse {
+        message: Some(pbv1::ResponseMessage {
+            blocks: vec![pbv1::ResponseBlock {
+                kind: Some(pbv1::response_block::Kind::ToolCall(pbv1::ToolCall {
+                    name: "f".into(),
+                    arguments_json: br#"{}"#.to_vec(),
+                    ..Default::default()
+                })),
+            }],
+        }),
+        finish_reason: "tool_calls".into(),
+    };
+    assert!(torana_plugin_sdk::respond_request(tool).is_ok());
+    let bad = pbv1::SyntheticResponse {
+        message: Some(pbv1::ResponseMessage {
+            blocks: vec![pbv1::ResponseBlock {
+                kind: Some(pbv1::response_block::Kind::ToolCall(pbv1::ToolCall {
+                    name: "f".into(),
+                    arguments_json: br#"[]"#.to_vec(),
+                    ..Default::default()
+                })),
+            }],
+        }),
+        finish_reason: "tool_calls".into(),
+    };
+    assert!(torana_plugin_sdk::respond_request(bad).is_err());
+}
