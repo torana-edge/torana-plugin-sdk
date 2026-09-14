@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
+	"github.com/torana-edge/torana-plugin-sdk/strictjson"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -104,6 +105,13 @@ func PluginConfig() (string, error) {
 	}
 	if len(raw) == 0 {
 		return "{}", nil
+	}
+	obj, err := strictjson.DecodeObject(raw)
+	if err != nil || obj == nil {
+		if err == nil {
+			err = fmt.Errorf("configuration must be a JSON object")
+		}
+		return "", fmt.Errorf("torana: plugin config: invalid JSON: %w", err)
 	}
 	return string(raw), nil
 }

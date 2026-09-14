@@ -216,6 +216,37 @@ func TestPluginConfigRefusalIsObservable(t *testing.T) {
 	})
 }
 
+func TestPluginConfigRejectsInvalidJSONShapesAndDuplicates(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+		ok   bool
+	}{
+		{name: "valid nested", raw: `{"mode":"strict","limits":{"max":3}}`, ok: true},
+		{name: "duplicate top level", raw: `{"mode":"strict","mode":"loose"}`},
+		{name: "duplicate nested", raw: `{"limits":{"max":3,"max":4}}`},
+		{name: "escaped equal keys", raw: `{"mo\u0064e":"strict","mode":"loose"}`},
+		{name: "array", raw: `[]`},
+		{name: "null", raw: `null`},
+		{name: "trailing", raw: `{"mode":"strict"} {}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := sdktest.New(t)
+			h.SetConfig(tc.raw)
+			h.Run(func() {
+				got, err := sdk.PluginConfig()
+				if tc.ok {
+					if err != nil || got != tc.raw {
+						t.Fatalf("PluginConfig = %q, err=%v", got, err)
+					}
+				} else if err == nil || got != "" {
+					t.Fatalf("PluginConfig = %q, err=%v; want strict rejection", got, err)
+				}
+			})
+		})
+	}
+}
+
 func TestOriginalsAbsentReportNotOK(t *testing.T) {
 	sdktest.New(t).Run(func() {
 		if _, ok, _ := sdk.OriginalRequest(); ok {

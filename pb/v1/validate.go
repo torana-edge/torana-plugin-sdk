@@ -378,6 +378,12 @@ func (x *HookInput) Validate() error {
 	if x == nil {
 		return fmt.Errorf("hook input is nil")
 	}
+	if x.ContractRevision != 1 {
+		return fmt.Errorf("unsupported contract revision %d", x.ContractRevision)
+	}
+	if err := validateClosed(x); err != nil {
+		return fmt.Errorf("hook input: %w", err)
+	}
 	if x.HookOf() == Hook_HOOK_UNSPECIFIED {
 		// A payload this build cannot name unmarshals with Payload nil and its
 		// bytes in unknown fields, the same way an unknown action does on
@@ -414,6 +420,16 @@ func (x *HookInput) Validate() error {
 	if ev, ok := x.Payload.(*HookInput_StreamEvent); ok {
 		if err := ev.StreamEvent.Validate(); err != nil {
 			return fmt.Errorf("hook input: %w", err)
+		}
+	}
+	switch p := x.Payload.(type) {
+	case *HookInput_ChatRequest:
+		if err := p.ChatRequest.ValidateReplacement(); err != nil {
+			return fmt.Errorf("chat request: %w", err)
+		}
+	case *HookInput_AfterResponse:
+		if err := p.AfterResponse.Response.Validate(); err != nil {
+			return fmt.Errorf("after response: %w", err)
 		}
 	}
 	return nil

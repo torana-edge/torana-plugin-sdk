@@ -69,8 +69,9 @@ func (r *Request) BeforeRequest(req *pbv1.ChatRequest) RequestResult {
 			"registration must happen in init(), not main()")
 	}
 	in := &pbv1.HookInput{
-		RequestId: r.requestID,
-		Payload:   &pbv1.HookInput_ChatRequest{ChatRequest: req},
+		ContractRevision: sdk.ContractRevision,
+		RequestId:        r.requestID,
+		Payload:          &pbv1.HookInput_ChatRequest{ChatRequest: req},
 	}
 	var raw []byte
 	var err error
@@ -118,7 +119,8 @@ func (r *Request) AfterResponse(resp *pbv1.ChatResponse, mutable bool) ResponseR
 		h.t.Fatal("sdktest: no run_after_response handler registered")
 	}
 	in := &pbv1.HookInput{
-		RequestId: r.requestID,
+		ContractRevision: sdk.ContractRevision,
+		RequestId:        r.requestID,
 		Payload: &pbv1.HookInput_AfterResponse{AfterResponse: &pbv1.AfterResponse{
 			Response: resp,
 			Mutable:  mutable,
@@ -167,8 +169,9 @@ func (r *Request) StreamChunk(ev *pbv1.StreamEvent) StreamResult {
 		h.t.Fatal("sdktest: no run_on_stream_chunk handler registered")
 	}
 	in := &pbv1.HookInput{
-		RequestId: r.requestID,
-		Payload:   &pbv1.HookInput_StreamEvent{StreamEvent: ev},
+		ContractRevision: sdk.ContractRevision,
+		RequestId:        r.requestID,
+		Payload:          &pbv1.HookInput_StreamEvent{StreamEvent: ev},
 	}
 	var raw []byte
 	var err error
@@ -214,8 +217,9 @@ func (r *Request) HTTPRequest(req *pbv1.HttpRequest) HTTPResult {
 		h.t.Fatal("sdktest: no run_on_http_request handler registered")
 	}
 	in := &pbv1.HookInput{
-		RequestId: r.requestID,
-		Payload:   &pbv1.HookInput_HttpRequest{HttpRequest: req},
+		ContractRevision: sdk.ContractRevision,
+		RequestId:        r.requestID,
+		Payload:          &pbv1.HookInput_HttpRequest{HttpRequest: req},
 	}
 	var raw []byte
 	var err error
@@ -254,8 +258,9 @@ func (r *Request) Tick(req *pbv1.TickRequest) TickResult {
 		h.t.Fatal("sdktest: no run_on_tick handler registered")
 	}
 	in := &pbv1.HookInput{
-		RequestId: r.requestID,
-		Payload:   &pbv1.HookInput_TickRequest{TickRequest: req},
+		ContractRevision: sdk.ContractRevision,
+		RequestId:        r.requestID,
+		Payload:          &pbv1.HookInput_TickRequest{TickRequest: req},
 	}
 	var raw []byte
 	var err error
