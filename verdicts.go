@@ -5,10 +5,10 @@ import (
 	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
-// Verdicts are attributed host calls. Classified host refusals are
-// fire-and-forget (the host logs them). Invalid arguments and protocol
-// failures panic so the guest traps and failure_mode applies — a broken block
-// must not look like success.
+// Verdicts are checked attributed host calls. Validation failures, classified
+// host refusals, malformed replies, and transport failures return errors.
+// Return the error from the hook so the host applies failure_mode. The Must*
+// variants panic on every error for authors who explicitly want that behavior.
 //
 // Block short-circuits the pipeline. A plugin that also returns a replacement
 // is not an error — block wins and the replacement is discarded.
@@ -53,18 +53,27 @@ func SetIdentity(identity string) error {
 	return checkedHostCall("env.set_identity", &pbv1.SetIdentityArgs{Identity: identity})
 }
 
+// MustBlockRequest is BlockRequest with panic-on-error semantics.
 func MustBlockRequest(status int32, code, message string) {
 	mustHostCall("env.block_request", &pbv1.BlockRequestArgs{Status: status, Code: code, Message: message})
 }
+
+// MustRespondRequest is RespondRequest with panic-on-error semantics.
 func MustRespondRequest(response *pbv1.SyntheticResponse) {
 	mustHostCall("env.respond_request", &pbv1.RespondRequestArgs{Response: response})
 }
+
+// MustRespondText is RespondText with panic-on-error semantics.
 func MustRespondText(content string) {
 	mustHostCall("env.respond_request", &pbv1.RespondRequestArgs{Response: &pbv1.SyntheticResponse{Message: &pbv1.ResponseMessage{Blocks: []*pbv1.ResponseBlock{{Kind: &pbv1.ResponseBlock_Text{Text: &pbv1.ResponseTextBlock{Text: content}}}}}, FinishReason: "stop"}})
 }
+
+// MustRouteRequest is RouteRequest with panic-on-error semantics.
 func MustRouteRequest(provider, model string) {
 	mustHostCall("env.route_request", &pbv1.RouteRequestArgs{Provider: provider, Model: model})
 }
+
+// MustSetIdentity is SetIdentity with panic-on-error semantics.
 func MustSetIdentity(identity string) {
 	mustHostCall("env.set_identity", &pbv1.SetIdentityArgs{Identity: identity})
 }

@@ -67,9 +67,11 @@ func HTTPRequest(request *pbv1.OutboundHTTPRequestArgs) (*pbv1.OutboundHTTPRespo
 	return &response, nil
 }
 
-// ModelComplete invokes an operator-bound model-service slot. The plugin
-// supplies only a provider-neutral prompt and bounded generation preferences;
-// the binding owns provider, URL, model, credentials, and hard budgets.
+// ModelComplete invokes an operator-bound model-service slot with canonical
+// messages, tools, and optional OutputFormat. The binding owns provider, URL,
+// model, credentials, timeout, and hard budgets; it may clamp preferences.
+// The result contains a canonical ResponseMessage plus provider-reported model,
+// finish reason, and usage when available.
 func ModelComplete(request *pbv1.ModelCompleteArgs) (*pbv1.ModelCompleteResult, error) {
 	value, _, err := checkedHostCallValue("env.model_complete", request)
 	if err != nil {
@@ -88,8 +90,9 @@ func ModelComplete(request *pbv1.ModelCompleteArgs) (*pbv1.ModelCompleteResult, 
 	return &result, nil
 }
 
-// ModelCompleteText returns a text-only completion. A tool or other non-text
-// block is an error; callers needing those results must use ModelComplete.
+// ModelCompleteText concatenates a completion made solely of text blocks. It
+// returns an error for tool calls, unknown blocks, empty blocks, or a missing
+// message so structured output is never silently discarded.
 func ModelCompleteText(request *pbv1.ModelCompleteArgs) (string, error) {
 	result, err := ModelComplete(request)
 	if err != nil {
@@ -154,6 +157,9 @@ func GetPromptCachePolicy(resource string) (*pbv1.PromptCachePolicy, error) {
 	return &policy, nil
 }
 
+// GetResourceInfo returns the effective operations and hard limits for one
+// declared operator-bound resource. It exposes no URL, credential, or secret
+// configuration, and it does not grant authority to use the resource.
 func GetResourceInfo(kind, name string) (*pbv1.ResourceInfo, error) {
 	request := &pbv1.ResourceInfoArgs{Kind: kind, Name: name}
 	if err := request.Validate(); err != nil {

@@ -103,6 +103,8 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: '1.25.x'
+      - name: Documentation examples compile and run
+        run: ./scripts/check-doc-examples.sh
       # The conformance guests export EVERY hook. The examples export only
       # before-request, so an unregistered hook returns 0 before it decodes
       # anything — which makes them useless for testing decode behaviour, since
@@ -113,6 +115,7 @@ jobs:
       - run: cargo build --target wasm32-wasip1 --target-dir /tmp/rust-allhooks-target --manifest-path conformance/guests/rust-allhooks/Cargo.toml
       - run: go test ./conformance/host
         env:
+          TORANA_E2E: '1'
           TORANA_GO_GUEST: /tmp/go-allhooks.wasm
           TORANA_GO_GUEST_MANIFEST: conformance/guests/go-allhooks/plugin.json
           TORANA_RUST_GUEST: /tmp/rust-allhooks-target/wasm32-wasip1/debug/torana-rust-allhooks.wasm
@@ -128,10 +131,12 @@ jobs:
       # must match its manifest exactly, not merely be non-zero.
       - run: go test ./conformance/host -run 'TestCompiledGoGuestImplementsRunHook|TestGuestBitmapMatchesManifest' -count=1
         env:
+          TORANA_E2E: '1'
           TORANA_GO_GUEST: /tmp/go-logger.wasm
           TORANA_GO_GUEST_MANIFEST: examples/go-logger/plugin.json
       - run: go test ./conformance/host -run 'TestCompiledRustGuestImplementsRunHook|TestRustGuestBitmapMatchesManifest|TestCompiledRustLoggerCallsHost' -count=1
         env:
+          TORANA_E2E: '1'
           TORANA_RUST_GUEST: /tmp/rust-logger-target/wasm32-wasip1/debug/torana-rust-logger.wasm
           TORANA_RUST_GUEST_MANIFEST: examples/rust-logger/plugin.json
           TORANA_RUST_LOGGER: /tmp/rust-logger-target/wasm32-wasip1/debug/torana-rust-logger.wasm

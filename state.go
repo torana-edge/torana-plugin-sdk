@@ -40,17 +40,16 @@ import (
 // configured. Plugins must tolerate this rather than assuming persistence — a
 // proxy without a data directory has nowhere to put it.
 //
-// It is wrapped by the JSON convenience helpers (StateGetJSON, StateSetJSON),
-// so errors.Is works there. The raw typed helpers (StateGet, StateSet,
-// StateDelete, StateKeys) return a *HostError instead and let the caller
-// classify — check for ErrorCode_ERROR_CODE_NOT_CONFIGURED.
+// It is joined into NOT_CONFIGURED errors from state helpers, including the
+// JSON conveniences, so errors.Is works without losing the classified
+// *HostCallRefusalError available through errors.As.
 var ErrStateUnavailable = errors.New("torana: durable plugin state is not available")
 
 // StateGet reads one of this plugin's durable keys.
 //
-// A key that was never written returns a NOT_FOUND HostError; a key holding an
-// empty string returns "" with no HostError. Branch with IsNotFound rather than
-// testing the value — the same rule as MetaGet and CacheGet.
+// A missing key returns ("", false, nil); a key holding an empty string returns
+// ("", true, nil). Other host refusals return an error. Branch on found rather
+// than testing the value.
 func StateGet(key string) (string, bool, error) {
 	raw, herr, err := hostCallChecked("env.state_get", &pbv1.StateGetArgs{Key: key})
 	if err != nil {
@@ -183,7 +182,8 @@ func StateSetJSON(key string, v any) error {
 	return StateSet(key, string(b))
 }
 
-// StateGetVersioned reads a value together with its opaque concurrency version.
+// StateGetVersioned reads a value with its opaque concurrency version. A miss
+// returns (nil, false, nil); other refusals return an error.
 func StateGetVersioned(key string) (*pbv1.StateValue, bool, error) {
 	raw, found, err := checkedHostCallValue("env.state_get_versioned", &pbv1.StateGetArgs{Key: key})
 	if err != nil || !found {
@@ -202,6 +202,9 @@ func StateGetVersioned(key string) (*pbv1.StateValue, bool, error) {
 	return &value, true, nil
 }
 
+// StateCompareAndSet creates when expectedVersion is nil or updates only the
+// version read by StateGetVersioned. Applied=false is a clean conflict; reread
+// before retrying because versions are opaque and non-reusable.
 func StateCompareAndSet(key, value string, expectedVersion *string) (*pbv1.StateMutationResult, error) {
 	raw, _, err := checkedHostCallValue("env.state_compare_and_set", &pbv1.StateCompareAndSetArgs{Key: key, Value: value, ExpectedVersion: expectedVersion})
 	if err != nil {
@@ -217,6 +220,8 @@ func StateCompareAndSet(key, value string, expectedVersion *string) (*pbv1.State
 	return &result, result.Validate()
 }
 
+// StateCompareAndDelete removes key only at expectedVersion. Applied=false is
+// a clean conflict or absence, not a host-call failure.
 func StateCompareAndDelete(key, expectedVersion string) (*pbv1.StateMutationResult, error) {
 	raw, _, err := checkedHostCallValue("env.state_compare_and_delete", &pbv1.StateCompareAndDeleteArgs{Key: key, ExpectedVersion: expectedVersion})
 	if err != nil {
@@ -232,6 +237,8 @@ func StateCompareAndDelete(key, expectedVersion string) (*pbv1.StateMutationResu
 	return &result, result.Validate()
 }
 
+// StateScan returns a stable lexical page for prefix. Pass the returned cursor
+// to continue; limit must be within the ABI bound of 1..256.
 func StateScan(prefix, cursor string, limit uint32) (*pbv1.StateScanResult, error) {
 	raw, _, err := checkedHostCallValue("env.state_scan", &pbv1.StateScanArgs{Prefix: prefix, Cursor: cursor, Limit: limit})
 	if err != nil {
