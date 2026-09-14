@@ -74,3 +74,26 @@ func TestCanonicalHarnessResetAndDeniedCalls(t *testing.T) {
 		t.Fatal("denied call was counted as effective")
 	}
 }
+
+func TestPermissionModeRefusesBeforeStubAndScopesOutcomes(t *testing.T) {
+	h := sdktest.New(t).WithPermissions([]string{"env.block_request"})
+	h.StubHostCall("env.block_request", func(string) (string, error) { return sdktest.HostResultValue([]byte("ok")), nil })
+	called := false
+	h.StubHostCall("env.cache_get", func(string) (string, error) { called = true; return sdktest.HostResultValue([]byte("bad")), nil })
+	r := h.NewRequest()
+	r.Run(func() { _, _, _ = sdk.CacheGet("x") })
+	if called {
+		t.Fatal("permission refusal invoked stub")
+	}
+	if len(r.Calls()) != 1 {
+		t.Fatal("permission-refused call should be observed")
+	}
+	r.Run(func() {
+		if err := sdk.BlockRequest(400, "x", "y"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if len(r.EffectiveBlockCalls()) != 1 {
+		t.Fatal("accepted block missing from request scope")
+	}
+}

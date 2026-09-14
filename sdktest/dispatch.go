@@ -21,6 +21,8 @@ type Request struct {
 	h         *Harness
 	requestID uint64
 	meta      map[string]string
+	calls     []HostCallEntry
+	accepted  []HostCallEntry
 }
 
 // NewRequest starts an explicit request scope for a related hook chain.
@@ -35,16 +37,55 @@ func (r *Request) with(fn func()) {
 
 	r.h.mu.Lock()
 	previous := r.h.meta
+	previousActive := r.h.active
 	r.h.meta = r.meta
+	r.h.active = r
 	r.h.mu.Unlock()
 	defer func() {
 		r.h.mu.Lock()
 		r.meta = r.h.meta
 		r.h.meta = previous
+		r.h.active = previousActive
 		r.h.mu.Unlock()
 	}()
 
 	r.h.with(fn)
+}
+
+// Run executes code inside this request's host and observation scope.
+func (r *Request) Run(fn func()) { r.with(fn) }
+
+// Calls returns calls observed in this request scope.
+func (r *Request) Calls() []HostCallEntry { return append([]HostCallEntry(nil), r.calls...) }
+
+// AcceptedCalls returns successful value-arm calls observed in this scope.
+func (r *Request) AcceptedCalls() []HostCallEntry { return append([]HostCallEntry(nil), r.accepted...) }
+func (r *Request) EffectiveBlockCalls() []HostCallEntry {
+	var out []HostCallEntry
+	for _, c := range r.accepted {
+		if c.Command == "env.block_request" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+func (r *Request) EffectiveRespondCalls() []HostCallEntry {
+	var out []HostCallEntry
+	for _, c := range r.accepted {
+		if c.Command == "env.respond_request" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+func (r *Request) EffectiveRouteCalls() []HostCallEntry {
+	var out []HostCallEntry
+	for _, c := range r.accepted {
+		if c.Command == "env.route_request" {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // RequestResult is the outcome of a before-request dispatch.

@@ -106,6 +106,8 @@ type Harness struct {
 	metrics      []MetricEntry
 	calls        []HostCallEntry
 	accepted     []HostCallEntry
+	permissions  map[string]bool
+	active       *Request
 	now          func() int64
 	// Presence is tracked separately from the byte slices. An all-default
 	// ChatRequest marshals to zero bytes and an upstream body can legitimately
@@ -225,6 +227,22 @@ func (h *Harness) StubHostCall(cmd string, fn func(args string) (string, error))
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.stubs[cmd] = fn
+	return h
+}
+
+// WithPermissions enables manifest-like permission enforcement for this
+// harness. An unset permission set keeps the historical unrestricted fixture
+// mode; once configured, refusals happen before any stub callback runs.
+func (h *Harness) WithPermissions(permissions []string) *Harness {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.permissions = make(map[string]bool, len(permissions))
+	for _, p := range permissions {
+		if !sdk.IsPermission(p) {
+			h.t.Fatalf("sdktest: unknown permission %q", p)
+		}
+		h.permissions[p] = true
+	}
 	return h
 }
 
@@ -473,6 +491,19 @@ func (h *Harness) State(key string) (string, bool) {
 func (h *Harness) hostCallBytes(cmd string, args []byte) ([]byte, error) {
 	h.mu.Lock()
 	stub := h.stubs[cmd]
+	if h.permissions != nil {
+		permission, ok := sdk.CommandPermission(cmd)
+		if !ok || !h.permissions[permission] {
+			denied := []byte(HostResultError(pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "permission denied"))
+			entry := HostCallEntry{Command: cmd, Args: string(args), Result: string(denied)}
+			h.calls = append(h.calls, entry)
+			if h.active != nil {
+				h.active.calls = append(h.active.calls, entry)
+			}
+			h.mu.Unlock()
+			return denied, nil
+		}
+	}
 	h.mu.Unlock()
 
 	argsStr := string(args)
@@ -484,8 +515,14 @@ func (h *Harness) hostCallBytes(cmd string, args []byte) ([]byte, error) {
 		h.mu.Lock()
 		entry := HostCallEntry{Command: cmd, Args: argsStr, Result: res}
 		h.calls = append(h.calls, entry)
+		if h.active != nil {
+			h.active.calls = append(h.active.calls, entry)
+		}
 		if hostResultAccepted([]byte(res)) {
 			h.accepted = append(h.accepted, entry)
+			if h.active != nil {
+				h.active.accepted = append(h.active.accepted, entry)
+			}
 		}
 		h.mu.Unlock()
 		return []byte(res), nil
@@ -498,8 +535,14 @@ func (h *Harness) hostCallBytes(cmd string, args []byte) ([]byte, error) {
 	h.mu.Lock()
 	entry := HostCallEntry{Command: cmd, Args: argsStr, Result: string(raw)}
 	h.calls = append(h.calls, entry)
+	if h.active != nil {
+		h.active.calls = append(h.active.calls, entry)
+	}
 	if hostResultAccepted(raw) {
 		h.accepted = append(h.accepted, entry)
+		if h.active != nil {
+			h.active.accepted = append(h.active.accepted, entry)
+		}
 	}
 	h.mu.Unlock()
 	return raw, nil
