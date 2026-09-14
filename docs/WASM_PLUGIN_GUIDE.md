@@ -57,6 +57,10 @@ run_hook(ptr: u32, size: u32) -> u64
 `run_hook` receives one serialized `HookInput`. The hook named by its oneof arm
 must be present in the bitmap and must match the payload.
 
+The Go WASI wrapper and native `sdktest` harness both use `DispatchHook` for
+input validation, handler dispatch, and result validation. The WASI wrapper
+owns memory transfer and converts returned errors into traps.
+
 The return value packs the output pointer in the high 32 bits and output length
 in the low 32 bits:
 
@@ -108,7 +112,9 @@ the operator's approval of the exact bundle digest grants.
 envelope must contain exactly one `value` or classified `HostError` arm. An
 empty envelope, malformed frame, unknown field, unspecified error code, or
 unknown error code is a protocol error—not success and not an advisory refusal.
-Branch on error codes, never diagnostic strings.
+Branch on error codes, never diagnostic strings. Go policy plugins should use
+`PluginConfigStrict` to retain those distinctions; `PluginConfig` suppresses
+failures and is only appropriate when defaults are safe.
 
 Core `env.*` operations use protobuf arguments through the typed SDK helpers.
 Feature calls such as `torana_send_request` use the extension path and their

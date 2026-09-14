@@ -3,7 +3,6 @@
 package plugin_sdk
 
 import (
-	"context"
 	"encoding/json"
 	"sync"
 	"unsafe"
@@ -62,79 +61,9 @@ func run_hook(ptr, size uint32) uint64 {
 	if err := proto.Unmarshal(inputBytes, &in); err != nil {
 		panic("torana sdk: decode run_hook: " + err.Error())
 	}
-	if err := in.Validate(); err != nil {
-		panic("torana sdk: invalid hook input: " + err.Error())
-	}
-
-	hook := in.HookOf()
-	ctx := withRequestID(context.Background(), in.RequestId)
-
-	var (
-		hr  *pbv1.HookResult
-		err error
-	)
-	switch hook {
-	case pbv1.Hook_HOOK_BEFORE_REQUEST:
-		if beforeRequestHandler == nil {
-			return 0
-		}
-		res, herr := beforeRequestHandler(ctx, in.GetChatRequest())
-		if herr != nil {
-			panic("torana plugin: " + hook.String() + ": " + herr.Error())
-		}
-		hr, err = res.hookResult()
-	case pbv1.Hook_HOOK_AFTER_RESPONSE:
-		if afterResponseHandler == nil {
-			return 0
-		}
-		ar := in.GetAfterResponse()
-		res, herr := afterResponseHandler(ctx, ar.GetResponse(), ar.GetMutable())
-		if herr != nil {
-			panic("torana plugin: " + hook.String() + ": " + herr.Error())
-		}
-		hr, err = res.hookResult()
-	case pbv1.Hook_HOOK_ON_STREAM_CHUNK:
-		if streamChunkHandler == nil {
-			return 0
-		}
-		res, herr := streamChunkHandler(ctx, in.GetStreamEvent())
-		if herr != nil {
-			panic("torana plugin: " + hook.String() + ": " + herr.Error())
-		}
-		hr, err = res.hookResult()
-	case pbv1.Hook_HOOK_ON_HTTP_REQUEST:
-		if httpRequestHandler == nil {
-			return 0
-		}
-		res, herr := httpRequestHandler(ctx, in.GetHttpRequest())
-		if herr != nil {
-			panic("torana plugin: " + hook.String() + ": " + herr.Error())
-		}
-		hr, err = res.hookResult()
-	case pbv1.Hook_HOOK_ON_TICK:
-		if tickHandler == nil {
-			return 0
-		}
-		res, herr := tickHandler(ctx, in.GetTickRequest())
-		if herr != nil {
-			panic("torana plugin: " + hook.String() + ": " + herr.Error())
-		}
-		hr, err = res.hookResult()
-	default:
-		panic("torana sdk: unhandled hook " + hook.String())
-	}
+	outBytes, err := DispatchHook(&in)
 	if err != nil {
-		panic("torana plugin: " + hook.String() + ": " + err.Error())
-	}
-	if hr == nil {
-		return 0
-	}
-	if err := hr.ValidateFor(hook); err != nil {
-		panic("torana sdk: invalid hook result: " + err.Error())
-	}
-	outBytes, err := proto.Marshal(hr)
-	if err != nil {
-		panic("torana sdk: encode run_hook: " + err.Error())
+		panic("torana sdk: run_hook: " + err.Error())
 	}
 	if len(outBytes) == 0 {
 		return 0
@@ -219,19 +148,4 @@ func hostCallRawImpl(cmd string, args []byte) ([]byte, error) {
 	res := append([]byte(nil), ReadBytes(outPtr, outLen)...)
 	dealloc(outPtr, outLen)
 	return res, nil
-}
-
-// PluginConfig returns this plugin's config JSON blob, or "{}" when unset or
-// denied.
-//
-// "{}" rather than an error because every caller unmarshals the result, and an
-// absent config genuinely means "no operator settings" — the plugin should run
-// on its defaults. Returning an error would make every plugin write the same
-// fallback.
-func PluginConfig() string {
-	raw, herr, err := HostCall("env.plugin_config", nil)
-	if err != nil || herr != nil || len(raw) == 0 {
-		return "{}"
-	}
-	return string(raw)
 }

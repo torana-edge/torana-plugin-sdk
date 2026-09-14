@@ -2,15 +2,6 @@
 
 package plugin_sdk
 
-import (
-	"context"
-	"fmt"
-
-	"google.golang.org/protobuf/proto"
-
-	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
-)
-
 // Non-WASM build: registrations and host calls are driven by sdktest.
 
 //nolint:unused
@@ -50,95 +41,4 @@ func hostCallRawImpl(cmd string, args []byte) ([]byte, error) {
 		return nil, nil
 	}
 	return h.HostCall(cmd, args)
-}
-
-// PluginConfig mirrors the wasip1 implementation: framed reply, "{}" when the
-// config is unset or denied. Duplicated rather than shared because the two
-// builds have different host-call plumbing, so a divergence here is a real
-// risk — sdktest exercises this copy, and a plugin's tests would pass against
-// semantics its wasm build does not have.
-func PluginConfig() string {
-	raw, herr, err := HostCall("env.plugin_config", nil)
-	if err != nil || herr != nil || len(raw) == 0 {
-		return "{}"
-	}
-	return string(raw)
-}
-
-// DispatchHook runs the registered handler for in and returns the framed
-// result bytes (nil for pass-through). Used by sdktest; mirrors run_hook.
-func DispatchHook(in *pbv1.HookInput) ([]byte, error) {
-	if in == nil {
-		return nil, fmt.Errorf("hook input is nil")
-	}
-	if err := in.Validate(); err != nil {
-		return nil, err
-	}
-	hook := in.HookOf()
-	ctx := withRequestID(context.Background(), in.RequestId)
-
-	var (
-		hr  *pbv1.HookResult
-		err error
-	)
-	switch hook {
-	case pbv1.Hook_HOOK_BEFORE_REQUEST:
-		if beforeRequestHandler == nil {
-			return nil, nil
-		}
-		res, herr := beforeRequestHandler(ctx, in.GetChatRequest())
-		if herr != nil {
-			return nil, herr
-		}
-		hr, err = res.hookResult()
-	case pbv1.Hook_HOOK_AFTER_RESPONSE:
-		if afterResponseHandler == nil {
-			return nil, nil
-		}
-		ar := in.GetAfterResponse()
-		res, herr := afterResponseHandler(ctx, ar.GetResponse(), ar.GetMutable())
-		if herr != nil {
-			return nil, herr
-		}
-		hr, err = res.hookResult()
-	case pbv1.Hook_HOOK_ON_STREAM_CHUNK:
-		if streamChunkHandler == nil {
-			return nil, nil
-		}
-		res, herr := streamChunkHandler(ctx, in.GetStreamEvent())
-		if herr != nil {
-			return nil, herr
-		}
-		hr, err = res.hookResult()
-	case pbv1.Hook_HOOK_ON_HTTP_REQUEST:
-		if httpRequestHandler == nil {
-			return nil, nil
-		}
-		res, herr := httpRequestHandler(ctx, in.GetHttpRequest())
-		if herr != nil {
-			return nil, herr
-		}
-		hr, err = res.hookResult()
-	case pbv1.Hook_HOOK_ON_TICK:
-		if tickHandler == nil {
-			return nil, nil
-		}
-		res, herr := tickHandler(ctx, in.GetTickRequest())
-		if herr != nil {
-			return nil, herr
-		}
-		hr, err = res.hookResult()
-	default:
-		return nil, fmt.Errorf("unhandled hook %v", hook)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if hr == nil {
-		return nil, nil
-	}
-	if err := hr.ValidateFor(hook); err != nil {
-		return nil, err
-	}
-	return proto.Marshal(hr)
 }
