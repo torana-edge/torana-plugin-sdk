@@ -75,7 +75,10 @@ func MatchToolPolicy(rules []ToolPolicyRule, toolName string) (ToolPolicyRule, b
 	return ToolPolicyRule{}, false
 }
 
-// ToolResultMustStayExact is the non-overridable safety layer. Mutation tools
+// ToolResultMustStayExact checks tool names and textual failure indicators.
+// Callers must also preserve results with ToolResultView.IsError set to true;
+// use ToolResultView.MustStayExact to include that explicit failure flag.
+// Mutation tools
 // and outputs that look like failures remain verbatim even if a broad policy
 // pattern would otherwise select them.
 func ToolResultMustStayExact(toolName, content string) bool {
@@ -126,6 +129,17 @@ func ToolResultMustStayExact(toolName, content string) bool {
 		}
 	}
 	return false
+}
+
+// MustStayExact is a conservative compaction check for plugin authors. The
+// result name takes precedence; toolName is a fallback from the matching call.
+// Unknown names and explicit failures stay exact. The host independently
+// enforces mutation grants and provenance; this helper is not an enforcement boundary.
+func (v ToolResultView) MustStayExact(toolName, content string) bool {
+	if v.ToolName != "" {
+		toolName = v.ToolName
+	}
+	return toolName == "" || (v.IsError != nil && *v.IsError) || ToolResultMustStayExact(toolName, content)
 }
 
 func toolNameTokens(name string) []string {

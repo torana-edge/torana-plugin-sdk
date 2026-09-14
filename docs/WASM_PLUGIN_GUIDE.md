@@ -120,6 +120,11 @@ State deletion uses the typed delete command, authorized by `env.state_set`.
 
 ## 4. Mutation authority and provenance
 
+Compaction authors must also follow the
+[tool-result safety rules](PLUGIN_SEMANTICS.md#explicit-tool-failures); the SDK
+provides copied error presence and a conservative eligibility helper.
+
+
 Every accepted request, response, or stream mutation is verified by the host.
 Declare the narrow `ir.*.write` permissions for the sections that actually
 change:

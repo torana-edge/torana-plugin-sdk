@@ -365,6 +365,23 @@ unknown/provider arms, and any number of cache-marker arms. Zero text arms
 the result UNCHANGED. Text arms are never concatenated (concatenation is not
 injective and the flat scalar had no such shape).
 
+Follow the [tool-result safety rules](PLUGIN_SEMANTICS.md#explicit-tool-failures)
+before any compaction side effects. Resolve the name from the result itself or
+the matching call, and decline unsupported content shapes:
+
+```go
+names := sdk.ToolNamesByCallID(req.Messages)
+for _, msg := range req.Messages {
+    for _, result := range sdk.ToolResults(msg) {
+        text, ok := sdk.ToolResultScalarText(result)
+        if !ok || result.MustStayExact(names[result.ToolCallId], text) {
+            continue
+        }
+        // The scalar result is eligible for further policy/economic checks.
+    }
+}
+```
+
 ### `ReplaceToolResultText(msg, block, text) (changed bool, err error)`
 
 The total, self-validating, ATOMIC in-place replacement of a tool-result

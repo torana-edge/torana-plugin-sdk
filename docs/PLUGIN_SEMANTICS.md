@@ -245,6 +245,22 @@ earliest changed item. Reuse the policy and cache-key helpers in `plugin-sdk`
 rather than inventing plugin-specific matching or call-ID-only keys. See
 [COMPACTION.md](https://github.com/torana-edge/torana-edge/blob/main/docs/COMPACTION.md) for the public contract.
 
+### Explicit tool failures
+
+Compaction must leave explicit tool failures, mutation-tool results, and results
+whose tool name cannot be resolved verbatim. `ToolResultView.IsError` is a copied
+optional pointer: it preserves absent versus explicit false for round trips.
+Both mean no explicit-error veto; neither bypasses name or textual failure checks.
+Use `result.MustStayExact(fallbackName, text)` before cache lookup, model calls,
+mutation, or savings reporting. The result's own name takes precedence over the
+matching-call fallback. This SDK helper assists authors; host grants and
+provenance verification remain the enforcement boundary. Consumers must adopt
+the helper to gain this protection.
+
+For scalar compaction, obtain the whole supported text with
+`ToolResultScalarText`, declining unsupported shapes rather than concatenating
+multiple text arms. See the [authoring recipe](WRITING_A_PLUGIN.md#toolresultscalartextv-toolresultview-text-string-ok-bool).
+
 ## 8. Request-replacement validation (normative output contract)
 
 A `ReplaceRequest` returned from `run_before_request` is validated atomically
