@@ -164,6 +164,98 @@ pub fn replace_request(request: pbv1::ChatRequest) -> Result<pbv1::HookResult, S
         action: Some(pbv1::hook_result::Action::ReplaceRequest(request)),
     })
 }
+
+pub fn set_text_at(message: &mut pbv1::Message, block: usize, text: &str) -> Result<(), String> {
+    let Some(slot) = message.blocks.get_mut(block) else {
+        return Err("text block index out of range".into());
+    };
+    let Some(pbv1::request_block::Kind::Text(t)) = slot.kind.as_mut() else {
+        return Err("block is not text".into());
+    };
+    if t.text != text {
+        t.text = text.into();
+        t.signature.clear();
+        if message.blocks.last().is_some_and(|b| {
+            matches!(
+                b.kind,
+                Some(pbv1::request_block::Kind::TrailingSignature(_))
+            )
+        }) {
+            message.blocks.pop();
+        }
+    }
+    Ok(())
+}
+pub fn replace_tool_result_text(
+    message: &mut pbv1::Message,
+    block: usize,
+    text: &str,
+) -> Result<bool, String> {
+    let Some(slot) = message.blocks.get_mut(block) else {
+        return Err("tool result index out of range".into());
+    };
+    let Some(pbv1::request_block::Kind::ToolResult(tr)) = slot.kind.as_mut() else {
+        return Err("block is not tool result".into());
+    };
+    let mut found = None;
+    for (i, c) in tr.content.iter().enumerate() {
+        let c = c;
+        match c.kind.as_ref() {
+            Some(pbv1::tool_result_content_block::Kind::Text(_)) if found.is_none() => {
+                found = Some(i)
+            }
+            Some(pbv1::tool_result_content_block::Kind::Text(_)) => {
+                return Err("multiple text arms".into())
+            }
+            Some(pbv1::tool_result_content_block::Kind::Unknown(_)) => {
+                return Err("unknown content arm".into())
+            }
+            Some(pbv1::tool_result_content_block::Kind::CacheBreakpoint(_)) => {}
+            None => return Err("empty content arm".into()),
+        }
+    }
+    let i = found.ok_or("tool result has no text")?;
+    let Some(pbv1::tool_result_content_block::Kind::Text(t)) = tr.content[i].kind.as_mut() else {
+        unreachable!()
+    };
+    if t.text == text {
+        return Ok(false);
+    }
+    t.text = text.into();
+    tr.signature.clear();
+    Ok(true)
+}
+pub fn set_cache_breakpoint(
+    message: &mut pbv1::Message,
+    block: usize,
+    marker: &[u8],
+) -> Result<(), String> {
+    let Some(slot) = message.blocks.get_mut(block) else {
+        return Err("cache index out of range".into());
+    };
+    let Some(pbv1::request_block::Kind::CacheBreakpoint(c)) = slot.kind.as_mut() else {
+        return Err("block is not cache breakpoint".into());
+    };
+    json_object(marker, "marker_json")?;
+    c.marker_json = marker.to_vec();
+    Ok(())
+}
+pub fn move_cache_breakpoint(
+    message: &mut pbv1::Message,
+    from: usize,
+    to: usize,
+) -> Result<(), String> {
+    if from >= message.blocks.len() || to > message.blocks.len() {
+        return Err("cache breakpoint index out of range".into());
+    }
+    let b = message.blocks.remove(from);
+    if !matches!(b.kind, Some(pbv1::request_block::Kind::CacheBreakpoint(_))) {
+        return Err("block is not cache breakpoint".into());
+    }
+    let at = if to > from { to - 1 } else { to };
+    message.blocks.insert(at, b);
+    Ok(())
+}
 pub fn replace_response(response: pbv1::ChatResponse) -> Result<pbv1::HookResult, String> {
     validate_response(&response)?;
     Ok(pbv1::HookResult {
