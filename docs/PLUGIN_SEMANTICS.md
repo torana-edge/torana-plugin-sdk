@@ -115,7 +115,7 @@ forward only the current fragment.
 **State scoping rules:**
 - `env.meta_set` / `env.meta_get` — plugin-private AND request-scoped. Other
   plugins and other requests can never see these keys. Setting an empty
-  value deletes the key.
+  value remains present; `MetaGet` returns `found=true` and an empty value.
 - `env.meta_append` (permission `env.meta_set`) — append/read tool-call argument
   fragments by block index.
 - `env.cache_set` / `env.cache_get` — private to one plugin across requests

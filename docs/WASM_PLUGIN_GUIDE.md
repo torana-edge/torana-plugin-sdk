@@ -126,8 +126,9 @@ closed command vocabulary. Do not pass permission strings as command names.
 
 Absence and an empty stored value are different. The Go lookup helpers return
 `(value, found, error)` and Rust returns a typed optional value or refusal.
-`MetaSet(key, "")` deletes request metadata. State and cache accept an empty
-stored value and expose separate typed delete commands.
+Metadata, state, and cache all accept a present empty stored value.
+`MetaSet(key, "")` stores present-empty metadata; a later `MetaGet` returns
+`("", true, nil)`. State and cache expose separate typed delete commands.
 Versioned state updates use opaque, non-reusable versions through compare-and-set
 and compare-and-delete; use them for concurrent writers and do not invent
 versions. State scans are ordered cursor pages capped at 256 entries. Private

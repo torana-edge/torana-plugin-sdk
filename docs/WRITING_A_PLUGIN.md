@@ -238,8 +238,8 @@ prefer `failure_mode: "block"` when silent pass-through would be unsafe.
 
 Every capability must be requested in `plugin.json` **and** approved with the
 rest of the declared set against your exact bundle digest. A denied capability
-does not trap: core and extension host calls return a classified `*HostError`,
-so a plugin should degrade rather than assume.
+does not trap: Go helpers return an error wrapping a classified
+`HostCallRefusalError`, so a plugin should degrade rather than assume.
 
 The tables below explain common authoring choices; they are not a second
 capability catalog. The checked-in [`capabilities.json`](../capabilities.json)
@@ -522,9 +522,10 @@ explicitly at that call site, as a deliberate choice with a comment — it is no
 the default.
 
 **Absence is not emptiness.** A key that was never written returns a
-`NOT_FOUND` `HostError`; a state or cache key holding `""` returns success with
-an empty value. Metadata is the exception: `MetaSet(k, "")` deletes the key.
-Use `StateDelete` and `CacheDelete` for the durable stores.
+`NOT_FOUND` refusal; a metadata, state, or cache key holding `""` returns
+success with an empty value. `MetaSet(k, "")` therefore stores a present-empty
+value. Use `StateDelete` and `CacheDelete` for the durable stores; request
+metadata disappears with its request scope.
 Do not test `v == ""` to decide whether something was stored.
 
 Do **not** reach these through `sdk.HostCall` directly. The typed helpers
@@ -539,7 +540,7 @@ the feature, so they take an opaque body:
 
 ```go
 payload, _ := json.Marshal(map[string]any{"counter": "decisions", "delta": 1})
-v, herr, err := sdk.HostCallExtension("torana_plugin_counter", payload)
+v, err := sdk.HostCallExtension("torana_plugin_counter", payload)
 ```
 
 Pass the **canonical command token** (`torana_plugin_counter`), not the
@@ -547,10 +548,11 @@ permission string (`env.host_call.torana_plugin_counter`). `HostCallExtension`
 refuses `env.`-prefixed commands: core operations have typed arguments and go
 through `HostCall`, and routing them here would bypass the typed contract.
 
-The result envelope is *not* opaque — a refusal is a framed `HostError`
-(`PERMISSION_DENIED`, `NOT_CONFIGURED`, `UNAVAILABLE`, `INVALID_ARGUMENT`) and a
-Go `error` means the call could not be made. A `status` field only appears where
-status is real data, such as a pricing decision.
+The result envelope is *not* opaque. A framed `HostError` becomes a Go error
+wrapping `*sdk.HostCallRefusalError` with a stable code
+(`PERMISSION_DENIED`, `NOT_CONFIGURED`, `UNAVAILABLE`, `INVALID_ARGUMENT`).
+Protocol and transport failures also return errors. A `status` field only
+appears where status is real data, such as a pricing decision.
 
 Where the SDK already has a typed helper, use it instead of constructing a raw
 extension call. Platform resource helpers such as `sdk.ModelComplete`,
