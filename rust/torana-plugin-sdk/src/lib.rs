@@ -726,12 +726,9 @@ pub fn __validate_stream_event(bytes: &[u8]) -> Result<(), String> {
 }
 
 #[doc(hidden)]
-pub fn __validate_wire_message(mut bytes: &[u8], name: &str) -> Result<(), String> {
+pub fn __validate_wire_message(bytes: &[u8], name: &str) -> Result<(), String> {
     use prost::Message;
-    use prost_types::{
-        field_descriptor_proto::{Label, Type},
-        FileDescriptorSet,
-    };
+    use prost_types::FileDescriptorSet;
     static SET: std::sync::OnceLock<Result<FileDescriptorSet, String>> = std::sync::OnceLock::new();
     let set = SET
         .get_or_init(|| {
@@ -742,6 +739,21 @@ pub fn __validate_wire_message(mut bytes: &[u8], name: &str) -> Result<(), Strin
         })
         .as_ref()
         .map_err(Clone::clone)?;
+    validate_wire_message_with_set(bytes, name, set, 1)
+}
+
+fn validate_wire_message_with_set(
+    mut bytes: &[u8],
+    name: &str,
+    set: &prost_types::FileDescriptorSet,
+    depth: usize,
+) -> Result<(), String> {
+    use prost_types::field_descriptor_proto::{Label, Type};
+    // Keep validation bounded if a future schema introduces a recursive
+    // message edge. The root message counts as depth one.
+    if depth > 100 {
+        return Err("torana sdk: protobuf message nesting exceeds 100".into());
+    }
     let descriptor = set
         .file
         .iter()
@@ -806,7 +818,7 @@ pub fn __validate_wire_message(mut bytes: &[u8], name: &str) -> Result<(), Strin
                 let ty = field.type_name.as_deref().ok_or_else(|| {
                     format!("torana sdk: message field {number} in {name} has no type")
                 })?;
-                __validate_wire_message(&bytes[p..p + len], ty)?;
+                validate_wire_message_with_set(&bytes[p..p + len], ty, set, depth + 1)?;
             }
         }
         let consumed = skip_wire(bytes, wire)?;
@@ -2636,6 +2648,97 @@ mod tests {
         assert!(validate_packed_field(&[0; 7], 1).is_err());
         assert!(validate_packed_field(&[0; 4], 5).is_ok());
         assert!(validate_packed_field(&[0; 3], 5).is_err());
+    }
+
+    fn synthetic_wire_descriptor() -> prost_types::FileDescriptorSet {
+        use prost_types::{
+            field_descriptor_proto::{Label, Type},
+            DescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet,
+        };
+        let field =
+            |name: &str, number: i32, kind: Type, repeated: bool, type_name: Option<&str>| {
+                FieldDescriptorProto {
+                    name: Some(name.into()),
+                    number: Some(number),
+                    label: Some(if repeated {
+                        Label::Repeated
+                    } else {
+                        Label::Optional
+                    } as i32),
+                    r#type: Some(kind as i32),
+                    type_name: type_name.map(Into::into),
+                    ..Default::default()
+                }
+            };
+        FileDescriptorSet {
+            file: vec![FileDescriptorProto {
+                package: Some("test".into()),
+                syntax: Some("proto3".into()),
+                message_type: vec![
+                    DescriptorProto {
+                        name: Some("Packed".into()),
+                        field: vec![
+                            field("numbers", 1, Type::Int32, true, None),
+                            field("modes", 2, Type::Enum, true, Some(".test.Mode")),
+                        ],
+                        ..Default::default()
+                    },
+                    DescriptorProto {
+                        name: Some("Node".into()),
+                        field: vec![field("child", 1, Type::Message, false, Some(".test.Node"))],
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            }],
+        }
+    }
+
+    #[test]
+    fn descriptor_backed_scanner_accepts_packed_and_unpacked_numeric_fields() {
+        let set = synthetic_wire_descriptor();
+        for valid in [
+            &[0x08, 0x01, 0x08, 0xac, 0x02][..],
+            &[0x0a, 0x03, 0x01, 0xac, 0x02],
+            &[0x10, 0x00, 0x10, 0x01],
+            &[0x12, 0x02, 0x00, 0x01],
+        ] {
+            validate_wire_message_with_set(valid, ".test.Packed", &set, 1).unwrap();
+        }
+        for malformed in [&[0x0a, 0x01, 0x80][..], &[0x0d, 0, 0, 0, 0]] {
+            assert!(validate_wire_message_with_set(malformed, ".test.Packed", &set, 1).is_err());
+        }
+    }
+
+    fn nested_message(levels: usize) -> Vec<u8> {
+        let mut message = Vec::new();
+        for _ in 0..levels {
+            let mut wrapped = vec![0x0a];
+            let mut len = message.len() as u64;
+            loop {
+                let mut byte = (len & 0x7f) as u8;
+                len >>= 7;
+                if len != 0 {
+                    byte |= 0x80;
+                }
+                wrapped.push(byte);
+                if len == 0 {
+                    break;
+                }
+            }
+            wrapped.extend_from_slice(&message);
+            message = wrapped;
+        }
+        message
+    }
+
+    #[test]
+    fn descriptor_backed_scanner_bounds_message_depth_including_root() {
+        let set = synthetic_wire_descriptor();
+        validate_wire_message_with_set(&nested_message(99), ".test.Node", &set, 1).unwrap();
+        let error = validate_wire_message_with_set(&nested_message(100), ".test.Node", &set, 1)
+            .unwrap_err();
+        assert!(error.contains("nesting exceeds 100"), "{error}");
     }
 
     #[test]
