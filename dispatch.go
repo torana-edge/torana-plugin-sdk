@@ -19,7 +19,7 @@ func DispatchHook(in *pbv1.HookInput) ([]byte, error) {
 		return nil, fmt.Errorf("%s: validate input: %w", in.HookOf(), err)
 	}
 	hook := in.HookOf()
-	ctx := withRequestID(context.Background(), in.RequestId)
+	ctx := withExecution(withRequestID(context.Background(), in.RequestId), in.Execution)
 
 	var (
 		hr  *pbv1.HookResult

@@ -1,6 +1,7 @@
 package plugin_sdk
 
 import (
+	"fmt"
 	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
@@ -24,8 +25,16 @@ func BlockRequest(status int32, code, message string) error {
 
 // RespondRequest serves content without calling upstream.
 // Requires env.respond_request. If both block and respond are issued, block wins.
-func RespondRequest(content string) error {
-	return checkedHostCall("env.respond_request", &pbv1.RespondRequestArgs{Content: content})
+func RespondRequest(response *pbv1.SyntheticResponse) error {
+	if response == nil {
+		return fmt.Errorf("torana: respond request: response is nil")
+	}
+	return checkedHostCall("env.respond_request", &pbv1.RespondRequestArgs{Response: response})
+}
+
+// RespondText serves a simple text response without calling upstream.
+func RespondText(content string) error {
+	return RespondRequest(&pbv1.SyntheticResponse{Message: &pbv1.ResponseMessage{Blocks: []*pbv1.ResponseBlock{{Kind: &pbv1.ResponseBlock_Text{Text: &pbv1.ResponseTextBlock{Text: content}}}}}, FinishReason: "stop"})
 }
 
 // RouteRequest sends the request to a different provider and/or model.
@@ -47,8 +56,11 @@ func SetIdentity(identity string) error {
 func MustBlockRequest(status int32, code, message string) {
 	mustHostCall("env.block_request", &pbv1.BlockRequestArgs{Status: status, Code: code, Message: message})
 }
-func MustRespondRequest(content string) {
-	mustHostCall("env.respond_request", &pbv1.RespondRequestArgs{Content: content})
+func MustRespondRequest(response *pbv1.SyntheticResponse) {
+	mustHostCall("env.respond_request", &pbv1.RespondRequestArgs{Response: response})
+}
+func MustRespondText(content string) {
+	mustHostCall("env.respond_request", &pbv1.RespondRequestArgs{Response: &pbv1.SyntheticResponse{Message: &pbv1.ResponseMessage{Blocks: []*pbv1.ResponseBlock{{Kind: &pbv1.ResponseBlock_Text{Text: &pbv1.ResponseTextBlock{Text: content}}}}}, FinishReason: "stop"}})
 }
 func MustRouteRequest(provider, model string) {
 	mustHostCall("env.route_request", &pbv1.RouteRequestArgs{Provider: provider, Model: model})

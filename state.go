@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"google.golang.org/protobuf/proto"
 	"strconv"
 
 	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
@@ -50,12 +51,9 @@ var ErrStateUnavailable = errors.New("torana: durable plugin state is not availa
 // A key that was never written returns a NOT_FOUND HostError; a key holding an
 // empty string returns "" with no HostError. Branch with IsNotFound rather than
 // testing the value — the same rule as MetaGet and CacheGet.
-func StateGet(key string) (string, *pbv1.HostError, error) {
-	raw, herr, err := HostCall("env.state_get", &pbv1.StateGetArgs{Key: key})
-	if err != nil || herr != nil {
-		return "", herr, err
-	}
-	return string(raw), nil, nil
+func StateGet(key string) (string, bool, error) {
+	raw, found, err := checkedHostCallValue("env.state_get", &pbv1.StateGetArgs{Key: key})
+	return string(raw), found, err
 }
 
 // StateSet writes one of this plugin's durable keys.
@@ -111,15 +109,12 @@ func StateKeys() ([]string, *pbv1.HostError, error) {
 // a denied capability as "not stored yet" will quietly rewrite state it could
 // not read.
 func StateGetJSON(key string, v any) (found bool, err error) {
-	raw, herr, err := StateGet(key)
+	raw, found, err := StateGet(key)
 	if err != nil {
 		return false, err
 	}
-	if IsNotFound(herr) {
+	if !found {
 		return false, nil
-	}
-	if herr != nil {
-		return false, stateError(key, herr)
 	}
 	// No value-based absence check. A key stored with StateSet(key, "") is
 	// PRESENT, and reporting it as absent would contradict both the state
@@ -169,6 +164,58 @@ func StateSetJSON(key string, v any) error {
 		return err
 	}
 	return stateError(key, herr)
+}
+
+// StateGetVersioned reads a value together with its opaque concurrency version.
+func StateGetVersioned(key string) (*pbv1.StateValue, bool, error) {
+	raw, found, err := checkedHostCallValue("env.state_get_versioned", &pbv1.StateGetArgs{Key: key})
+	if err != nil || !found {
+		return nil, found, err
+	}
+	var value pbv1.StateValue
+	if err := proto.Unmarshal(raw, &value); err != nil {
+		return nil, false, fmt.Errorf("torana: decode versioned state: %w", err)
+	}
+	if err := value.Validate(); err != nil {
+		return nil, false, err
+	}
+	return &value, true, nil
+}
+
+func StateCompareAndSet(key, value string, expectedVersion *string) (*pbv1.StateMutationResult, error) {
+	raw, _, err := checkedHostCallValue("env.state_compare_and_set", &pbv1.StateCompareAndSetArgs{Key: key, Value: value, ExpectedVersion: expectedVersion})
+	if err != nil {
+		return nil, err
+	}
+	var result pbv1.StateMutationResult
+	if err := proto.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("torana: decode state mutation: %w", err)
+	}
+	return &result, result.Validate()
+}
+
+func StateCompareAndDelete(key, expectedVersion string) (*pbv1.StateMutationResult, error) {
+	raw, _, err := checkedHostCallValue("env.state_compare_and_delete", &pbv1.StateCompareAndDeleteArgs{Key: key, ExpectedVersion: expectedVersion})
+	if err != nil {
+		return nil, err
+	}
+	var result pbv1.StateMutationResult
+	if err := proto.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("torana: decode state mutation: %w", err)
+	}
+	return &result, result.Validate()
+}
+
+func StateScan(prefix, cursor string, limit uint32) (*pbv1.StateScanResult, error) {
+	raw, _, err := checkedHostCallValue("env.state_scan", &pbv1.StateScanArgs{Prefix: prefix, Cursor: cursor, Limit: limit})
+	if err != nil {
+		return nil, err
+	}
+	var result pbv1.StateScanResult
+	if err := proto.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("torana: decode state scan: %w", err)
+	}
+	return &result, result.Validate()
 }
 
 // Now returns the host's wall-clock time in Unix milliseconds.

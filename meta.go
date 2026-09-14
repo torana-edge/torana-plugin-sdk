@@ -42,12 +42,9 @@ func IsNotFound(herr *pbv1.HostError) bool {
 // A key that was never written returns a NOT_FOUND HostError. A key holding an
 // empty string returns "" with no HostError. Callers that treat absence as a
 // default should branch with IsNotFound rather than testing the value.
-func MetaGet(key string) (string, *pbv1.HostError, error) {
-	raw, herr, err := HostCall("env.meta_get", &pbv1.MetaGetArgs{Key: key})
-	if err != nil || herr != nil {
-		return "", herr, err
-	}
-	return string(raw), nil, nil
+func MetaGet(key string) (string, bool, error) {
+	raw, found, err := checkedHostCallValue("env.meta_get", &pbv1.MetaGetArgs{Key: key})
+	return string(raw), found, err
 }
 
 // MetaSet writes one of this plugin's request-scoped keys.
@@ -65,12 +62,9 @@ func MetaSet(key, value string) (*pbv1.HostError, error) {
 // A miss returns a NOT_FOUND HostError, not an empty value — the same
 // distinction as MetaGet, and the reason a cached empty string is usable at
 // all.
-func CacheGet(key string) (string, *pbv1.HostError, error) {
-	raw, herr, err := HostCall("env.cache_get", &pbv1.CacheGetArgs{Key: key})
-	if err != nil || herr != nil {
-		return "", herr, err
-	}
-	return string(raw), nil, nil
+func CacheGet(key string) (string, bool, error) {
+	raw, found, err := checkedHostCallValue("env.cache_get", &pbv1.CacheGetArgs{Key: key})
+	return string(raw), found, err
 }
 
 // CacheSet writes a key to this plugin's private cross-request cache.
@@ -83,12 +77,9 @@ func CacheSet(key, value string) (*pbv1.HostError, error) {
 // Most plugins should use CacheGet. Shared cache capabilities are appropriate
 // only when two separately approved plugins intentionally exchange data under
 // a documented key contract.
-func SharedCacheGet(key string) (string, *pbv1.HostError, error) {
-	raw, herr, err := HostCall("env.shared_cache_get", &pbv1.CacheGetArgs{Key: key})
-	if err != nil || herr != nil {
-		return "", herr, err
-	}
-	return string(raw), nil, nil
+func SharedCacheGet(key string) (string, bool, error) {
+	raw, found, err := checkedHostCallValue("env.shared_cache_get", &pbv1.CacheGetArgs{Key: key})
+	return string(raw), found, err
 }
 
 // SharedCacheSet writes a key to the explicit cross-plugin cache namespace.

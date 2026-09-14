@@ -152,6 +152,20 @@ func checkedHostCall(cmd string, args proto.Message) error {
 	return nil
 }
 
+func checkedHostCallValue(cmd string, args proto.Message) ([]byte, bool, error) {
+	value, herr, err := HostCall(cmd, args)
+	if err != nil {
+		return nil, false, err
+	}
+	if herr != nil {
+		if herr.Code == pbv1.ErrorCode_ERROR_CODE_NOT_FOUND {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("torana: %s: %w", cmd, classifiedRefusal(herr))
+	}
+	return value, true, nil
+}
+
 // mustHostCall is the explicitly named panic convenience for code that has no
 // useful recovery path. Checked public helpers use checkedHostCall instead.
 func mustHostCall(cmd string, args proto.Message) {

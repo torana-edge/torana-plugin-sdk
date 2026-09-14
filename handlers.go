@@ -10,6 +10,7 @@ import (
 // wasip1 trampoline and the non-WASM test build.
 
 type requestIDCtxKey struct{}
+type executionCtxKey struct{}
 
 // RequestID returns the host request id from ctx, or 0 when absent.
 func RequestID(ctx context.Context) uint64 {
@@ -19,6 +20,21 @@ func RequestID(ctx context.Context) uint64 {
 
 func withRequestID(ctx context.Context, id uint64) context.Context {
 	return context.WithValue(ctx, requestIDCtxKey{}, id)
+}
+
+// Execution returns host supplied execution metadata for the current hook.
+// The value is immutable for the lifetime of the callback; nil means the host
+// did not provide metadata.
+func Execution(ctx context.Context) *pbv1.ExecutionInfo {
+	value, _ := ctx.Value(executionCtxKey{}).(*pbv1.ExecutionInfo)
+	return value
+}
+
+func withExecution(ctx context.Context, info *pbv1.ExecutionInfo) context.Context {
+	if info == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, executionCtxKey{}, info)
 }
 
 var (
