@@ -1548,6 +1548,7 @@ pub fn set_identity(identity: &str) -> Result<(), HostCallError> {
     .map(|_| ())
 }
 
+#[derive(Clone)]
 pub struct AssembledToolCall {
     pub index: i32,
     pub id: String,
@@ -1638,6 +1639,88 @@ impl StreamAssembler {
             complete: None,
         })
     }
+}
+
+pub struct StreamHandler<F> {
+    assembler: StreamAssembler,
+    on_tool: F,
+}
+impl<F, E> StreamHandler<F>
+where
+    F: Fn(AssembledToolCall) -> Result<Option<String>, E>,
+    E: std::fmt::Display,
+{
+    pub fn new(on_tool: F) -> Self {
+        Self {
+            assembler: StreamAssembler::new(),
+            on_tool,
+        }
+    }
+    pub fn handle(&self, event: pbv1::StreamEvent) -> Result<Vec<pbv1::StreamEvent>, String> {
+        let fed = self.assembler.feed(event).map_err(|e| e.to_string())?;
+        if let Some(call) = fed.complete {
+            let original = if call.invocation_kind == pbv1::ToolInvocationKind::Freeform {
+                call.input_text.clone().unwrap_or_default()
+            } else {
+                call.arguments.clone()
+            };
+            let payload = (self.on_tool)(call.clone())
+                .map_err(|e| e.to_string())?
+                .unwrap_or(original.clone());
+            let sig = if payload == original {
+                call.signature
+            } else {
+                String::new()
+            };
+            let r = pbv1::ToolCallRef {
+                id: call.id,
+                name: call.name,
+                signature: sig,
+                invocation_kind: call.invocation_kind as i32,
+            };
+            let mut out = Vec::new();
+            out.push(pbv1::StreamEvent {
+                event: Some(pbv1::stream_event::Event::ContentBlockStart(
+                    pbv1::ContentBlockStart {
+                        index: call.index,
+                        block: Some(pbv1::content_block_start::Block::ToolCall(r)),
+                    },
+                )),
+            });
+            let mut d = pbv1::ToolCallDelta {
+                index: call.index,
+                ..Default::default()
+            };
+            if call.invocation_kind == pbv1::ToolInvocationKind::Freeform {
+                d.input_text_delta = Some(payload)
+            } else {
+                d.arguments_delta = payload
+            }
+            out.push(pbv1::StreamEvent {
+                event: Some(pbv1::stream_event::Event::ToolCallDelta(d)),
+            });
+            out.push(pbv1::StreamEvent {
+                event: Some(pbv1::stream_event::Event::ContentBlockStop(
+                    pbv1::ContentBlockStop { index: call.index },
+                )),
+            });
+            Ok(out)
+        } else if fed.suppress {
+            Ok(Vec::new())
+        } else {
+            Ok(fed.emit)
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+struct EmptyArgs {}
+pub fn plugin_config<T: serde::de::DeserializeOwned>() -> Result<T, HostCallError> {
+    let bytes = host_call("env.plugin_config", &EmptyArgs {})?;
+    let value = strict_json(&bytes)
+        .map_err(|e| HostCallError::Protocol(format!("plugin config is invalid JSON: {e}")))?;
+    serde_json::from_value(value)
+        .map_err(|e| HostCallError::Protocol(format!("plugin config has wrong shape: {e}")))
 }
 
 pub fn append_file(path: &str, data: &[u8]) -> Result<(), HostCallError> {
