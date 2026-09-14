@@ -235,6 +235,66 @@ fn json_array(raw: &[u8], field: &str) -> Result<(), String> {
     Ok(())
 }
 
+/* fn strict_json(raw: &[u8]) -> Result<serde_json::Value, serde_json::Error> {
+    use serde::de::{Deserialize, DeserializeSeed, MapAccess, SeqAccess, Visitor};
+    use std::{collections::HashSet, fmt};
+    struct V;
+    impl<'de> Visitor<'de> for V {
+        type Value = serde_json::Value;
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("JSON value")
+        }
+        fn visit_map<A: MapAccess<'de>>(self, mut a: A) -> Result<Self::Value, A::Error> {
+            let mut m = serde_json::Map::new();
+            let mut keys = HashSet::new();
+            while let Some(k) = a.next_key::<String>()? {
+                if !keys.insert(k.clone()) {
+                    return Err(serde::de::Error::custom("duplicate JSON key"));
+                }
+                m.insert(k, a.next_value_seed(V)?);
+            }
+            Ok(serde_json::Value::Object(m))
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut a: A) -> Result<Self::Value, A::Error> {
+            let mut v = Vec::new();
+            while let Some(x) = a.next_element_seed(V)? {
+                v.push(x);
+            }
+            Ok(serde_json::Value::Array(v))
+        }
+        fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Bool(v))
+        }
+        fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Number(v.into()))
+        }
+        fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Number(v.into()))
+        }
+        fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<Self::Value, E> {
+            serde_json::Number::from_f64(v)
+                .map(serde_json::Value::Number)
+                .ok_or_else(|| E::custom("non-finite number"))
+        }
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::String(v.into()))
+        }
+        fn visit_string<E: serde::de::Error>(self, v: String) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::String(v))
+        }
+        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Null)
+        }
+        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Null)
+        }
+    }
+    let mut d = serde_json::Deserializer::from_slice(raw);
+    let v = V.deserialize(&mut d)?;
+    d.end()?;
+    Ok(v)
+} */
+
 fn validate_chat_request(request: &pbv1::ChatRequest) -> Result<(), String> {
     if request.max_tokens.is_some_and(|v| v <= 0)
         || request.temperature.is_some_and(|v| !v.is_finite())
@@ -246,9 +306,61 @@ fn validate_chat_request(request: &pbv1::ChatRequest) -> Result<(), String> {
         if message.role.is_empty() {
             return Err(format!("torana sdk: message {i} role is required"));
         }
+        if message.blocks.is_empty() {
+            return Err(format!("torana sdk: message {i} requires blocks"));
+        }
         for block in &message.blocks {
-            if block.kind.is_none() {
+            let Some(kind) = block.kind.as_ref() else {
                 return Err(format!("torana sdk: message {i} contains an empty block"));
+            };
+            match kind {
+                pbv1::request_block::Kind::ToolUse(t) => {
+                    if t.id.is_empty() || t.name.is_empty() {
+                        return Err("torana sdk: tool use id/name required".into());
+                    }
+                    if !matches!(t.invocation_kind, x if x == pbv1::ToolInvocationKind::Function as i32 || x == pbv1::ToolInvocationKind::Freeform as i32)
+                    {
+                        return Err("torana sdk: invalid tool invocation kind".into());
+                    }
+                    match t.invocation_kind {
+                        x if x == pbv1::ToolInvocationKind::Function as i32 => {
+                            if t.arguments_json.is_empty() || t.input_text.is_some() {
+                                return Err("torana sdk: invalid function tool input".into());
+                            }
+                            json_object(&t.arguments_json, "arguments_json")?;
+                        }
+                        _ => {
+                            if t.input_text.is_none() || !t.arguments_json.is_empty() {
+                                return Err("torana sdk: invalid freeform tool input".into());
+                            }
+                        }
+                    }
+                    json_object(&t.part_metadata_json, "part_metadata_json")?;
+                }
+                pbv1::request_block::Kind::ToolResult(t) => {
+                    if t.tool_call_id.is_empty()
+                        || t.content.is_empty()
+                        || t.content.iter().any(|x| x.kind.is_none())
+                    {
+                        return Err("torana sdk: invalid tool result".into());
+                    }
+                }
+                pbv1::request_block::Kind::CacheBreakpoint(t) => {
+                    if t.marker_json.is_empty() {
+                        return Err("torana sdk: cache marker required".into());
+                    }
+                    json_object(&t.marker_json, "marker_json")?;
+                }
+                pbv1::request_block::Kind::Unknown(t) => {
+                    if t.kind.is_empty() || t.payload_json.is_empty() {
+                        return Err("torana sdk: unknown block requires kind and payload".into());
+                    }
+                    json_object(&t.payload_json, "payload_json")?;
+                }
+                pbv1::request_block::Kind::TrailingSignature(t) if t.signature.is_empty() => {
+                    return Err("torana sdk: trailing signature required".into())
+                }
+                _ => {}
             }
         }
     }
