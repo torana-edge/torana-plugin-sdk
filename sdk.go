@@ -49,6 +49,9 @@ func WriteResult(data []byte) uint64 {
 	return uint64(p)<<32 | uint64(len(data))
 }
 
+//go:wasmexport abi_version
+func abi_version() uint64 { return ABIVersion }
+
 //go:wasmexport supported_hooks
 func supported_hooks() uint32 {
 	return uint32(registeredHookBitmap())

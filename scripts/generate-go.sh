@@ -23,4 +23,7 @@ protoc --go_out=. --go_opt=module=github.com/torana-edge/torana-plugin-sdk proto
 # when the generated descriptor and Go API are byte-identical. Normalize that
 # non-semantic line so generation is reproducible across supported protoc
 # patch releases used by contributors and CI.
-sed -i -E 's#^//[[:space:]]+protoc[[:space:]]+v[^[:space:]]+$#// \tprotoc        normalized#' pb/v1/torana.pb.go
+generated=$(mktemp)
+trap 'rm -f "$generated"' EXIT
+sed -E 's#^//[[:space:]]+protoc[[:space:]]+v[^[:space:]]+$#// \tprotoc        normalized#' pb/v1/torana.pb.go > "$generated"
+cat "$generated" > pb/v1/torana.pb.go

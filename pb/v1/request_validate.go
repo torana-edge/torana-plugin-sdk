@@ -104,6 +104,7 @@ type jsonFieldRule struct {
 // TestReplacementFieldInventory walks the descriptors against the same
 // names, so an additive v1 field fails until a rule is decided here.
 var requestJSONFields = map[string]jsonFieldRule{
+	"torana.v1.OutputFormat.schema_json":              {shape: "object"},
 	"torana.v1.ChatRequest.torana_meta_json":          {shape: "object"},
 	"torana.v1.ChatRequest.provider_extensions_json":  {shape: "object"},
 	"torana.v1.ChatRequest.safety_settings_json":      {shape: "array"},
@@ -146,6 +147,10 @@ var requestJSONFields = map[string]jsonFieldRule{
 //     content, thinking, signatures, description) carry no universal
 //     constraint.
 var requestScalarRules = map[string]string{
+	"torana.v1.ChatRequest.output_format": "message-optional",
+	"torana.v1.OutputFormat.mode":         "enum-output-format",
+	"torana.v1.OutputFormat.name":         "text-utf8",
+	"torana.v1.OutputFormat.strict":       "bool-optional",
 	// ChatRequest
 	"torana.v1.ChatRequest.model":          "text-utf8",
 	"torana.v1.ChatRequest.messages":       "repeated-message-nonnil",
@@ -337,6 +342,11 @@ func validateJSONField(raw []byte, field string, rule jsonFieldRule) error {
 // contract consumed by HookResult.ValidateFor and by the host's
 // handwritten-guest/unconditional verifier.
 func (x *ChatRequest) ValidateReplacement() error {
+	if x != nil && x.OutputFormat != nil {
+		if err := x.OutputFormat.Validate(); err != nil {
+			return err
+		}
+	}
 	if x == nil {
 		return fmt.Errorf("chat request replacement is nil")
 	}

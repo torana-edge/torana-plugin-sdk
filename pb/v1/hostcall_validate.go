@@ -106,12 +106,12 @@ func (x *BlockRequestArgs) Validate() error {
 }
 
 // Validate reports whether RespondRequestArgs can be acted on.
-// Empty content is allowed.
+// The synthetic response must be structurally valid.
 func (x *RespondRequestArgs) Validate() error {
 	if x == nil {
 		return fmt.Errorf("respond request args are nil")
 	}
-	return nil
+	return x.Response.Validate()
 }
 
 // Validate reports whether RouteRequestArgs names a route change.
@@ -196,6 +196,9 @@ func (x *CacheSetArgs) Validate() error {
 	}
 	if x.Key == "" {
 		return fmt.Errorf("cache set args have no key")
+	}
+	if x.TtlMs != nil && (*x.TtlMs == 0 || *x.TtlMs > math.MaxInt64/1000000) {
+		return fmt.Errorf("cache TTL must be a positive representable duration")
 	}
 	return nil
 }
@@ -383,19 +386,9 @@ func (x *ModelCompleteArgs) Validate() error {
 	if len(x.Messages) == 0 {
 		return fmt.Errorf("model completion requires at least one message")
 	}
-	for i, message := range x.Messages {
-		if message == nil {
-			return fmt.Errorf("model message %d is nil", i)
-		}
-		if len(message.ProtoReflect().GetUnknown()) != 0 {
-			return fmt.Errorf("model message %d contains unknown fields", i)
-		}
-		if message.Role == "" || !utf8.ValidString(message.Role) {
-			return fmt.Errorf("model message %d role must be non-empty UTF-8", i)
-		}
-		if !utf8.ValidString(message.Content) {
-			return fmt.Errorf("model message %d content must be UTF-8", i)
-		}
+	request := &ChatRequest{Messages: x.Messages, Tools: x.Tools, OutputFormat: x.OutputFormat}
+	if err := request.ValidateReplacement(); err != nil {
+		return fmt.Errorf("model request: %w", err)
 	}
 	if x.MaxTokens != nil && *x.MaxTokens == 0 {
 		return fmt.Errorf("model completion max_tokens must be positive when present")
@@ -413,8 +406,14 @@ func (x *ModelCompleteResult) Validate() error {
 	if len(x.ProtoReflect().GetUnknown()) != 0 {
 		return fmt.Errorf("model completion result contains unknown fields")
 	}
-	if !utf8.ValidString(x.Content) || !utf8.ValidString(x.ReportedModel) || !utf8.ValidString(x.FinishReason) {
+	if !utf8.ValidString(x.ReportedModel) || !utf8.ValidString(x.FinishReason) {
 		return fmt.Errorf("model completion result strings must be UTF-8")
+	}
+	if x.Message == nil {
+		return fmt.Errorf("model completion message is missing")
+	}
+	if err := x.Message.Validate(); err != nil {
+		return err
 	}
 	if x.Usage != nil && (x.Usage.InputTokens < 0 || x.Usage.OutputTokens < 0 ||
 		x.Usage.CacheReadTokens < 0 || x.Usage.CacheWriteTokens < 0) {

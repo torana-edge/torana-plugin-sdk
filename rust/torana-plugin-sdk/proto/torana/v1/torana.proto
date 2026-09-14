@@ -325,6 +325,8 @@ message ChatRequest {
   // Verdicts are host calls in the ABI, so this is host-owned: a plugin changing it
   // is a protocol violation, not a grantable edit.
   bytes torana_meta_json = 11;
+  // Portable output constraint. Unsupported provider modes are refused.
+  OutputFormat output_format = 12;
 }
 
 // One ordered, writable element of a non-streaming assistant response.
@@ -725,9 +727,8 @@ message AfterResponse {
 // is; there is no separate hook field to contradict it. The guest receives it
 // via run_hook(ptr, size) -> u64 — one export, no request_id WASM argument.
 message HookInput {
-  // Minor version of the ABI contract the host is speaking. Additive changes
-  // bump this; a plugin may use it to detect fields it can rely on.
-  uint32 abi_minor = 1;
+  // Exact unreleased ABI v1 contract revision, also checked at module load.
+  uint32 contract_revision = 1;
   // Host-assigned execution-scope id. This is the only place the id appears —
   // it is not also a WASM argument.
   //
@@ -743,6 +744,9 @@ message HookInput {
   // content and identity remain unavailable: there is no caller. Authors must
   // not interpret a tick's request_id as a caller request.
   uint64 request_id = 2;
+
+  // Host-owned execution information; availability is independent of grants.
+  ExecutionInfo execution = 9;
 
   oneof payload {
     ChatRequest chat_request = 4;
@@ -868,8 +872,8 @@ message BlockRequestArgs {
 // RespondRequestArgs is the argument body for env.respond_request.
 // Serves content without calling upstream.
 message RespondRequestArgs {
-  // Assistant content to return. Empty is allowed (an empty completion).
-  string content = 1;
+  // Complete host-local response. Observed upstream facts are not writable.
+  SyntheticResponse response = 1;
 }
 
 // RouteRequestArgs is the argument body for env.route_request.
@@ -996,6 +1000,8 @@ message CacheSetArgs {
   string key = 1;
   // Value to store. Empty is a legitimate value.
   string value = 2;
+  // Absent uses host default; present must be positive and within its ceiling.
+  optional uint64 ttl_ms = 3;
 }
 
 // MetaAppendArgs is the argument body for host command env.meta_append.
@@ -1102,27 +1108,24 @@ message OutboundHTTPResponse {
 // ModelMessage is the provider-neutral prompt surface for a plugin-owned
 // model call. Provider routing, model selection, credentials, and URL are not
 // present: those belong to the operator binding for ModelCompleteArgs.service.
-message ModelMessage {
-  string role = 1;
-  string content = 2;
-}
-
 // ModelCompleteArgs invokes one operator-bound model-service slot. It is a
 // separate inference path, not a recursive trip through the user-facing
 // plugin pipeline. The host applies the binding's provider, model, credential,
 // timeout, and token budgets and may clamp the requested max_tokens.
 message ModelCompleteArgs {
   string service = 1;
-  repeated ModelMessage messages = 2;
+  repeated Message messages = 2;
   optional uint32 max_tokens = 3;
   optional double temperature = 4;
+  repeated ToolDef tools = 5;
+  OutputFormat output_format = 6;
 }
 
 // ModelCompleteResult is the provider-neutral completion returned in the
 // HostCallResult value arm. reported_model is empty when the provider does not
 // identify the answering model; the host never guesses aliases.
 message ModelCompleteResult {
-  string content = 1;
+  ResponseMessage message = 1;
   string reported_model = 2;
   string finish_reason = 3;
   Usage usage = 4;
@@ -1174,3 +1177,89 @@ message PromptCachePolicy {
   // plugins that actively warm a cache must decline rather than guess.
   optional uint32 warm_interval_seconds = 5;
 }
+
+// Portable structured-output controls. TEXT carries no name/schema/strictness;
+// JSON_OBJECT carries no schema/name; JSON_SCHEMA requires a named object schema.
+message OutputFormat {
+  enum Mode { TEXT = 0; JSON_OBJECT = 1; JSON_SCHEMA = 2; }
+  Mode mode = 1;
+  string name = 2;
+  bytes schema_json = 3;
+  optional bool strict = 4;
+}
+
+// A plugin-authored completion, not an observed provider response. Host supplies
+// model, response ID, timestamps and accounting; signatures cannot be supplied.
+message SyntheticResponse {
+  ResponseMessage message = 1;
+  // Canonical stop or tool_calls. Must agree with the message's tool-call arms.
+  string finish_reason = 2;
+}
+
+// Snapshot for this invocation. Empty optional identities mean unavailable.
+// No secrets or credential material is exposed here.
+message ExecutionInfo {
+  string provider = 1;
+  string model = 2;
+  optional string conversation_id = 3;
+  bool synthetic_response = 4;
+  optional int64 deadline_unix_ms = 5;
+  uint64 max_memory_bytes = 6;
+  uint64 max_host_response_bytes = 7;
+  uint64 max_stream_buffer_bytes = 8;
+}
+
+message ResourceInfoArgs {
+  // credential, file, http, model, pricing, or cache_policy.
+  string kind = 1;
+  string name = 2;
+}
+message ResourceInfo {
+  string kind = 1;
+  string name = 2;
+  bool available = 3;
+  // Effective limits use explicit units; no destinations or secrets are returned.
+  optional uint64 timeout_ms = 4;
+  optional uint64 max_input_bytes = 5;
+  optional uint64 max_output_bytes = 6;
+  optional uint64 max_tokens = 7;
+  optional uint64 max_calls_per_minute = 8;
+  optional uint64 max_tokens_per_hour = 9;
+  repeated string operations = 10;
+}
+
+message StateValue {
+  string value = 1;
+  // Non-empty opaque persisted version, never reused after delete/recreate.
+  string version = 2;
+}
+message StateCompareAndSetArgs {
+  string key = 1;
+  string value = 2;
+  // Absent means create only if absent; present must be non-empty.
+  optional string expected_version = 3;
+}
+message StateCompareAndDeleteArgs {
+  string key = 1;
+  string expected_version = 2;
+}
+message StateMutationResult {
+  // Conflicts are ordinary outcomes, not host refusals. No implicit retries.
+  bool applied = 1;
+  // New version on successful set, absent on deletion or conflict.
+  optional string version = 2;
+}
+message StateScanArgs {
+  string prefix = 1;
+  // Opaque cursor tied to this namespace and prefix; empty begins a scan.
+  string cursor = 2;
+  // 1..256. Pages also obey the host response-byte budget.
+  uint32 limit = 3;
+}
+message StateEntry { string key = 1; StateValue value = 2; }
+message StateScanResult {
+  repeated StateEntry entries = 1;
+  // Empty means the scan reached the end. Not a snapshot across pages.
+  string next_cursor = 2;
+}
+message CacheDeleteArgs { string key = 1; }
