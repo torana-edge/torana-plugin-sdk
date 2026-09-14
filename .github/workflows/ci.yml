@@ -35,6 +35,8 @@ jobs:
       - run: buf lint
       - name: GitHub Actions use immutable commits
         run: ./scripts/check-actions-pinned.sh
+      - name: Release source must have landed on the default branch
+        run: bash ./scripts/test-release-source.sh
       - if: github.event_name == 'pull_request'
         name: ABI compatibility
         run: ./scripts/check-abi-breaking.sh

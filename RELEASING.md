@@ -49,7 +49,8 @@ not merely two crates that happen to compile.
    Do not grant owner-management, yank, or unrestricted legacy access. Use an
    expiration date and rotate the secret before it expires. Never put a token
    in a command argument, release note, issue, or pull request.
-4. **Tag and push.**
+4. **Tag and push a commit already on the default branch.** Both publishing
+   workflows reject source commits that are not ancestors of its current tip.
    ```bash
    git tag -a vX.Y.Z -m "…"
    git push origin vX.Y.Z
@@ -83,15 +84,23 @@ crates.io publication.
    ```
 
    The recovery workflow requires an existing published `vX.Y.Z` GitHub
-   release, resolves its tag to an immutable commit, checks the crate version,
-   runs Rust tests and the independent packaged-consumer check, and publishes
-   only the Rust crate. It does not modify a tag, GitHub release, or its assets.
+   release, resolves its tag to an immutable commit, and checks that the commit
+   is reachable from the repository's default branch before running any of its
+   code. It then checks the crate version, runs Rust tests and the independent
+   packaged-consumer check, and publishes only the Rust crate. It does not
+   modify a tag, GitHub release, or its assets.
 4. Verify the version on crates.io and its docs.rs build. A green GitHub release
    job alone is not evidence that every distribution channel is available.
 
 Token scope details: [crates.io scope definitions](https://rust-lang.github.io/rfcs/2947-crates-io-token-scopes.html).
 Manual dispatch requires the workflow on the default branch:
 [GitHub workflow documentation](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
+
+The registry token is available only to the final `cargo publish` step. Cargo
+rebuilds the packaged crate for verification in that step, so its build scripts
+and dependencies inherit the token then; this verification remains enabled.
+The ancestry check relies on the default branch's review protections. It does
+not add a separate human approval gate for each publication.
 
 ## Then the downstream repos
 

@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 # Share the tag release's concurrency group; never publish the same version
 # concurrently with the normal release workflow.
 concurrency:
@@ -41,6 +45,17 @@ jobs:
           test "$published" = "$SDK_TAG"
           revision=$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$SDK_TAG" --jq .sha)
           [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+
+          # Compare immutable commits before any release code runs. The release
+          # must already have landed on the repository's default branch.
+          default_branch=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)
+          default_revision=$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/heads/$default_branch" --jq .sha)
+          [[ "$default_revision" =~ ^[0-9a-f]{40}$ ]]
+          merge_base=$(gh api "repos/$GITHUB_REPOSITORY/compare/$revision...$default_revision" --jq .merge_base_commit.sha)
+          if [ "$merge_base" != "$revision" ]; then
+            echo '::error::The release commit must be reachable from the default branch before publication.'
+            exit 1
+          fi
           echo "revision=$revision" >> "$GITHUB_OUTPUT"
 
   publish:

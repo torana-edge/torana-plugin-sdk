@@ -9,6 +9,10 @@ permissions:
   id-token: write
   attestations: write
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: sdk-release-${{ github.ref }}
   cancel-in-progress: false
@@ -18,7 +22,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      - name: Require release source on the default branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SDK_REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$SDK_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          default_branch=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)
+          default_revision=$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/heads/$default_branch" --jq .sha)
+          [[ "$default_revision" =~ ^[0-9a-f]{40}$ ]]
+          merge_base=$(gh api "repos/$GITHUB_REPOSITORY/compare/$SDK_REVISION...$default_revision" --jq .merge_base_commit.sha)
+          if [ "$merge_base" != "$SDK_REVISION" ]; then
+            echo '::error::The release commit must be reachable from the default branch before publication.'
+            exit 1
+          fi
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: GitHub Actions use immutable commits
         run: ./scripts/check-actions-pinned.sh
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
