@@ -203,3 +203,93 @@ fn shared_wire_vectors_match_rust_validation() {
         assert_eq!(actual, expected, "{name}");
     }
 }
+
+#[test]
+fn stream_assembler_assembles_function_and_freeform_calls() {
+    use std::sync::{Arc, Mutex};
+    let buffers = Arc::new(Mutex::new(std::collections::HashMap::<i32, Vec<u8>>::new()));
+    let state = buffers.clone();
+    let _guard = torana_plugin_sdk::install_native_host(move |cmd, args| {
+        if cmd != "env.meta_append" {
+            return Ok(pbv1::HostCallResult {
+                result: Some(pbv1::host_call_result::Result::Value(vec![])),
+            }
+            .encode_to_vec());
+        }
+        let a = pbv1::MetaAppendArgs::decode(args).unwrap();
+        let mut m = state.lock().unwrap();
+        let v = m.entry(a.block_index).or_default();
+        if a.fragment.is_empty() {
+            return Ok(pbv1::HostCallResult {
+                result: Some(pbv1::host_call_result::Result::Value(v.clone())),
+            }
+            .encode_to_vec());
+        }
+        v.extend(a.fragment);
+        Ok(pbv1::HostCallResult {
+            result: Some(pbv1::host_call_result::Result::Value(vec![])),
+        }
+        .encode_to_vec())
+    });
+    let asm = torana_plugin_sdk::StreamAssembler::new();
+    let ref0 = pbv1::ToolCallRef {
+        id: "f".into(),
+        name: "fn".into(),
+        invocation_kind: pbv1::ToolInvocationKind::Function as i32,
+        ..Default::default()
+    };
+    let start = pbv1::StreamEvent {
+        event: Some(pbv1::stream_event::Event::ContentBlockStart(
+            pbv1::ContentBlockStart {
+                index: 0,
+                block: Some(pbv1::content_block_start::Block::ToolCall(ref0)),
+            },
+        )),
+    };
+    assert!(asm.feed(start).unwrap().suppress);
+    let d = pbv1::StreamEvent {
+        event: Some(pbv1::stream_event::Event::ToolCallDelta(
+            pbv1::ToolCallDelta {
+                index: 0,
+                arguments_delta: "{}".into(),
+                ..Default::default()
+            },
+        )),
+    };
+    assert!(asm.feed(d).unwrap().suppress);
+    let stop = pbv1::StreamEvent {
+        event: Some(pbv1::stream_event::Event::ContentBlockStop(
+            pbv1::ContentBlockStop { index: 0 },
+        )),
+    };
+    let out = asm.feed(stop).unwrap();
+    assert_eq!(out.complete.unwrap().arguments, "{}");
+}
+
+#[test]
+fn stream_assembler_propagates_meta_refusal() {
+    let _guard = torana_plugin_sdk::install_native_host(|_, _| {
+        Ok(pbv1::HostCallResult {
+            result: Some(pbv1::host_call_result::Result::Error(pbv1::HostError {
+                code: pbv1::ErrorCode::PermissionDenied as i32,
+                message: "denied".into(),
+            })),
+        }
+        .encode_to_vec())
+    });
+    let asm = torana_plugin_sdk::StreamAssembler::new();
+    let ev = pbv1::StreamEvent {
+        event: Some(pbv1::stream_event::Event::ContentBlockStart(
+            pbv1::ContentBlockStart {
+                index: 1,
+                block: Some(pbv1::content_block_start::Block::ToolCall(
+                    Default::default(),
+                )),
+            },
+        )),
+    };
+    assert!(matches!(
+        asm.feed(ev),
+        Err(torana_plugin_sdk::HostCallError::Refused(_))
+    ));
+}
