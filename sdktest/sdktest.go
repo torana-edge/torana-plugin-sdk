@@ -60,13 +60,13 @@ import (
 // LogEntry is one captured sdk.Log call.
 type LogEntry struct {
 	Message string
-	Level   int32
+	Level   sdk.LogLevel
 }
 
 // MetricEntry is one captured sdk.EmitMetric call.
 type MetricEntry struct {
 	Name   string
-	Type   int32
+	Type   sdk.MetricKind
 	Value  float64
 	Labels map[string]string
 }
@@ -172,7 +172,7 @@ func New(t testing.TB) *Harness {
 
 	h.host = &sdk.TestHost{
 		HostCall: h.hostCallBytes,
-		Log: func(msg string, level int32) {
+		Log: func(msg string, level sdk.LogLevel) {
 			h.mu.Lock()
 			defer h.mu.Unlock()
 			if h.permissions != nil && !h.permissions["env.log"] {
@@ -180,7 +180,7 @@ func New(t testing.TB) *Harness {
 			}
 			h.logs = append(h.logs, LogEntry{Message: msg, Level: level})
 		},
-		Metric: func(name string, typ int32, value float64, labels map[string]string) {
+		Metric: func(name string, typ sdk.MetricKind, value float64, labels map[string]string) {
 			h.mu.Lock()
 			defer h.mu.Unlock()
 			if h.permissions != nil && !h.permissions["env.emit_metric"] {

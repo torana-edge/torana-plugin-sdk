@@ -1033,8 +1033,14 @@ macro_rules! export_plugin_v1 {
     };
 }
 
-pub const LOG_DEBUG: i32 = 0;
-pub const LOG_INFO: i32 = 1;
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LogLevel {
+    Debug = 0,
+    Info = 1,
+}
+pub const LOG_DEBUG: LogLevel = LogLevel::Debug;
+pub const LOG_INFO: LogLevel = LogLevel::Info;
 
 #[link(wasm_import_module = "env")]
 #[cfg(target_arch = "wasm32")]
@@ -1055,16 +1061,17 @@ extern "C" {
 }
 
 /// Logs a bounded diagnostic string when the host granted `env.log`.
-pub fn log(message: &str, level: i32) {
+/// Delivery is best effort: the void ABI import cannot report refusal.
+pub fn log(message: &str, level: LogLevel) {
     if message.is_empty() {
         return;
     }
     #[cfg(target_arch = "wasm32")]
     unsafe {
-        host_log(level, message.as_ptr() as u32, message.len() as u32)
+        host_log(level as i32, message.as_ptr() as u32, message.len() as u32)
     }
     #[cfg(not(target_arch = "wasm32"))]
-    let _ = level;
+    let _ = level as i32;
 }
 
 // Allocation goes through `std::alloc` with an explicit `Layout`, which is the
@@ -1191,16 +1198,24 @@ fn pack(ptr: u32, len: u32) -> u64 {
     ((ptr as u64) << 32) | len as u64
 }
 
-pub const METRIC_COUNTER: i32 = 0;
-pub const METRIC_HISTOGRAM: i32 = 1;
-pub const METRIC_GAUGE: i32 = 2;
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MetricKind {
+    Counter = 0,
+    Histogram = 1,
+    Gauge = 2,
+}
+pub const METRIC_COUNTER: MetricKind = MetricKind::Counter;
+pub const METRIC_HISTOGRAM: MetricKind = MetricKind::Histogram;
+pub const METRIC_GAUGE: MetricKind = MetricKind::Gauge;
 
-pub fn emit_metric(name: &str, kind: i32, value: f64, labels: &serde_json::Value) {
+/// Emits a metric on a best-effort void host import.
+pub fn emit_metric(name: &str, kind: MetricKind, value: f64, labels: &serde_json::Value) {
     let labels = labels.to_string();
     #[cfg(target_arch = "wasm32")]
     unsafe {
         host_emit_metric(
-            kind,
+            kind as i32,
             name.as_ptr() as u32,
             name.len() as u32,
             value,
@@ -1211,6 +1226,12 @@ pub fn emit_metric(name: &str, kind: i32, value: f64, labels: &serde_json::Value
     #[cfg(not(target_arch = "wasm32"))]
     let _ = (name, kind, value, labels);
 }
+
+pub fn debug(message: &str) { log(message, LogLevel::Debug); }
+pub fn info(message: &str) { log(message, LogLevel::Info); }
+pub fn counter(name: &str, value: f64, labels: &serde_json::Value) { emit_metric(name, MetricKind::Counter, value, labels); }
+pub fn histogram(name: &str, value: f64, labels: &serde_json::Value) { emit_metric(name, MetricKind::Histogram, value, labels); }
+pub fn gauge(name: &str, value: f64, labels: &serde_json::Value) { emit_metric(name, MetricKind::Gauge, value, labels); }
 
 pub fn decode_host_call_result(bytes: &[u8]) -> Result<Vec<u8>, HostCallError> {
     use pbv1::host_call_result::Result as ResultArm;

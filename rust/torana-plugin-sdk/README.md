@@ -4,6 +4,11 @@ Rust bindings, safe memory plumbing, typed host-call results, and a single-hook
 dispatcher for Torana's WASM Plugin ABI v1. The crate requires Rust 1.85 or
 newer and `protoc`.
 
+Observability uses typed `LogLevel` and `MetricKind` values with the
+`debug`, `info`, `counter`, `histogram`, and `gauge` helpers. These map to the
+ABI v1 `env.log` and `env.emit_metric` imports and are best effort: the void
+imports cannot acknowledge delivery or report a missing permission.
+
 Add the crate and build for WASI Preview 1:
 
 ```toml

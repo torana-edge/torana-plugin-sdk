@@ -53,7 +53,7 @@ func TestCompiledRustLoggerCallsHost(t *testing.T) {
 	if len(logs) != 1 {
 		t.Fatalf("Rust logger emitted %d log calls, want 1", len(logs))
 	}
-	if logs[0].level != plugin_sdk.LogLevelInfo || logs[0].message != "received request for conformance" {
+	if logs[0].level != int32(plugin_sdk.LogLevelInfo) || logs[0].message != "received request for conformance" {
 		t.Fatalf("Rust logger call = level %d message %q", logs[0].level, logs[0].message)
 	}
 }
