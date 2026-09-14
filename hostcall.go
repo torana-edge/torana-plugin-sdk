@@ -140,12 +140,9 @@ func dispatchHostCall(cmd string, argBytes []byte) ([]byte, *pbv1.HostError, err
 	if err := rejectDuplicateHostCallResultArms(raw); err != nil {
 		return nil, nil, fmt.Errorf("torana: host-call result: %w", err)
 	}
-	var res pbv1.HostCallResult
-	if err := proto.Unmarshal(raw, &res); err != nil {
+	res, err := pbv1.DecodeHostCallResult(raw)
+	if err != nil {
 		return nil, nil, fmt.Errorf("torana: decode host-call result: %w", err)
-	}
-	if err := res.Validate(); err != nil {
-		return nil, nil, fmt.Errorf("torana: host-call result: %w", err)
 	}
 	switch r := res.Result.(type) {
 	case *pbv1.HostCallResult_Value:

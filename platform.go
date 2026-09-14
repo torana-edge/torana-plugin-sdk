@@ -55,6 +55,9 @@ func HTTPRequest(request *pbv1.OutboundHTTPRequestArgs) (*pbv1.OutboundHTTPRespo
 		return nil, err
 	}
 	var response pbv1.OutboundHTTPResponse
+	if err := pbv1.ValidateWire(value, response.ProtoReflect().Descriptor()); err != nil {
+		return nil, fmt.Errorf("torana: outbound http response wire: %w", err)
+	}
 	if err := proto.Unmarshal(value, &response); err != nil {
 		return nil, fmt.Errorf("torana: decode outbound http response: %w", err)
 	}
@@ -73,6 +76,9 @@ func ModelComplete(request *pbv1.ModelCompleteArgs) (*pbv1.ModelCompleteResult, 
 		return nil, err
 	}
 	var result pbv1.ModelCompleteResult
+	if err := pbv1.ValidateWire(value, result.ProtoReflect().Descriptor()); err != nil {
+		return nil, fmt.Errorf("torana: model completion wire: %w", err)
+	}
 	if err := proto.Unmarshal(value, &result); err != nil {
 		return nil, fmt.Errorf("torana: decode model completion: %w", err)
 	}
@@ -108,6 +114,9 @@ func GetModelPricing(resource string) (*pbv1.ModelPricing, error) {
 		return nil, err
 	}
 	var pricing pbv1.ModelPricing
+	if err := pbv1.ValidateWire(value, pricing.ProtoReflect().Descriptor()); err != nil {
+		return nil, fmt.Errorf("torana: model pricing wire: %w", err)
+	}
 	if err := proto.Unmarshal(value, &pricing); err != nil {
 		return nil, fmt.Errorf("torana: decode model pricing: %w", err)
 	}
@@ -130,6 +139,9 @@ func GetPromptCachePolicy(resource string) (*pbv1.PromptCachePolicy, error) {
 		return nil, err
 	}
 	var policy pbv1.PromptCachePolicy
+	if err := pbv1.ValidateWire(value, policy.ProtoReflect().Descriptor()); err != nil {
+		return nil, fmt.Errorf("torana: prompt cache policy wire: %w", err)
+	}
 	if err := proto.Unmarshal(value, &policy); err != nil {
 		return nil, fmt.Errorf("torana: decode prompt cache policy: %w", err)
 	}
@@ -149,6 +161,9 @@ func GetResourceInfo(kind, name string) (*pbv1.ResourceInfo, error) {
 		return nil, err
 	}
 	var info pbv1.ResourceInfo
+	if err := pbv1.ValidateWire(raw, info.ProtoReflect().Descriptor()); err != nil {
+		return nil, fmt.Errorf("torana: resource info wire: %w", err)
+	}
 	if err := proto.Unmarshal(raw, &info); err != nil {
 		return nil, fmt.Errorf("torana: decode resource info: %w", err)
 	}

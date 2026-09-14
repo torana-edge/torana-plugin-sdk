@@ -241,9 +241,9 @@ func DecodeRequest(encoded string) (*pbv1.ChatRequest, error) {
 	if err != nil {
 		return nil, fmt.Errorf("torana: decode request: %w", err)
 	}
-	var req pbv1.ChatRequest
-	if err := proto.Unmarshal(raw, &req); err != nil {
+	req, err := pbv1.DecodeChatRequest(raw)
+	if err != nil {
 		return nil, fmt.Errorf("torana: decode request: %w", err)
 	}
-	return &req, nil
+	return req, nil
 }

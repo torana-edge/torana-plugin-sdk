@@ -60,11 +60,11 @@ func supported_hooks() uint32 {
 //go:wasmexport run_hook
 func run_hook(ptr, size uint32) uint64 {
 	inputBytes := ReadBytes(ptr, size)
-	var in pbv1.HookInput
-	if err := proto.Unmarshal(inputBytes, &in); err != nil {
+	in, err := pbv1.DecodeHookInput(inputBytes)
+	if err != nil {
 		panic("torana sdk: decode run_hook: " + err.Error())
 	}
-	outBytes, err := DispatchHook(&in)
+	outBytes, err := DispatchHook(in)
 	if err != nil {
 		panic("torana sdk: run_hook: " + err.Error())
 	}

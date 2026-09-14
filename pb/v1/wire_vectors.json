@@ -1,0 +1,8 @@
+[
+  {"name":"host_call_result_value","message_type":"torana.v1.HostCallResult","wire_hex":"0a026f6b","valid":true},
+  {"name":"host_call_result_duplicate_arms","message_type":"torana.v1.HostCallResult","wire_hex":"0a026f6b12020801","valid":false},
+  {"name":"hook_result_unknown_field","message_type":"torana.v1.HookResult","wire_hex":"a00601","valid":false},
+  {"name":"hook_input_duplicate_payload","message_type":"torana.v1.HookInput","wire_hex":"2a020a002a020a00","valid":false},
+  {"name":"state_mutation_applied","message_type":"torana.v1.StateMutationResult","wire_hex":"0801120131","valid":true},
+  {"name":"output_format_unknown_enum","message_type":"torana.v1.OutputFormat","wire_hex":"08ff01","valid":false}
+]

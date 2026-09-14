@@ -190,6 +190,9 @@ func StateGetVersioned(key string) (*pbv1.StateValue, bool, error) {
 		return nil, found, err
 	}
 	var value pbv1.StateValue
+	if err := pbv1.ValidateWire(raw, value.ProtoReflect().Descriptor()); err != nil {
+		return nil, false, fmt.Errorf("torana: versioned state wire: %w", err)
+	}
 	if err := proto.Unmarshal(raw, &value); err != nil {
 		return nil, false, fmt.Errorf("torana: decode versioned state: %w", err)
 	}
@@ -205,6 +208,9 @@ func StateCompareAndSet(key, value string, expectedVersion *string) (*pbv1.State
 		return nil, err
 	}
 	var result pbv1.StateMutationResult
+	if err := pbv1.ValidateWire(raw, result.ProtoReflect().Descriptor()); err != nil {
+		return nil, fmt.Errorf("torana: state mutation wire: %w", err)
+	}
 	if err := proto.Unmarshal(raw, &result); err != nil {
 		return nil, fmt.Errorf("torana: decode state mutation: %w", err)
 	}
@@ -217,6 +223,9 @@ func StateCompareAndDelete(key, expectedVersion string) (*pbv1.StateMutationResu
 		return nil, err
 	}
 	var result pbv1.StateMutationResult
+	if err := pbv1.ValidateWire(raw, result.ProtoReflect().Descriptor()); err != nil {
+		return nil, fmt.Errorf("torana: state mutation wire: %w", err)
+	}
 	if err := proto.Unmarshal(raw, &result); err != nil {
 		return nil, fmt.Errorf("torana: decode state mutation: %w", err)
 	}
@@ -229,6 +238,9 @@ func StateScan(prefix, cursor string, limit uint32) (*pbv1.StateScanResult, erro
 		return nil, err
 	}
 	var result pbv1.StateScanResult
+	if err := pbv1.ValidateWire(raw, result.ProtoReflect().Descriptor()); err != nil {
+		return nil, fmt.Errorf("torana: state scan wire: %w", err)
+	}
 	if err := proto.Unmarshal(raw, &result); err != nil {
 		return nil, fmt.Errorf("torana: decode state scan: %w", err)
 	}

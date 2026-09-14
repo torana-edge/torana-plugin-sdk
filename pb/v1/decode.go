@@ -57,6 +57,9 @@ func actionFieldNumbers(md protoreflect.MessageDescriptor) map[protowire.Number]
 // refused by ValidateFor. Call DecodeHookResult at the host boundary before
 // ValidateFor.
 func DecodeHookResult(b []byte) (*HookResult, error) {
+	if err := ValidateWire(b, (&HookResult{}).ProtoReflect().Descriptor()); err != nil {
+		return nil, fmt.Errorf("hook result wire: %w", err)
+	}
 	if err := refuseMultipleKnownFields(b, knownHookResultActionFields()); err != nil {
 		return nil, fmt.Errorf("hook result: %w", err)
 	}
@@ -65,6 +68,92 @@ func DecodeHookResult(b []byte) (*HookResult, error) {
 		return nil, err
 	}
 	return &r, nil
+}
+
+// ValidateWire validates a closed protobuf message before unmarshal. It
+// rejects unknown fields, wrong wire types, and repeated/conflicting oneof
+// members recursively through nested messages.
+func ValidateWire(b []byte, md protoreflect.MessageDescriptor) error {
+	return validateWireMessage(b, md, md.FullName())
+}
+
+func validateWireMessage(b []byte, md protoreflect.MessageDescriptor, name protoreflect.FullName) error {
+	seenOneof := map[protoreflect.Name]protoreflect.FieldNumber{}
+	for len(b) > 0 {
+		num, typ, n := protowire.ConsumeTag(b)
+		if n < 0 {
+			return fmt.Errorf("%s: invalid wire tag", name)
+		}
+		b = b[n:]
+		fd := md.Fields().ByNumber(num)
+		if fd == nil {
+			return fmt.Errorf("%s: unknown field %d", name, num)
+		}
+		if expected := wireTypeFor(fd); expected != typ {
+			return fmt.Errorf("%s.%s: wrong wire type", name, fd.Name())
+		}
+		if od := fd.ContainingOneof(); od != nil && !od.IsSynthetic() {
+			if old, ok := seenOneof[od.Name()]; ok {
+				return fmt.Errorf("%s: encodes more than one known oneof arm (fields %d and %d)", name, old, num)
+			}
+			seenOneof[od.Name()] = num
+		}
+		value := b
+		consumed := protowire.ConsumeFieldValue(num, typ, value)
+		if consumed < 0 {
+			return fmt.Errorf("%s.%s: invalid field", name, fd.Name())
+		}
+		b = b[consumed:]
+		if fd.Kind() == protoreflect.MessageKind && typ == protowire.BytesType {
+			payload, m := protowire.ConsumeBytes(value)
+			if m < 0 {
+				return fmt.Errorf("%s.%s: invalid message", name, fd.Name())
+			}
+			if fd.IsList() { /* repeated message payload is one element */
+			}
+			if err := validateWireMessage(payload, fd.Message(), fd.Message().FullName()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func wireTypeFor(fd protoreflect.FieldDescriptor) protowire.Type {
+	switch fd.Kind() {
+	case protoreflect.MessageKind, protoreflect.StringKind, protoreflect.BytesKind:
+		return protowire.BytesType
+	case protoreflect.Fixed32Kind, protoreflect.Sfixed32Kind, protoreflect.FloatKind:
+		return protowire.Fixed32Type
+	case protoreflect.Fixed64Kind, protoreflect.Sfixed64Kind, protoreflect.DoubleKind:
+		return protowire.Fixed64Type
+	default:
+		return protowire.VarintType
+	}
+}
+
+func DecodeHookInput(b []byte) (*HookInput, error) {
+	if err := ValidateWire(b, (&HookInput{}).ProtoReflect().Descriptor()); err != nil {
+		return nil, err
+	}
+	var v HookInput
+	if err := proto.Unmarshal(b, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+func DecodeHostCallResult(b []byte) (*HostCallResult, error) {
+	if err := ValidateWire(b, (&HostCallResult{}).ProtoReflect().Descriptor()); err != nil {
+		return nil, err
+	}
+	var v HostCallResult
+	if err := proto.Unmarshal(b, &v); err != nil {
+		return nil, err
+	}
+	if err := v.Validate(); err != nil {
+		return nil, err
+	}
+	return &v, nil
 }
 
 // refuseMultipleKnownFields walks a protobuf message wire encoding and reports
@@ -92,4 +181,15 @@ func refuseMultipleKnownFields(b []byte, known map[protowire.Number]struct{}) er
 		}
 	}
 	return nil
+}
+
+func DecodeChatRequest(b []byte) (*ChatRequest, error) {
+	if err := ValidateWire(b, (&ChatRequest{}).ProtoReflect().Descriptor()); err != nil {
+		return nil, err
+	}
+	var v ChatRequest
+	if err := proto.Unmarshal(b, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
 }
