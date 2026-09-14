@@ -365,6 +365,8 @@ version = "0.4.2"
 dependencies = [
  "prost",
  "prost-build",
+ "prost-types",
+ "serde",
  "serde_json",
 ]
 

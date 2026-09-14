@@ -233,6 +233,17 @@ pub trait Plugin {
     }
 }
 
+pub fn __plugin_dispatch<P: Plugin>(input: pbv1::HookInput) -> Result<Option<pbv1::HookResult>, String> {
+    match input.payload {
+        Some(pbv1::hook_input::Payload::ChatRequest(r)) => P::before_request(r).map(|x|x.into_hook_result()),
+        Some(pbv1::hook_input::Payload::AfterResponse(r)) => P::after_response(r.response.ok_or("missing response")?).map(|x|x.into_hook_result()),
+        Some(pbv1::hook_input::Payload::StreamEvent(e)) => P::on_stream(e).map(|x|x.into_hook_result()),
+        Some(pbv1::hook_input::Payload::HttpRequest(r)) => P::on_http(r).map(|x|x.into_hook_result()),
+        Some(pbv1::hook_input::Payload::TickRequest(r)) => P::on_tick(r).map(|x|x.into_hook_result()),
+        None => Err("missing hook payload".into()),
+    }
+}
+
 pub fn replace_request(request: pbv1::ChatRequest) -> Result<pbv1::HookResult, String> {
     validate_chat_request(&request)?;
     Ok(pbv1::HookResult {
@@ -899,6 +910,11 @@ pub fn __dispatch_v1<E: core::fmt::Display>(
 /// for pass-through or one hook-appropriate HookResult.
 #[macro_export]
 macro_rules! export_plugin_v1 {
+    ($plugin:ty) => {
+        #[no_mangle] pub extern "C" fn abi_version() -> u64 { $crate::ABI_VERSION }
+        #[no_mangle] pub extern "C" fn supported_hooks() -> u32 { <$plugin as $crate::Plugin>::SUPPORTED_HOOKS }
+        #[no_mangle] pub extern "C" fn run_hook(ptr:u32,len:u32)->u64 { let input=unsafe{$crate::__input(ptr,len)}; let output=$crate::__dispatch_v1(input, <$plugin as $crate::Plugin>::SUPPORTED_HOOKS, $crate::__plugin_dispatch::<$plugin>).unwrap_or_else(|e|panic!("{e}")); $crate::__result(&output) }
+    };
     ($hooks:expr, $handler:path) => {
         #[no_mangle]
         pub extern "C" fn abi_version() -> u64 {
