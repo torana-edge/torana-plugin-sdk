@@ -19,6 +19,9 @@ import (
 func TestCompiledGoGuestImplementsRunHook(t *testing.T) {
 	path := os.Getenv("TORANA_GO_GUEST")
 	if path == "" {
+		if os.Getenv("TORANA_E2E") == "1" {
+			t.Fatal("TORANA_GO_GUEST is required in E2E mode")
+		}
 		t.Log("TORANA_GO_GUEST unset; exercised in CI")
 		return
 	}
@@ -28,6 +31,9 @@ func TestCompiledGoGuestImplementsRunHook(t *testing.T) {
 func TestCompiledRustGuestImplementsRunHook(t *testing.T) {
 	path := os.Getenv("TORANA_RUST_GUEST")
 	if path == "" {
+		if os.Getenv("TORANA_E2E") == "1" {
+			t.Fatal("TORANA_RUST_GUEST is required in E2E mode")
+		}
 		t.Log("TORANA_RUST_GUEST unset; exercised in CI")
 		return
 	}
@@ -127,6 +133,9 @@ func TestGuestBitmapMatchesManifest(t *testing.T) {
 	guest := os.Getenv("TORANA_GO_GUEST")
 	manifest := os.Getenv("TORANA_GO_GUEST_MANIFEST")
 	if guest == "" || manifest == "" {
+		if os.Getenv("TORANA_E2E") == "1" {
+			t.Fatal("TORANA_GO_GUEST and TORANA_GO_GUEST_MANIFEST are required in E2E mode")
+		}
 		t.Log("TORANA_GO_GUEST/TORANA_GO_GUEST_MANIFEST unset; exercised in CI")
 	} else {
 		assertGuestBitmapMatchesManifest(t, guest, manifest)
@@ -137,6 +146,9 @@ func TestRustGuestBitmapMatchesManifest(t *testing.T) {
 	guest := os.Getenv("TORANA_RUST_GUEST")
 	manifest := os.Getenv("TORANA_RUST_GUEST_MANIFEST")
 	if guest == "" || manifest == "" {
+		if os.Getenv("TORANA_E2E") == "1" {
+			t.Fatal("TORANA_RUST_GUEST and TORANA_RUST_GUEST_MANIFEST are required in E2E mode")
+		}
 		t.Log("TORANA_RUST_GUEST/TORANA_RUST_GUEST_MANIFEST unset; exercised in CI")
 		return
 	}
@@ -167,9 +179,17 @@ func assertGuestBitmapMatchesManifest(t *testing.T, guest, manifest string) {
 			t.Fatalf("initialize guest: %v", err)
 		}
 	}
+	assertABISurface(t, module)
 	supported := module.ExportedFunction("supported_hooks")
 	if supported == nil {
 		t.Fatal("v1 guest is missing supported_hooks")
+	}
+	version := module.ExportedFunction("abi_version")
+	if version == nil {
+		t.Fatal("v1 guest is missing abi_version")
+	}
+	if got, err := version.Call(ctx); err != nil || len(got) != 1 || got[0] != (uint64(1)<<32|1) {
+		t.Fatalf("abi_version = %v, err=%v; want ABI v1 revision 1", got, err)
 	}
 	bits, err := supported.Call(ctx)
 	if err != nil || len(bits) != 1 {
@@ -226,6 +246,7 @@ func exerciseRunHook(t *testing.T, path string) []loggedMessage {
 			t.Fatalf("initialize guest: %v", err)
 		}
 	}
+	assertABISurface(t, module)
 	payload, err := proto.Marshal(&pbv1.HookInput{
 		ContractRevision: 1,
 		RequestId:        1,
@@ -243,6 +264,13 @@ func exerciseRunHook(t *testing.T, path string) []loggedMessage {
 	}
 	if supported == nil {
 		t.Fatal("v1 guest is missing supported_hooks")
+	}
+	version := module.ExportedFunction("abi_version")
+	if version == nil {
+		t.Fatal("v1 guest is missing abi_version")
+	}
+	if got, err := version.Call(ctx); err != nil || len(got) != 1 || got[0] != (uint64(1)<<32|1) {
+		t.Fatalf("abi_version = %v, err=%v; want ABI v1 revision 1", got, err)
 	}
 	if module.ExportedFunction("run_before_request") != nil {
 		t.Fatal("per-hook run_before_request export must not remain in the single-dispatch ABI")
@@ -276,6 +304,42 @@ func exerciseRunHook(t *testing.T, path string) []loggedMessage {
 		t.Fatal(recorder.err)
 	}
 	return recorder.logs
+}
+
+func assertABISurface(t *testing.T, module api.Module) {
+	t.Helper()
+	want := map[string]struct{ params, results []api.ValueType }{
+		"alloc":           {[]api.ValueType{api.ValueTypeI32}, []api.ValueType{api.ValueTypeI32}},
+		"dealloc":         {[]api.ValueType{api.ValueTypeI32, api.ValueTypeI32}, nil},
+		"run_hook":        {[]api.ValueType{api.ValueTypeI32, api.ValueTypeI32}, []api.ValueType{api.ValueTypeI64}},
+		"supported_hooks": {nil, []api.ValueType{api.ValueTypeI32}},
+		"abi_version":     {nil, []api.ValueType{api.ValueTypeI64}},
+	}
+	for name, signature := range want {
+		fn := module.ExportedFunction(name)
+		if fn == nil {
+			t.Fatalf("v1 guest is missing %s", name)
+		}
+		def := fn.Definition()
+		if got := def.ParamTypes(); !sameValueTypes(got, signature.params) {
+			t.Fatalf("%s params = %v, want %v", name, got, signature.params)
+		}
+		if got := def.ResultTypes(); !sameValueTypes(got, signature.results) {
+			t.Fatalf("%s results = %v, want %v", name, got, signature.results)
+		}
+	}
+}
+
+func sameValueTypes(a, b []api.ValueType) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func instantiateEnvImports(ctx context.Context, runtime wazero.Runtime, recorder *envRecorder) error {

@@ -15,6 +15,9 @@ import (
 func TestPassThroughVersusServeHTTP(t *testing.T) {
 	path := os.Getenv("TORANA_GO_GUEST")
 	if path == "" {
+		if os.Getenv("TORANA_E2E") == "1" {
+			t.Fatal("TORANA_GO_GUEST is required in E2E mode")
+		}
 		t.Log("TORANA_GO_GUEST unset; exercised in CI")
 		return
 	}
