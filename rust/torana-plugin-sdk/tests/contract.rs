@@ -110,3 +110,47 @@ fn deep_unknown_fields_are_rejected_before_decode() {
     raw.extend_from_slice(&message);
     assert!(__dispatch_v1(&raw, HOOK_BEFORE_REQUEST, pass).is_err());
 }
+
+#[test]
+fn native_injection_drives_public_helpers() {
+    use std::sync::{Arc, Mutex};
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let copy = seen.clone();
+    let _guard = torana_plugin_sdk::install_native_host(move |cmd, args| {
+        copy.lock().unwrap().push((cmd.to_owned(), args.to_vec()));
+        Ok(pbv1::HostCallResult {
+            result: Some(pbv1::host_call_result::Result::Value(b"ok".to_vec())),
+        }
+        .encode_to_vec())
+    });
+    assert_eq!(torana_plugin_sdk::meta_set("k", "v").unwrap(), ());
+    assert_eq!(
+        torana_plugin_sdk::cache_set("k", "v", Some(1000)).unwrap(),
+        ()
+    );
+    assert_eq!(
+        seen.lock()
+            .unwrap()
+            .iter()
+            .map(|x| x.0.as_str())
+            .collect::<Vec<_>>(),
+        vec!["env.meta_set", "env.cache_set"]
+    );
+}
+
+#[test]
+fn native_injection_preserves_typed_refusal() {
+    let _guard = torana_plugin_sdk::install_native_host(|_, _| {
+        Ok(pbv1::HostCallResult {
+            result: Some(pbv1::host_call_result::Result::Error(pbv1::HostError {
+                code: pbv1::ErrorCode::PermissionDenied as i32,
+                message: "denied".into(),
+            })),
+        }
+        .encode_to_vec())
+    });
+    assert!(matches!(
+        torana_plugin_sdk::state_set("k", "v"),
+        Err(torana_plugin_sdk::HostCallError::Refused(_))
+    ));
+}

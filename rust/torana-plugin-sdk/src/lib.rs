@@ -7,6 +7,9 @@
 use core::alloc::Layout;
 use core::{ptr, slice};
 
+#[cfg(not(target_arch = "wasm32"))]
+thread_local! { static NATIVE_HOST: std::cell::RefCell<Option<Box<dyn Fn(&str, &[u8]) -> Result<Vec<u8>, HostCallError>>>> = const { std::cell::RefCell::new(None) }; }
+
 #[doc(hidden)]
 pub use prost;
 
@@ -36,6 +39,24 @@ pub enum HostCallError {
 /// linking a WASM host.
 pub struct NativeHost<F> {
     call: F,
+}
+
+/// Installs a native transport for the duration of a test. The guard restores
+/// the previous transport on drop and storage is thread-local.
+pub struct NativeHostGuard;
+#[cfg(not(target_arch = "wasm32"))]
+pub fn install_native_host<F>(call: F) -> NativeHostGuard
+where
+    F: Fn(&str, &[u8]) -> Result<Vec<u8>, HostCallError> + 'static,
+{
+    NATIVE_HOST.with(|slot| *slot.borrow_mut() = Some(Box::new(call)));
+    NativeHostGuard
+}
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for NativeHostGuard {
+    fn drop(&mut self) {
+        NATIVE_HOST.with(|slot| *slot.borrow_mut() = None);
+    }
 }
 
 impl<F> NativeHost<F>
@@ -715,6 +736,7 @@ pub const LOG_DEBUG: i32 = 0;
 pub const LOG_INFO: i32 = 1;
 
 #[link(wasm_import_module = "env")]
+#[cfg(target_arch = "wasm32")]
 extern "C" {
     #[link_name = "log"]
     fn host_log(level: i32, ptr: u32, len: u32);
@@ -736,7 +758,10 @@ pub fn log(message: &str, level: i32) {
     if message.is_empty() {
         return;
     }
+    #[cfg(target_arch = "wasm32")]
     unsafe { host_log(level, message.as_ptr() as u32, message.len() as u32) }
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = level;
 }
 
 // Allocation goes through `std::alloc` with an explicit `Layout`, which is the
@@ -869,6 +894,7 @@ pub const METRIC_GAUGE: i32 = 2;
 
 pub fn emit_metric(name: &str, kind: i32, value: f64, labels: &serde_json::Value) {
     let labels = labels.to_string();
+    #[cfg(target_arch = "wasm32")]
     unsafe {
         host_emit_metric(
             kind,
@@ -879,6 +905,8 @@ pub fn emit_metric(name: &str, kind: i32, value: f64, labels: &serde_json::Value
             labels.len() as u32,
         )
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = (name, kind, value, labels);
 }
 
 pub fn decode_host_call_result(bytes: &[u8]) -> Result<Vec<u8>, HostCallError> {
@@ -963,26 +991,39 @@ pub fn host_call<M: prost::Message>(
     arguments: &M,
 ) -> Result<Vec<u8>, HostCallError> {
     let arguments = arguments.encode_to_vec();
-    let packed = unsafe {
-        raw_host_call(
-            command.as_ptr() as u32,
-            command.len() as u32,
-            arguments.as_ptr() as u32,
-            arguments.len() as u32,
-        )
-    };
-    if packed == 0 {
-        return Err(HostCallError::Protocol(
-            "host_call returned no HostCallResult frame".to_owned(),
-        ));
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(result) =
+        NATIVE_HOST.with(|slot| slot.borrow().as_ref().map(|f| f(command, &arguments)))
+    {
+        return result.and_then(|frame| decode_host_call_result(&frame));
     }
-    let ptr = (packed >> 32) as u32;
-    let len = packed as u32;
-    // SAFETY: raw_host_call returns a host-owned result buffer valid until
-    // dealloc below; copy it before releasing that allocation.
-    let bytes = unsafe { __input(ptr, len) }.to_vec();
-    dealloc(ptr, len);
-    decode_host_call_result(&bytes)
+    #[cfg(not(target_arch = "wasm32"))]
+    return Err(HostCallError::Protocol(
+        "no native host transport installed".into(),
+    ));
+    #[cfg(target_arch = "wasm32")]
+    {
+        let packed = unsafe {
+            raw_host_call(
+                command.as_ptr() as u32,
+                command.len() as u32,
+                arguments.as_ptr() as u32,
+                arguments.len() as u32,
+            )
+        };
+        if packed == 0 {
+            return Err(HostCallError::Protocol(
+                "host_call returned no HostCallResult frame".to_owned(),
+            ));
+        }
+        let ptr = (packed >> 32) as u32;
+        let len = packed as u32;
+        // SAFETY: raw_host_call returns a host-owned result buffer valid until
+        // dealloc below; copy it before releasing that allocation.
+        let bytes = unsafe { __input(ptr, len) }.to_vec();
+        dealloc(ptr, len);
+        decode_host_call_result(&bytes)
+    }
 }
 
 /// Resolves one operator-bound credential slot. Treat the returned bytes as a
@@ -994,6 +1035,115 @@ pub fn get_credential(slot: &str) -> Result<Vec<u8>, HostCallError> {
             slot: slot.to_owned(),
         },
     )
+}
+
+pub fn meta_get(key: &str) -> Result<Option<String>, HostCallError> {
+    match host_call("env.meta_get", &pbv1::MetaGetArgs { key: key.into() })? {
+        v if v.is_empty() => Ok(Some(String::new())),
+        v => String::from_utf8(v)
+            .map(Some)
+            .map_err(|_| HostCallError::Protocol("meta value is not UTF-8".into())),
+    }
+}
+pub fn meta_set(key: &str, value: &str) -> Result<(), HostCallError> {
+    host_call(
+        "env.meta_set",
+        &pbv1::MetaSetArgs {
+            key: key.into(),
+            value: value.into(),
+        },
+    )
+    .map(|_| ())
+}
+pub fn meta_append(block_index: i32, fragment: &[u8]) -> Result<Vec<u8>, HostCallError> {
+    host_call(
+        "env.meta_append",
+        &pbv1::MetaAppendArgs {
+            block_index,
+            fragment: fragment.to_vec(),
+        },
+    )
+}
+pub fn state_get(key: &str) -> Result<Option<String>, HostCallError> {
+    match host_call("env.state_get", &pbv1::StateGetArgs { key: key.into() })? {
+        v if v.is_empty() => Ok(Some(String::new())),
+        v => String::from_utf8(v)
+            .map(Some)
+            .map_err(|_| HostCallError::Protocol("state value is not UTF-8".into())),
+    }
+}
+pub fn state_set(key: &str, value: &str) -> Result<(), HostCallError> {
+    host_call(
+        "env.state_set",
+        &pbv1::StateSetArgs {
+            key: key.into(),
+            value: value.into(),
+        },
+    )
+    .map(|_| ())
+}
+pub fn state_delete(key: &str) -> Result<(), HostCallError> {
+    host_call(
+        "env.state_delete",
+        &pbv1::StateDeleteArgs { key: key.into() },
+    )
+    .map(|_| ())
+}
+pub fn cache_get(key: &str) -> Result<Option<String>, HostCallError> {
+    match host_call("env.cache_get", &pbv1::CacheGetArgs { key: key.into() })? {
+        v if v.is_empty() => Ok(Some(String::new())),
+        v => String::from_utf8(v)
+            .map(Some)
+            .map_err(|_| HostCallError::Protocol("cache value is not UTF-8".into())),
+    }
+}
+pub fn cache_set(key: &str, value: &str, ttl_ms: Option<u64>) -> Result<(), HostCallError> {
+    host_call(
+        "env.cache_set",
+        &pbv1::CacheSetArgs {
+            key: key.into(),
+            value: value.into(),
+            ttl_ms,
+        },
+    )
+    .map(|_| ())
+}
+pub fn cache_delete(key: &str) -> Result<(), HostCallError> {
+    host_call(
+        "env.cache_delete",
+        &pbv1::CacheDeleteArgs { key: key.into() },
+    )
+    .map(|_| ())
+}
+pub fn block_request(status: i32, code: &str, message: &str) -> Result<(), HostCallError> {
+    host_call(
+        "env.block_request",
+        &pbv1::BlockRequestArgs {
+            status,
+            code: code.into(),
+            message: message.into(),
+        },
+    )
+    .map(|_| ())
+}
+pub fn route_request(provider: &str, model: &str) -> Result<(), HostCallError> {
+    host_call(
+        "env.route_request",
+        &pbv1::RouteRequestArgs {
+            provider: provider.into(),
+            model: model.into(),
+        },
+    )
+    .map(|_| ())
+}
+pub fn set_identity(identity: &str) -> Result<(), HostCallError> {
+    host_call(
+        "env.set_identity",
+        &pbv1::SetIdentityArgs {
+            identity: identity.into(),
+        },
+    )
+    .map(|_| ())
 }
 
 pub fn append_file(path: &str, data: &[u8]) -> Result<(), HostCallError> {
@@ -1195,10 +1345,9 @@ fn validate_prompt_cache_policy(policy: &pbv1::PromptCachePolicy) -> Result<(), 
                 "PromptCachePolicy contains an invalid tier".to_owned(),
             ));
         }
-        let marker: serde_json::Value =
-            strict_json(&tier.marker_json).map_err(|_| {
-                HostCallError::Protocol("PromptCachePolicy marker_json is invalid JSON".to_owned())
-            })?;
+        let marker: serde_json::Value = strict_json(&tier.marker_json).map_err(|_| {
+            HostCallError::Protocol("PromptCachePolicy marker_json is invalid JSON".to_owned())
+        })?;
         if !marker.is_object() {
             return Err(HostCallError::Protocol(
                 "PromptCachePolicy marker_json must be an object".to_owned(),
