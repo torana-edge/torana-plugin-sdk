@@ -85,9 +85,13 @@ func (x *SyntheticResponse) Validate() error {
 		}
 		switch kind := block.Kind.(type) {
 		case *ResponseBlock_Text:
-			if kind == nil || kind.Text == nil { return fmt.Errorf("synthetic response text block %d is nil", i) }
+			if kind == nil || kind.Text == nil {
+				return fmt.Errorf("synthetic response text block %d is nil", i)
+			}
 		case *ResponseBlock_ToolCall:
-			if kind == nil || kind.ToolCall == nil { return fmt.Errorf("synthetic response tool block %d is nil", i) }
+			if kind == nil || kind.ToolCall == nil {
+				return fmt.Errorf("synthetic response tool block %d is nil", i)
+			}
 			call := kind.ToolCall
 			hasTools = true
 			if call.Signature != "" || call.Id != "" {

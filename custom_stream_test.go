@@ -104,14 +104,17 @@ func TestStreamHandlerFreeformReplacementAndWrongFamilyFailOpen(t *testing.T) {
 					result, err = h.Handle(context.Background(), event)
 					if tc.name == "function replacement is wrong family" && err != nil {
 						gotErr = true
-						return
+						break
 					}
 					if err != nil {
 						t.Fatal(err)
 					}
 				}
-				if tc.name == "function replacement is wrong family" && !gotErr {
-					t.Fatal("wrong-family replacement must fail")
+				if tc.name == "function replacement is wrong family" {
+					if !gotErr {
+						t.Fatal("wrong-family replacement must fail")
+					}
+					return
 				}
 				events := result.inner.GetEmitEvents().GetEvents()
 				if len(events) != 3 {

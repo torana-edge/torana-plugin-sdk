@@ -123,6 +123,7 @@ jobs:
           TORANA_GO_GUEST_MANIFEST: conformance/guests/go-allhooks/plugin.json
           TORANA_RUST_GUEST: /tmp/rust-allhooks-target/wasm32-wasip1/debug/torana-rust-allhooks.wasm
           TORANA_RUST_GUEST_MANIFEST: conformance/guests/rust-allhooks/plugin.json
+          TORANA_RUST_LOGGER: /tmp/rust-logger-target/wasm32-wasip1/debug/torana-rust-logger.wasm
       # The example plugins are what release.yml actually publishes. Pointing
       # the conformance vars at the all-hooks guests above would leave the
       # shipped artifacts with only a compile check, so run the ABI and

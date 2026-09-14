@@ -109,8 +109,6 @@ func validateWireMessage(b []byte, md protoreflect.MessageDescriptor, name proto
 			if m < 0 {
 				return fmt.Errorf("%s.%s: invalid message", name, fd.Name())
 			}
-			if fd.IsList() { /* repeated message payload is one element */
-			}
 			if err := validateWireMessage(payload, fd.Message(), fd.Message().FullName()); err != nil {
 				return err
 			}
