@@ -2,50 +2,11 @@ package v1
 
 import (
 	"fmt"
-	"sync"
 
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
-
-// hookResultActionFields is every field number in HookResult.action, derived
-// from the generated descriptor so a new action arm cannot silently reopen
-// last-wins acceptance of multi-arm frames.
-var (
-	hookResultActionFields     map[protowire.Number]struct{}
-	hookResultActionFieldsOnce sync.Once
-)
-
-func knownHookResultActionFields() map[protowire.Number]struct{} {
-	hookResultActionFieldsOnce.Do(func() {
-		hookResultActionFields = actionFieldNumbers((&HookResult{}).ProtoReflect().Descriptor())
-	})
-	return hookResultActionFields
-}
-
-// actionFieldNumbers returns the field numbers belonging to the "action" oneof
-// on md. Panics if the descriptor has no such oneof — that would mean the
-// generated message no longer matches this decoder's contract.
-func actionFieldNumbers(md protoreflect.MessageDescriptor) map[protowire.Number]struct{} {
-	ones := md.Oneofs()
-	for i := 0; i < ones.Len(); i++ {
-		od := ones.Get(i)
-		if od.Name() != "action" {
-			continue
-		}
-		fs := od.Fields()
-		out := make(map[protowire.Number]struct{}, fs.Len())
-		for j := 0; j < fs.Len(); j++ {
-			out[fs.Get(j).Number()] = struct{}{}
-		}
-		if len(out) == 0 {
-			panic("torana pb/v1: HookResult.action oneof has no fields")
-		}
-		return out
-	}
-	panic("torana pb/v1: HookResult has no action oneof")
-}
 
 // DecodeHookResult unmarshals a guest-produced HookResult and refuses a wire
 // frame that encodes more than one known action arm (including the same arm
@@ -53,15 +14,11 @@ func actionFieldNumbers(md protoreflect.MessageDescriptor) map[protowire.Number]
 //
 // Protobuf's standard unmarshal applies last-known-arm-wins and drops the
 // earlier arm, so a post-unmarshal ValidateFor cannot recover a double-arm
-// handwritten frame. Unknown/future arms still land in unknown fields and are
-// refused by ValidateFor. Call DecodeHookResult at the host boundary before
-// ValidateFor.
+// handwritten frame. The closed wire validator also rejects unknown/future
+// fields. Call DecodeHookResult at the host boundary before ValidateFor.
 func DecodeHookResult(b []byte) (*HookResult, error) {
 	if err := ValidateWire(b, (&HookResult{}).ProtoReflect().Descriptor()); err != nil {
 		return nil, fmt.Errorf("hook result wire: %w", err)
-	}
-	if err := refuseMultipleKnownFields(b, knownHookResultActionFields()); err != nil {
-		return nil, fmt.Errorf("hook result: %w", err)
 	}
 	var r HookResult
 	if err := proto.Unmarshal(b, &r); err != nil {
@@ -72,12 +29,17 @@ func DecodeHookResult(b []byte) (*HookResult, error) {
 
 // ValidateWire validates a closed protobuf message before unmarshal. It
 // rejects unknown fields, wrong wire types, and repeated/conflicting oneof
-// members recursively through nested messages.
+// members recursively through nested messages. Repeated numeric fields accept
+// both packed and unpacked encodings, as required by protobuf. Nesting is
+// bounded to 100 messages, including the root, to protect future recursive schemas.
 func ValidateWire(b []byte, md protoreflect.MessageDescriptor) error {
-	return validateWireMessage(b, md, md.FullName())
+	return validateWireMessage(b, md, md.FullName(), 1)
 }
 
-func validateWireMessage(b []byte, md protoreflect.MessageDescriptor, name protoreflect.FullName) error {
+func validateWireMessage(b []byte, md protoreflect.MessageDescriptor, name protoreflect.FullName, depth int) error {
+	if depth > 100 {
+		return fmt.Errorf("%s: message nesting exceeds 100", name)
+	}
 	seenOneof := map[protoreflect.Name]protoreflect.FieldNumber{}
 	for len(b) > 0 {
 		num, typ, n := protowire.ConsumeTag(b)
@@ -89,7 +51,9 @@ func validateWireMessage(b []byte, md protoreflect.MessageDescriptor, name proto
 		if fd == nil {
 			return fmt.Errorf("%s: unknown field %d", name, num)
 		}
-		if expected := wireTypeFor(fd); expected != typ {
+		expected := wireTypeFor(fd)
+		packed := fd.IsList() && typ == protowire.BytesType && (expected == protowire.VarintType || expected == protowire.Fixed32Type || expected == protowire.Fixed64Type)
+		if expected != typ && !packed {
 			return fmt.Errorf("%s.%s: wrong wire type", name, fd.Name())
 		}
 		if od := fd.ContainingOneof(); od != nil && !od.IsSynthetic() {
@@ -104,12 +68,22 @@ func validateWireMessage(b []byte, md protoreflect.MessageDescriptor, name proto
 			return fmt.Errorf("%s.%s: invalid field", name, fd.Name())
 		}
 		b = b[consumed:]
+		if packed {
+			payload, _ := protowire.ConsumeBytes(value) // ConsumeFieldValue checked the length.
+			for len(payload) > 0 {
+				n := protowire.ConsumeFieldValue(num, expected, payload)
+				if n < 0 {
+					return fmt.Errorf("%s.%s: invalid packed field", name, fd.Name())
+				}
+				payload = payload[n:]
+			}
+		}
 		if fd.Kind() == protoreflect.MessageKind && typ == protowire.BytesType {
 			payload, m := protowire.ConsumeBytes(value)
 			if m < 0 {
 				return fmt.Errorf("%s.%s: invalid message", name, fd.Name())
 			}
-			if err := validateWireMessage(payload, fd.Message(), fd.Message().FullName()); err != nil {
+			if err := validateWireMessage(payload, fd.Message(), fd.Message().FullName(), depth+1); err != nil {
 				return err
 			}
 		}
@@ -152,33 +126,6 @@ func DecodeHostCallResult(b []byte) (*HostCallResult, error) {
 		return nil, err
 	}
 	return &v, nil
-}
-
-// refuseMultipleKnownFields walks a protobuf message wire encoding and reports
-// an error when more than one field number from known appears at the top level,
-// including repeated occurrences of the same number. Nested length-delimited
-// payloads are not descended into.
-func refuseMultipleKnownFields(b []byte, known map[protowire.Number]struct{}) error {
-	seen := 0
-	for len(b) > 0 {
-		num, typ, n := protowire.ConsumeTag(b)
-		if n < 0 {
-			return fmt.Errorf("invalid wire tag")
-		}
-		b = b[n:]
-		n = protowire.ConsumeFieldValue(num, typ, b)
-		if n < 0 {
-			return fmt.Errorf("invalid wire value for field %d", num)
-		}
-		b = b[n:]
-		if _, ok := known[num]; ok {
-			seen++
-			if seen > 1 {
-				return fmt.Errorf("encodes more than one known oneof arm")
-			}
-		}
-	}
-	return nil
 }
 
 func DecodeChatRequest(b []byte) (*ChatRequest, error) {

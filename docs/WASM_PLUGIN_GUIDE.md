@@ -56,7 +56,12 @@ run_hook(ptr: u32, size: u32) -> u64
 
 `abi_version` returns `(1 << 32) | 1`: ABI major 1 and contract revision 1.
 The host requires this exact value. Contract revisions are whole contracts;
-there is no ABI-minor or additive-compatibility negotiation in v1.
+there is no ABI-minor or additive-compatibility negotiation in v1. An SDK
+package version is distinct from the contract revision: documentation or helper
+fixes can retain the same ABI. When the contract revision changes, rebuild
+plugins against the matching SDK and approve their new bundle digests before
+rolling out the host. This foundation requires rebuilding every older bundle;
+the loader rejects incompatible exports instead of attempting a partial load.
 
 `supported_hooks` returns the OR of the `Hook` bits the plugin implements.
 `run_hook` receives one serialized `HookInput`. The hook named by its oneof arm

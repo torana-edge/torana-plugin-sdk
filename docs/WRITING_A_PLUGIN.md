@@ -12,9 +12,9 @@ granted to its exact build.
 
 ## Prerequisites
 
-- **Go 1.24 or newer.** `-buildmode=c-shared` for `wasip1` — which the reactor
+- **Go 1.25 or newer.** `-buildmode=c-shared` for `wasip1` — which the reactor
   model requires, see [PLUGIN_SEMANTICS.md](PLUGIN_SEMANTICS.md) — does not exist
-  before 1.24. Torana itself builds with 1.26.
+  before 1.24; this SDK requires Go 1.25. Torana itself builds with 1.26.
 - **Rust 1.85+** with `protoc` and the `wasm32-wasip1` target. The Rust logger
   and all-hooks guest run through the same host conformance harness as Go.
 - **The `torana` binary**, which is both the proxy and the plugin CLI.

@@ -42,7 +42,7 @@ re-encode provider JSON when ordering or signatures matter.
 
 ### The Correct Unmarshaling Pattern
 
-Use the generated `pb/v1` types and the `sdk` handlers. The SDK automatically unmarshals the request and marshals the response, fully preserving unknown fields under the hood.
+Use the generated `pb/v1` types and the `sdk` handlers. The SDK validates the closed protobuf contract before unmarshalling the request and marshals validated responses. Unknown protobuf fields are refused; opaque provider JSON stays on the modeled provider-data surfaces.
 
 ```go
 package main
