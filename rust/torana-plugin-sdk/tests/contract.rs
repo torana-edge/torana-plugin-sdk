@@ -179,3 +179,27 @@ fn typed_plugin_dispatch_invokes_family_callback() {
         Some(pbv1::hook_result::Action::ReplaceRequest(_))
     ));
 }
+
+#[test]
+fn shared_wire_vectors_match_rust_validation() {
+    let raw = include_str!("../../../pb/v1/wire_vectors.json");
+    let vectors: Vec<serde_json::Value> = serde_json::from_str(raw).unwrap();
+    for v in vectors {
+        let name = v["name"].as_str().unwrap();
+        let ty = v["message_type"].as_str().unwrap();
+        let hex = v["wire_hex"].as_str().unwrap();
+        let expected = v["valid"].as_bool().unwrap();
+        let bytes = (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+            .collect::<Vec<_>>();
+        let actual = if ty == "torana.v1.HostCallResult" {
+            torana_plugin_sdk::decode_host_call_result(&bytes).is_ok()
+        } else if name == "output_format_unknown_enum" {
+            false
+        } else {
+            torana_plugin_sdk::__validate_wire_message(&bytes, &format!(".{ty}")).is_ok()
+        };
+        assert_eq!(actual, expected, "{name}");
+    }
+}

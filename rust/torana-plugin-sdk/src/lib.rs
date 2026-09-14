@@ -708,7 +708,7 @@ fn validate_response(response: &pbv1::ChatResponse) -> Result<(), String> {
 }
 
 fn validate_input(input: &pbv1::HookInput, raw: &[u8]) -> Result<(), String> {
-    validate_wire_message(raw, ".torana.v1.HookInput")?;
+    __validate_wire_message(raw, ".torana.v1.HookInput")?;
     match input.payload.as_ref() {
         Some(pbv1::hook_input::Payload::ChatRequest(r)) => validate_chat_request(r),
         Some(pbv1::hook_input::Payload::AfterResponse(r)) => {
@@ -727,7 +727,8 @@ fn validate_input(input: &pbv1::HookInput, raw: &[u8]) -> Result<(), String> {
     }
 }
 
-fn validate_wire_message(mut bytes: &[u8], name: &str) -> Result<(), String> {
+#[doc(hidden)]
+pub fn __validate_wire_message(mut bytes: &[u8], name: &str) -> Result<(), String> {
     use prost::Message;
     use prost_types::{field_descriptor_proto::Type, FileDescriptorSet};
     static SET: std::sync::OnceLock<Result<FileDescriptorSet, String>> = std::sync::OnceLock::new();
@@ -789,7 +790,7 @@ fn validate_wire_message(mut bytes: &[u8], name: &str) -> Result<(), String> {
                 return Err("torana sdk: truncated nested field".into());
             }
             if let Some(ty) = field.type_name.as_deref() {
-                validate_wire_message(&bytes[p..p + len], ty)?;
+                __validate_wire_message(&bytes[p..p + len], ty)?;
             }
         }
         let consumed = skip_wire(bytes, wire)?;
