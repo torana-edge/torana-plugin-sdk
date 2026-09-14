@@ -340,9 +340,8 @@ func (s *StreamHandler) OnTextDelta(fn func(context.Context, string) (TextAction
 	return s
 }
 
-// Handle implements the stream-chunk hook signature. Semantic callback errors
-// are consumed for fail-open re-emission; assembler/protocol errors are returned
-// so the trampoline traps.
+// Handle implements the stream-chunk hook signature. Semantic callback and
+// assembler errors are returned so the host applies the approved failure mode.
 func (s *StreamHandler) Handle(ctx context.Context, ev *pbv1.StreamEvent) (StreamResult, error) {
 	if ev == nil {
 		return StreamResult{}, fmt.Errorf("StreamHandler: nil event")
@@ -352,7 +351,7 @@ func (s *StreamHandler) Handle(ctx context.Context, ev *pbv1.StreamEvent) (Strea
 	if td, ok := ev.Event.(*pbv1.StreamEvent_TextDelta); ok && s.onText != nil {
 		action, cbErr := s.onText(ctx, td.TextDelta)
 		if cbErr != nil {
-			return PassEvent(), nil
+			return StreamResult{}, fmt.Errorf("StreamHandler text callback: %w", cbErr)
 		}
 		if action.suppress {
 			return SuppressEvent(), nil
@@ -371,13 +370,19 @@ func (s *StreamHandler) Handle(ctx context.Context, ev *pbv1.StreamEvent) (Strea
 	}
 	if fr.Complete != nil {
 		call := *fr.Complete
-		action, cbErr := s.onToolCall(ctx, call)
 		payload := call.Arguments
 		if call.InvocationKind == pbv1.ToolInvocationKind_TOOL_INVOCATION_KIND_FREEFORM && call.InputText != nil {
 			payload = *call.InputText
 		}
-		if cbErr != nil || action.err != nil {
+		if s.onToolCall == nil {
 			return EmitEvents(EmitAssembledToolCall(call, payload)...), nil
+		}
+		action, cbErr := s.onToolCall(ctx, call)
+		if cbErr != nil {
+			return StreamResult{}, fmt.Errorf("StreamHandler tool callback: %w", cbErr)
+		}
+		if action.err != nil {
+			return StreamResult{}, fmt.Errorf("StreamHandler tool action: %w", action.err)
 		}
 		if action.suppress {
 			return SuppressEvent(), nil
@@ -386,7 +391,7 @@ func (s *StreamHandler) Handle(ctx context.Context, ev *pbv1.StreamEvent) (Strea
 			if action.replaceKind != call.InvocationKind {
 				// A callback used the wrong mutation family. Preserve the original
 				// call exactly, matching callback-error fail-open behavior.
-				return EmitEvents(EmitAssembledToolCall(call, payload)...), nil
+				return StreamResult{}, fmt.Errorf("StreamHandler tool action: replacement kind %v does not match call kind %v", action.replaceKind, call.InvocationKind)
 			}
 			payload = action.replace
 		}

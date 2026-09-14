@@ -193,7 +193,7 @@ func TestPluginConfigAndDeny(t *testing.T) {
 
 	var got string
 	sdk.OnBeforeRequest(func(context.Context, *pbv1.ChatRequest) (sdk.RequestResult, error) {
-		got = sdk.PluginConfig()
+		got, _ = sdk.PluginConfig()
 		return sdk.PassRequest(), nil
 	})
 	sdktest.New(t).SetConfig(`{"threshold":42}`).BeforeRequest(&pbv1.ChatRequest{})

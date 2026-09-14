@@ -212,8 +212,8 @@ func TestPluginConfigReadsAFramedValue(t *testing.T) {
 	h := sdktest.New(t)
 	h.SetConfig(`{"mode":"strict"}`)
 	h.Run(func() {
-		if got := sdk.PluginConfig(); got != `{"mode":"strict"}` {
-			t.Fatalf("PluginConfig = %q", got)
+		if got, err := sdk.PluginConfig(); err != nil || got != `{"mode":"strict"}` {
+			t.Fatalf("PluginConfig = %q, err=%v", got, err)
 		}
 	})
 }
@@ -222,12 +222,12 @@ func TestPluginConfigReadsAFramedValue(t *testing.T) {
 // config. v1 returned the denial envelope, so a plugin parsed an object with
 // none of its fields and silently ran on defaults — the failure this fallback
 // has to be careful not to reintroduce in a new form.
-func TestPluginConfigRefusalFallsBackToEmptyObject(t *testing.T) {
+func TestPluginConfigRefusalIsObservable(t *testing.T) {
 	h := sdktest.New(t)
 	h.DenyPermission("env.plugin_config")
 	h.Run(func() {
-		if got := sdk.PluginConfig(); got != "{}" {
-			t.Fatalf("PluginConfig = %q, want {} — a refusal must not become the config", got)
+		if got, err := sdk.PluginConfig(); err == nil || got != "" {
+			t.Fatalf("PluginConfig = %q, err=%v; want refusal", got, err)
 		}
 	})
 }
@@ -375,7 +375,7 @@ func TestStateDeleteUsesTheStateSetPermission(t *testing.T) {
 	}
 }
 
-func TestPluginConfigStrictRetainsFailureClasses(t *testing.T) {
+func TestPluginConfigRetainsFailureClasses(t *testing.T) {
 	for _, tc := range []struct {
 		name, reply string
 		transport   error
@@ -393,9 +393,9 @@ func TestPluginConfigStrictRetainsFailureClasses(t *testing.T) {
 			h := sdktest.New(t)
 			h.StubHostCall("env.plugin_config", func(string) (string, error) { return tc.reply, tc.transport })
 			h.Run(func() {
-				got, herr, err := sdk.PluginConfigStrict()
-				if got != tc.want || (err != nil) != tc.wantErr || herr.GetCode() != tc.wantCode {
-					t.Fatalf("got %q, %v, %v", got, herr, err)
+				got, err := sdk.PluginConfig()
+				if got != tc.want || (err != nil) != (tc.wantErr || tc.wantCode != 0) {
+					t.Fatalf("got %q, %v", got, err)
 				}
 				if tc.transport != nil && !errors.Is(err, tc.transport) {
 					t.Fatalf("transport identity lost: %v", err)

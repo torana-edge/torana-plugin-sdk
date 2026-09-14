@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
@@ -118,6 +119,9 @@ func dispatchHostCall(cmd string, argBytes []byte) ([]byte, *pbv1.HostError, err
 		return nil, nil, fmt.Errorf("torana: host-call returned an empty reply; " +
 			"HostCallResult requires a result arm")
 	}
+	if err := rejectDuplicateHostCallResultArms(raw); err != nil {
+		return nil, nil, fmt.Errorf("torana: host-call result: %w", err)
+	}
 	var res pbv1.HostCallResult
 	if err := proto.Unmarshal(raw, &res); err != nil {
 		return nil, nil, fmt.Errorf("torana: decode host-call result: %w", err)
@@ -135,13 +139,58 @@ func dispatchHostCall(cmd string, argBytes []byte) ([]byte, *pbv1.HostError, err
 	}
 }
 
-// mustHostCall is for fire-and-forget verdicts: classified host refusals are
-// discarded (the host logs them), but local/protocol failures trap the guest.
-func mustHostCall(cmd string, args proto.Message) {
-	_, _, err := HostCall(cmd, args)
+// checkedHostCall is the error-returning verdict path. It preserves typed
+// refusals while keeping local and protocol defects as ordinary errors.
+func checkedHostCall(cmd string, args proto.Message) error {
+	_, herr, err := HostCall(cmd, args)
 	if err != nil {
-		panic("torana plugin: " + cmd + ": " + err.Error())
+		return err
 	}
+	if herr != nil {
+		return fmt.Errorf("torana: %s: %w", cmd, classifiedRefusal(herr))
+	}
+	return nil
+}
+
+// mustHostCall is the explicitly named panic convenience for code that has no
+// useful recovery path. Checked public helpers use checkedHostCall instead.
+func mustHostCall(cmd string, args proto.Message) {
+	if err := checkedHostCall(cmd, args); err != nil {
+		panic("torana plugin: " + err.Error())
+	}
+}
+
+// rejectDuplicateHostCallResultArms checks the raw protobuf before unmarshal.
+// protobuf oneofs otherwise use last-arm-wins, which could turn a refusal
+// followed by success into an apparent successful call.
+func rejectDuplicateHostCallResultArms(raw []byte) error {
+	var value, failure bool
+	for len(raw) > 0 {
+		num, typ, n := protowire.ConsumeField(raw)
+		if n < 0 {
+			return protowire.ParseError(n)
+		}
+		raw = raw[n:]
+		if typ != protowire.BytesType {
+			continue
+		}
+		switch num {
+		case 1:
+			if value {
+				return fmt.Errorf("duplicate value result arm")
+			}
+			value = true
+		case 2:
+			if failure {
+				return fmt.Errorf("duplicate error result arm")
+			}
+			failure = true
+		}
+	}
+	if value && failure {
+		return fmt.Errorf("conflicting value and error result arms")
+	}
+	return nil
 }
 
 func hostCallRaw(cmd string, args []byte) ([]byte, error) {

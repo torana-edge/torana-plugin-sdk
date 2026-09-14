@@ -91,27 +91,19 @@ func DispatchHook(in *pbv1.HookInput) ([]byte, error) {
 	return out, nil
 }
 
-// PluginConfig returns the config JSON, defaulting to "{}" when unset or
-// unavailable. Use PluginConfigStrict for policy decisions that must distinguish
-// missing configuration from a refused call or malformed host reply.
-func PluginConfig() string {
-	config, herr, err := PluginConfigStrict()
-	if err != nil || herr != nil {
-		return "{}"
-	}
-	return config
-}
-
-// PluginConfigStrict reads config without suppressing failures. A successful
-// empty value means no operator settings and returns "{}". Classified refusals
-// and local/protocol errors remain separate, as in HostCall.
-func PluginConfigStrict() (string, *pbv1.HostError, error) {
+// PluginConfig reads the operator configuration. A successful empty value
+// means no operator settings and returns "{}". Refusals and malformed replies
+// are returned as errors so a policy plugin cannot silently run with defaults.
+func PluginConfig() (string, error) {
 	raw, herr, err := HostCall("env.plugin_config", nil)
-	if err != nil || herr != nil {
-		return "", herr, err
+	if err != nil {
+		return "", err
+	}
+	if herr != nil {
+		return "", fmt.Errorf("torana: plugin config: %w", classifiedRefusal(herr))
 	}
 	if len(raw) == 0 {
-		return "{}", nil, nil
+		return "{}", nil
 	}
-	return string(raw), nil, nil
+	return string(raw), nil
 }
