@@ -216,8 +216,8 @@ fn json_object(raw: &[u8], field: &str) -> Result<(), String> {
     if raw.is_empty() {
         return Ok(());
     }
-    let value: serde_json::Value = serde_json::from_slice(raw)
-        .map_err(|e| format!("torana sdk: {field} is invalid JSON: {e}"))?;
+    let value: serde_json::Value =
+        strict_json(raw).map_err(|e| format!("torana sdk: {field} is invalid JSON: {e}"))?;
     if !value.is_object() {
         return Err(format!("torana sdk: {field} must be a JSON object"));
     }
@@ -227,12 +227,78 @@ fn json_array(raw: &[u8], field: &str) -> Result<(), String> {
     if raw.is_empty() {
         return Ok(());
     }
-    let value: serde_json::Value = serde_json::from_slice(raw)
-        .map_err(|e| format!("torana sdk: {field} is invalid JSON: {e}"))?;
+    let value: serde_json::Value =
+        strict_json(raw).map_err(|e| format!("torana sdk: {field} is invalid JSON: {e}"))?;
     if !value.is_array() {
         return Err(format!("torana sdk: {field} must be a JSON array"));
     }
     Ok(())
+}
+
+fn strict_json(raw: &[u8]) -> Result<serde_json::Value, serde_json::Error> {
+    use serde::de::{DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
+    use std::{collections::HashSet, fmt};
+    struct V;
+    impl<'de> DeserializeSeed<'de> for V {
+        type Value = serde_json::Value;
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
+            d.deserialize_any(V)
+        }
+    }
+    impl<'de> Visitor<'de> for V {
+        type Value = serde_json::Value;
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("JSON value")
+        }
+        fn visit_map<A: MapAccess<'de>>(self, mut a: A) -> Result<Self::Value, A::Error> {
+            let mut m = serde_json::Map::new();
+            let mut keys = HashSet::new();
+            while let Some(k) = a.next_key::<String>()? {
+                if !keys.insert(k.clone()) {
+                    return Err(serde::de::Error::custom("duplicate JSON key"));
+                }
+                m.insert(k, a.next_value_seed(V)?);
+            }
+            Ok(serde_json::Value::Object(m))
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut a: A) -> Result<Self::Value, A::Error> {
+            let mut v = Vec::new();
+            while let Some(x) = a.next_element_seed(V)? {
+                v.push(x);
+            }
+            Ok(serde_json::Value::Array(v))
+        }
+        fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Bool(v))
+        }
+        fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Number(v.into()))
+        }
+        fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Number(v.into()))
+        }
+        fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<Self::Value, E> {
+            serde_json::Number::from_f64(v)
+                .map(serde_json::Value::Number)
+                .ok_or_else(|| E::custom("non-finite number"))
+        }
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::String(v.into()))
+        }
+        fn visit_string<E: serde::de::Error>(self, v: String) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::String(v))
+        }
+        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Null)
+        }
+        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Null)
+        }
+    }
+    let mut d = serde_json::Deserializer::from_slice(raw);
+    let v = d.deserialize_any(V)?;
+    d.end()?;
+    Ok(v)
 }
 
 /* fn strict_json(raw: &[u8]) -> Result<serde_json::Value, serde_json::Error> {
@@ -407,10 +473,16 @@ fn validate_input(input: &pbv1::HookInput, raw: &[u8]) -> Result<(), String> {
 fn validate_wire_message(mut bytes: &[u8], name: &str) -> Result<(), String> {
     use prost::Message;
     use prost_types::{field_descriptor_proto::Type, FileDescriptorSet};
-    let set = FileDescriptorSet::decode(
-        include_bytes!(concat!(env!("OUT_DIR"), "/torana.descriptor.bin")).as_slice(),
-    )
-    .map_err(|e| format!("torana sdk: descriptor decode: {e}"))?;
+    static SET: std::sync::OnceLock<Result<FileDescriptorSet, String>> = std::sync::OnceLock::new();
+    let set = SET
+        .get_or_init(|| {
+            FileDescriptorSet::decode(
+                include_bytes!(concat!(env!("OUT_DIR"), "/torana.descriptor.bin")).as_slice(),
+            )
+            .map_err(|e| format!("torana sdk: descriptor decode: {e}"))
+        })
+        .as_ref()
+        .map_err(Clone::clone)?;
     let descriptor = set
         .file
         .iter()
@@ -1124,7 +1196,7 @@ fn validate_prompt_cache_policy(policy: &pbv1::PromptCachePolicy) -> Result<(), 
             ));
         }
         let marker: serde_json::Value =
-            serde_json::from_slice(&tier.marker_json).map_err(|_| {
+            strict_json(&tier.marker_json).map_err(|_| {
                 HostCallError::Protocol("PromptCachePolicy marker_json is invalid JSON".to_owned())
             })?;
         if !marker.is_object() {

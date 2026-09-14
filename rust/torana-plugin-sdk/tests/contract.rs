@@ -52,3 +52,61 @@ fn rejects_duplicate_host_result_arms() {
         Err(torana_plugin_sdk::HostCallError::Protocol(_))
     ));
 }
+
+#[test]
+fn strict_json_rejects_duplicate_top_level_and_nested_keys() {
+    let req = |json: &[u8]| pbv1::ChatRequest {
+        provider_extensions_json: json.to_vec(),
+        ..Default::default()
+    };
+    assert!(torana_plugin_sdk::replace_request(req(br#"{"a":1,"a":2}"#)).is_err());
+    assert!(torana_plugin_sdk::replace_request(req(br#"{"x":{"a":1,"\u0061":2}}"#)).is_err());
+}
+
+#[test]
+fn strict_json_rejects_lone_surrogates() {
+    let req = pbv1::ChatRequest {
+        provider_extensions_json: br#"{"x":"\uD800"}"#.to_vec(),
+        ..Default::default()
+    };
+    assert!(torana_plugin_sdk::replace_request(req).is_err());
+}
+
+#[test]
+fn safety_settings_must_be_array() {
+    let req = pbv1::ChatRequest {
+        safety_settings_json: br#"{}"#.to_vec(),
+        ..Default::default()
+    };
+    assert!(torana_plugin_sdk::replace_request(req).is_err());
+}
+
+#[test]
+fn message_requires_at_least_one_block() {
+    let req = pbv1::ChatRequest {
+        messages: vec![pbv1::Message {
+            role: "user".into(),
+            blocks: vec![],
+        }],
+        ..Default::default()
+    };
+    assert!(torana_plugin_sdk::replace_request(req).is_err());
+}
+
+#[test]
+fn deep_unknown_fields_are_rejected_before_decode() {
+    // HookInput -> ChatRequest -> Message -> RequestBlock, unknown field 100.
+    let block = vec![0xa2, 0x06, 0x01, b'x'];
+    let message = vec![
+        0x12,
+        1,
+        b'u',
+        0x1a,
+        block.len() as u8,
+        0x1a,
+        block.len() as u8,
+    ];
+    let mut raw = vec![0x22, message.len() as u8];
+    raw.extend_from_slice(&message);
+    assert!(__dispatch_v1(&raw, HOOK_BEFORE_REQUEST, pass).is_err());
+}
