@@ -792,6 +792,10 @@ Use the `sdktest` package. It runs your hooks in-process, so an ordinary
 `go test ./...` exercises the code the host actually calls — no proxy, no WASM
 toolchain, no sibling checkout.
 
+Native tests and the compiled Go guest share the same `DispatchHook`
+implementation and `PluginConfig` fallback. WASI memory transfer and
+error-to-trap conversion remain covered by the compiled conformance suite.
+
 ```go
 package main
 

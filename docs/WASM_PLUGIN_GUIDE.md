@@ -57,6 +57,10 @@ run_hook(ptr: u32, size: u32) -> u64
 `run_hook` receives one serialized `HookInput`. The hook named by its oneof arm
 must be present in the bitmap and must match the payload.
 
+The Go WASI wrapper and native `sdktest` harness both use `DispatchHook` for
+input validation, handler dispatch, and result validation. The WASI wrapper
+owns memory transfer and converts returned errors into traps.
+
 The return value packs the output pointer in the high 32 bits and output length
 in the low 32 bits:
 
