@@ -1,0 +1,91 @@
+name: Publish Rust crate from an existing release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing published SDK release tag (for example v0.5.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+# Share the tag release's concurrency group; never publish the same version
+# concurrently with the normal release workflow.
+concurrency:
+  group: sdk-release-refs/tags/${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      revision: ${{ steps.release.outputs.revision }}
+    steps:
+      - name: Resolve an existing published release to immutable source
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SDK_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$SDK_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo '::error::Expected a published vX.Y.Z release tag, not a branch.'
+            exit 1
+          fi
+          published=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$SDK_TAG" \
+            --jq 'select(.draft == false) | .tag_name')
+          test "$published" = "$SDK_TAG"
+          revision=$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$SDK_TAG" --jq .sha)
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+
+          # Compare immutable commits before any release code runs. The release
+          # must already have landed on the repository's default branch.
+          default_branch=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)
+          default_revision=$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/heads/$default_branch" --jq .sha)
+          [[ "$default_revision" =~ ^[0-9a-f]{40}$ ]]
+          merge_base=$(gh api "repos/$GITHUB_REPOSITORY/compare/$revision...$default_revision" --jq .merge_base_commit.sha)
+          if [ "$merge_base" != "$revision" ]; then
+            echo '::error::The release commit must be reachable from the default branch before publication.'
+            exit 1
+          fi
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.resolve.outputs.revision }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+      - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Check the crate version against the selected release
+        env:
+          SDK_TAG: ${{ inputs.tag }}
+        run: |
+          cargo metadata --no-deps --format-version 1 \
+            --manifest-path rust/torana-plugin-sdk/Cargo.toml \
+            | jq --exit-status --arg version "${SDK_TAG#v}" \
+              '.packages[] | select(.name == "torana-plugin-sdk") | .version == $version'
+      - run: cargo test --locked --manifest-path rust/torana-plugin-sdk/Cargo.toml
+      - name: Check the archive and an independent consumer
+        run: ./scripts/check-rust-package.sh
+      - name: Publish only the missing Rust crate
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo '::error::Add the CARGO_REGISTRY_TOKEN Actions secret with publishing access to torana-plugin-sdk. See RELEASING.md.'
+            exit 1
+          fi
+          cargo publish --manifest-path rust/torana-plugin-sdk/Cargo.toml --locked
