@@ -52,7 +52,7 @@ var ErrStateUnavailable = errors.New("torana: durable plugin state is not availa
 // empty string returns "" with no HostError. Branch with IsNotFound rather than
 // testing the value — the same rule as MetaGet and CacheGet.
 func StateGet(key string) (string, bool, error) {
-	raw, herr, err := HostCall("env.state_get", &pbv1.StateGetArgs{Key: key})
+	raw, herr, err := hostCallChecked("env.state_get", &pbv1.StateGetArgs{Key: key})
 	if err != nil {
 		return "", false, err
 	}
@@ -70,7 +70,7 @@ func StateGet(key string) (string, bool, error) {
 // An empty value stores an empty value. It does not delete; use StateDelete to
 // release a key.
 func StateSet(key, value string) error {
-	_, herr, err := HostCall("env.state_set", &pbv1.StateSetArgs{Key: key, Value: value})
+	_, herr, err := hostCallChecked("env.state_set", &pbv1.StateSetArgs{Key: key, Value: value})
 	if err != nil {
 		return err
 	}
@@ -94,7 +94,7 @@ func StateSet(key, value string) error {
 // permission from the command string would look for a capability that does not
 // exist.
 func StateDelete(key string) error {
-	_, herr, err := HostCall(pbv1.StateDeleteCommand, &pbv1.StateDeleteArgs{Key: key})
+	_, herr, err := hostCallChecked(pbv1.StateDeleteCommand, &pbv1.StateDeleteArgs{Key: key})
 	if err != nil {
 		return err
 	}
@@ -251,7 +251,7 @@ func StateScan(prefix, cursor string, limit uint32) (*pbv1.StateScanResult, erro
 // multiplies the operator's token spend. Torana's determinism test exists to
 // catch exactly this. Use it to decide *whether* to act, never as content.
 func Now() (int64, error) {
-	raw, herr, err := HostCall("env.now", nil)
+	raw, herr, err := hostCallChecked("env.now", nil)
 	if err != nil {
 		return 0, err
 	}

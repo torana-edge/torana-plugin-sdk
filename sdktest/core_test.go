@@ -218,10 +218,10 @@ func TestPluginConfigRefusalIsObservable(t *testing.T) {
 
 func TestOriginalsAbsentReportNotOK(t *testing.T) {
 	sdktest.New(t).Run(func() {
-		if _, ok := sdk.OriginalRequest(); ok {
+		if _, ok, _ := sdk.OriginalRequest(); ok {
 			t.Fatal("an uncaptured original request reported ok")
 		}
-		if _, ok := sdk.OriginalResponse(); ok {
+		if _, ok, _ := sdk.OriginalResponse(); ok {
 			t.Fatal("an uncaptured original response reported ok")
 		}
 	})
@@ -238,14 +238,20 @@ func TestCapturedEmptyOriginalsArePresent(t *testing.T) {
 	h.SetOriginalRequest(&pbv1.ChatRequest{})
 	h.SetOriginalResponse(nil)
 	h.Run(func() {
-		req, ok := sdk.OriginalRequest()
+		req, ok, err := sdk.OriginalRequest()
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !ok {
 			t.Fatal("a captured all-default request reported absent")
 		}
 		if req == nil {
 			t.Fatal("ok=true with a nil request")
 		}
-		body, ok := sdk.OriginalResponse()
+		body, ok, err := sdk.OriginalResponse()
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !ok {
 			t.Fatal("a captured empty response body reported absent")
 		}
@@ -260,11 +266,11 @@ func TestNonEmptyOriginalsRoundTrip(t *testing.T) {
 	h.SetOriginalRequest(&pbv1.ChatRequest{Model: "claude-opus-5"})
 	h.SetOriginalResponse([]byte("pristine-upstream"))
 	h.Run(func() {
-		req, ok := sdk.OriginalRequest()
+		req, ok, _ := sdk.OriginalRequest()
 		if !ok || req.Model != "claude-opus-5" {
 			t.Fatalf("request round trip: ok=%v req=%+v", ok, req)
 		}
-		body, ok := sdk.OriginalResponse()
+		body, ok, _ := sdk.OriginalResponse()
 		if !ok || string(body) != "pristine-upstream" {
 			t.Fatalf("response round trip: ok=%v body=%q", ok, body)
 		}
@@ -279,7 +285,7 @@ func TestMalformedOriginalRequestReportsNotOK(t *testing.T) {
 		return sdktest.HostResultValue([]byte{0xff, 0xff, 0xff, 0xff}), nil
 	})
 	h.Run(func() {
-		if _, ok := sdk.OriginalRequest(); ok {
+		if _, ok, _ := sdk.OriginalRequest(); ok {
 			t.Fatal("a malformed original request decoded as ok")
 		}
 	})

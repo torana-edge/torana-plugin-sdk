@@ -22,7 +22,7 @@ type validator interface {
 // *HostError. Empty command, invalid args, empty/malformed replies, and
 // transport failures return a Go error — callers that must not fail open
 // (verdicts) panic on those.
-func HostCall(cmd string, args proto.Message) ([]byte, *pbv1.HostError, error) {
+func hostCallChecked(cmd string, args proto.Message) ([]byte, *pbv1.HostError, error) {
 	if cmd == "" {
 		return nil, nil, fmt.Errorf("torana: host-call command is required")
 	}
@@ -83,12 +83,23 @@ func HostCall(cmd string, args proto.Message) ([]byte, *pbv1.HostError, error) {
 // Extension commands are NOT open-ended today. sdk.Permissions is a closed
 // allowlist and hosts must not invent names; a third-party extension registry
 // would be a separate platform feature.
-func HostCallExtension(cmd string, args []byte) ([]byte, *pbv1.HostError, error) {
+func HostCall(cmd string, args proto.Message) ([]byte, error) {
+	value, herr, err := hostCallChecked(cmd, args)
+	if err != nil {
+		return nil, err
+	}
+	if herr != nil {
+		return nil, classifiedRefusal(herr)
+	}
+	return value, nil
+}
+
+func HostCallExtension(cmd string, args []byte) ([]byte, error) {
 	if cmd == "" {
-		return nil, nil, fmt.Errorf("torana: extension host-call command is required")
+		return nil, fmt.Errorf("torana: extension host-call command is required")
 	}
 	if strings.HasPrefix(cmd, "env.") {
-		return nil, nil, fmt.Errorf("torana: %q is a core host call, not an extension; "+
+		return nil, fmt.Errorf("torana: %q is a core host call, not an extension; "+
 			"use HostCall with its typed arguments — routing it here would bypass "+
 			"the typed contract for verdicts, metadata, cache and state", cmd)
 	}
@@ -98,12 +109,19 @@ func HostCallExtension(cmd string, args []byte) ([]byte, *pbv1.HostError, error)
 	// canonical form: the capability is env.host_call.<cmd>, so passing the
 	// permission string itself does not accidentally resolve.
 	if !IsPermission("env.host_call." + cmd) {
-		return nil, nil, fmt.Errorf("torana: %q is not a supported extension command; "+
+		return nil, fmt.Errorf("torana: %q is not a supported extension command; "+
 			"pass the canonical token (for example \"torana_plugin_counter\", not "+
 			"\"env.host_call.torana_plugin_counter\"). Supported extensions are a "+
 			"closed set in this SDK version", cmd)
 	}
-	return dispatchHostCall(cmd, args)
+	value, herr, err := dispatchHostCall(cmd, args)
+	if err != nil {
+		return nil, err
+	}
+	if herr != nil {
+		return nil, classifiedRefusal(herr)
+	}
+	return value, nil
 }
 
 // dispatchHostCall is the one place a host reply is decoded. HostCall and
@@ -142,7 +160,7 @@ func dispatchHostCall(cmd string, argBytes []byte) ([]byte, *pbv1.HostError, err
 // checkedHostCall is the error-returning verdict path. It preserves typed
 // refusals while keeping local and protocol defects as ordinary errors.
 func checkedHostCall(cmd string, args proto.Message) error {
-	_, herr, err := HostCall(cmd, args)
+	_, herr, err := hostCallChecked(cmd, args)
 	if err != nil {
 		return err
 	}
@@ -153,7 +171,7 @@ func checkedHostCall(cmd string, args proto.Message) error {
 }
 
 func checkedHostCallValue(cmd string, args proto.Message) ([]byte, bool, error) {
-	value, herr, err := HostCall(cmd, args)
+	value, herr, err := hostCallChecked(cmd, args)
 	if err != nil {
 		return nil, false, err
 	}

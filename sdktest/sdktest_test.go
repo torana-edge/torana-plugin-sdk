@@ -164,18 +164,21 @@ func TestTypedPermissionDeniedIsQuiet(t *testing.T) {
 	sdktest.Reset()
 	t.Cleanup(sdktest.Reset)
 
-	var hostErr *pbv1.HostError
+	var hostErr error
 	sdk.OnBeforeRequest(func(context.Context, *pbv1.ChatRequest) (sdk.RequestResult, error) {
-		_, hostErr, _ = sdk.HostCall("env.block_request", &pbv1.BlockRequestArgs{
+		_, hostErr = sdk.HostCall("env.block_request", &pbv1.BlockRequestArgs{
 			Status: 403, Code: "x", Message: "y",
 		})
-		sdk.BlockRequest(403, "x", "y") // classified refusal must not panic
+		if err := sdk.BlockRequest(403, "x", "y"); err != nil {
+			hostErr = err
+		}
 		return sdk.PassRequest(), nil
 	})
 	h := sdktest.New(t)
 	h.DenyPermission("env.block_request")
 	h.BeforeRequest(&pbv1.ChatRequest{})
-	if hostErr == nil || hostErr.Code != pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
+	var refusal *sdk.HostCallRefusalError
+	if hostErr == nil || !errors.As(hostErr, &refusal) || refusal.Code != pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
 		t.Fatalf("want typed permission denied, got %+v", hostErr)
 	}
 }

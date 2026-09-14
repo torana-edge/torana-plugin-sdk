@@ -52,7 +52,8 @@ func MetaGet(key string) (string, bool, error) {
 // An empty value stores an empty value; it is not a delete. After
 // MetaSet(k, ""), MetaGet(k) succeeds with an empty value rather than reporting
 // NOT_FOUND.
-func MetaSet(key, value string) error { return checkedHostCall("env.meta_set", &pbv1.MetaSetArgs{Key: key, Value: value})
+func MetaSet(key, value string) error {
+	return checkedHostCall("env.meta_set", &pbv1.MetaSetArgs{Key: key, Value: value})
 }
 
 // CacheGet reads a key from this plugin's private cross-request cache.
@@ -66,7 +67,15 @@ func CacheGet(key string) (string, bool, error) {
 }
 
 // CacheSet writes a key to this plugin's private cross-request cache.
-func CacheSet(key, value string) error { return checkedHostCall("env.cache_set", &pbv1.CacheSetArgs{Key: key, Value: value})
+func CacheSet(key, value string) error {
+	return checkedHostCall("env.cache_set", &pbv1.CacheSetArgs{Key: key, Value: value})
+}
+
+func CacheSetTTL(key, value string, ttlMS uint64) error {
+	return checkedHostCall("env.cache_set", &pbv1.CacheSetArgs{Key: key, Value: value, TtlMs: &ttlMS})
+}
+func CacheDelete(key string) error {
+	return checkedHostCall("env.cache_delete", &pbv1.CacheDeleteArgs{Key: key})
 }
 
 // SharedCacheGet reads a key from the explicit cross-plugin cache namespace.
@@ -80,5 +89,12 @@ func SharedCacheGet(key string) (string, bool, error) {
 
 // SharedCacheSet writes a key to the explicit cross-plugin cache namespace.
 // Possessing private env.cache_set never authorizes this operation.
-func SharedCacheSet(key, value string) error { return checkedHostCall("env.shared_cache_set", &pbv1.CacheSetArgs{Key: key, Value: value})
+func SharedCacheSet(key, value string) error {
+	return checkedHostCall("env.shared_cache_set", &pbv1.CacheSetArgs{Key: key, Value: value})
+}
+func SharedCacheSetTTL(key, value string, ttlMS uint64) error {
+	return checkedHostCall("env.shared_cache_set", &pbv1.CacheSetArgs{Key: key, Value: value, TtlMs: &ttlMS})
+}
+func SharedCacheDelete(key string) error {
+	return checkedHostCall("env.shared_cache_delete", &pbv1.CacheDeleteArgs{Key: key})
 }

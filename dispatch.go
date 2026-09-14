@@ -95,7 +95,7 @@ func DispatchHook(in *pbv1.HookInput) ([]byte, error) {
 // means no operator settings and returns "{}". Refusals and malformed replies
 // are returned as errors so a policy plugin cannot silently run with defaults.
 func PluginConfig() (string, error) {
-	raw, herr, err := HostCall("env.plugin_config", nil)
+	raw, herr, err := hostCallChecked("env.plugin_config", nil)
 	if err != nil {
 		return "", err
 	}

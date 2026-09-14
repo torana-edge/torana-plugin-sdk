@@ -32,7 +32,7 @@ func WriteFile(path string, data []byte) error {
 
 // ListFiles lists declared files under prefix in stable lexical order.
 func ListFiles(prefix string) ([]string, *pbv1.HostError, error) {
-	value, herr, err := HostCall("env.file_list", &pbv1.FileListArgs{Prefix: prefix})
+	value, herr, err := hostCallChecked("env.file_list", &pbv1.FileListArgs{Prefix: prefix})
 	if err != nil || herr != nil {
 		return nil, herr, err
 	}
@@ -137,6 +137,26 @@ func GetPromptCachePolicy(resource string) (*pbv1.PromptCachePolicy, error) {
 		return nil, fmt.Errorf("torana: prompt cache policy: %w", err)
 	}
 	return &policy, nil
+}
+
+func GetResourceInfo(kind, name string) (*pbv1.ResourceInfo, error) {
+	request := &pbv1.ResourceInfoArgs{Kind: kind, Name: name}
+	if err := request.Validate(); err != nil {
+		return nil, err
+	}
+	raw, _, err := checkedHostCallValue("env.resource_info", request)
+	if err != nil {
+		return nil, err
+	}
+	var info pbv1.ResourceInfo
+	if err := proto.Unmarshal(raw, &info); err != nil {
+		return nil, fmt.Errorf("torana: decode resource info: %w", err)
+	}
+	if err := info.Validate(); err != nil {
+		return nil, fmt.Errorf("torana: resource info: %w", err)
+	}
+	info.Operations = append([]string(nil), info.Operations...)
+	return &info, nil
 }
 
 // LongestPromptCacheTier returns the longest configured tier. Fewer than two

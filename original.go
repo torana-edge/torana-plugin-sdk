@@ -1,6 +1,7 @@
 package plugin_sdk
 
 import (
+	"fmt"
 	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 	"google.golang.org/protobuf/proto"
 )
@@ -12,7 +13,7 @@ import (
 //
 // Requires the env.original_request permission grant. Returns ok=false when
 // the grant is missing, the call runs outside a request, or decoding fails.
-func OriginalRequest() (*pbv1.ChatRequest, bool) {
+func OriginalRequest() (*pbv1.ChatRequest, bool, error) {
 	// ok=false covers every unavailable case deliberately: the caller's only
 	// sensible response to "no original" is to skip whatever needed it, so a
 	// classified error would be ceremony. The framed path still matters — the
@@ -24,15 +25,15 @@ func OriginalRequest() (*pbv1.ChatRequest, bool) {
 	// treating an empty value as absence would report a real captured request
 	// as missing — the same absence-versus-emptiness confusion the envelope
 	// exists to prevent.
-	raw, herr, err := HostCall("env.original_request", nil)
+	raw, herr, err := hostCallChecked("env.original_request", nil)
 	if err != nil || herr != nil {
-		return nil, false
+		return nil, false, err
 	}
 	var req pbv1.ChatRequest
 	if proto.Unmarshal(raw, &req) != nil {
-		return nil, false
+		return nil, false, fmt.Errorf("torana: decode original request: %w", err)
 	}
-	return &req, true
+	return &req, true, nil
 }
 
 // OriginalResponse returns the raw upstream response body exactly as the
@@ -42,14 +43,14 @@ func OriginalRequest() (*pbv1.ChatRequest, bool) {
 //
 // Requires the env.original_response permission grant. Returns ok=false when
 // unavailable.
-func OriginalResponse() ([]byte, bool) {
+func OriginalResponse() ([]byte, bool, error) {
 	// As with OriginalRequest, absence is the error arm. An upstream body can
 	// legitimately be empty (a 204, or a provider that returns nothing), and
 	// reporting that as "no original captured" would send a plugin looking for
 	// a missing grant.
-	raw, herr, err := HostCall("env.original_response", nil)
+	raw, herr, err := hostCallChecked("env.original_response", nil)
 	if err != nil || herr != nil {
-		return nil, false
+		return nil, false, err
 	}
-	return raw, true
+	return raw, true, nil
 }

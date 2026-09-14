@@ -73,7 +73,7 @@ func MustSetIdentity(identity string) {
 // blockIndex. Permission env.meta_set (dispatcher maps env.meta_append).
 // See pb/v1.MetaAppendSuccessValue for reply semantics.
 func MetaAppend(blockIndex int32, fragment []byte) ([]byte, *pbv1.HostError, error) {
-	return HostCall(pbv1.MetaAppendCommand, &pbv1.MetaAppendArgs{
+	return hostCallChecked(pbv1.MetaAppendCommand, &pbv1.MetaAppendArgs{
 		BlockIndex: blockIndex,
 		Fragment:   fragment,
 	})
