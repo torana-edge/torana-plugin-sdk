@@ -135,6 +135,9 @@ func TestNativeVerdictPriorityAndIdentityRollback(t *testing.T) {
 	if len(r.AcceptedCalls()) != 6 || len(r.EffectiveBlockCalls()) != 1 || len(r.EffectiveRespondCalls()) != 1 || len(r.EffectiveIdentityCalls()) != 1 {
 		t.Fatalf("priority not applied: %+v", r.AcceptedCalls())
 	}
+	if got := h.EffectiveBlockCalls(); len(got) != 1 {
+		t.Fatalf("aggregate effective blocks = %d, want one winner: %+v", len(got), got)
+	}
 	sdk.OnAfterResponse(func(context.Context, *pb.ChatResponse, bool) (sdk.ResponseResult, error) {
 		return sdk.ResponseResult{}, errors.New("later invocation failed")
 	})

@@ -635,7 +635,7 @@ func (h *Harness) AcceptedCalls() []HostCallEntry {
 func (h *Harness) EffectiveBlockCalls() []HostCallEntry {
 	var out []HostCallEntry
 	for _, c := range h.AcceptedCalls() {
-		if c.Command == "env.block_request" {
+		if c.Command == "env.block_request" && c.Effective {
 			out = append(out, c)
 		}
 	}
