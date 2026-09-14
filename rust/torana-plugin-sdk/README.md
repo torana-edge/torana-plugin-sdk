@@ -16,8 +16,13 @@ Add the crate and build for WASI Preview 1:
 crate-type = ["cdylib"]
 
 [dependencies]
-torana-plugin-sdk = "0.4"
+torana-plugin-sdk = { git = "https://github.com/torana-edge/torana-plugin-sdk", tag = "v0.5.0", version = "=0.5.0" }
 ```
+
+The tag and exact package version deliberately agree. This path works directly
+from the signed GitHub release even when crates.io publication is unavailable.
+After `torana-plugin-sdk` 0.5.0 is published to crates.io, registry consumers
+may use `torana-plugin-sdk = "=0.5.0"`.
 
 ```bash
 rustup target add wasm32-wasip1
