@@ -107,6 +107,7 @@ type Harness struct {
 	calls        []HostCallEntry
 	accepted     []HostCallEntry
 	permissions  map[string]bool
+	hooks        map[string]bool
 	active       *Request
 	now          func() int64
 	// Presence is tracked separately from the byte slices. An all-default
@@ -244,6 +245,26 @@ func (h *Harness) WithPermissions(permissions []string) *Harness {
 		h.permissions[p] = true
 	}
 	return h
+}
+
+// WithHooks constrains dispatch to the hooks declared by a manifest.
+func (h *Harness) WithHooks(hooks []string) *Harness {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.hooks = make(map[string]bool, len(hooks))
+	for _, hook := range hooks {
+		if !sdk.IsHook(hook) {
+			h.t.Fatalf("sdktest: unknown hook %q", hook)
+		}
+		h.hooks[hook] = true
+	}
+	return h
+}
+
+func (h *Harness) hookAllowed(name string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.hooks == nil || h.hooks[name]
 }
 
 // StubModelComplete installs a typed model-service double. The callback sees
@@ -510,6 +531,13 @@ func (h *Harness) hostCallBytes(cmd string, args []byte) ([]byte, error) {
 	if stub != nil {
 		res, err := stub(argsStr)
 		if err != nil {
+			h.mu.Lock()
+			entry := HostCallEntry{Command: cmd, Args: argsStr, Result: "<transport error>"}
+			h.calls = append(h.calls, entry)
+			if h.active != nil {
+				h.active.calls = append(h.active.calls, entry)
+			}
+			h.mu.Unlock()
 			return nil, err
 		}
 		h.mu.Lock()

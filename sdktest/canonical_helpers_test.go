@@ -97,3 +97,18 @@ func TestPermissionModeRefusesBeforeStubAndScopesOutcomes(t *testing.T) {
 		t.Fatal("accepted block missing from request scope")
 	}
 }
+
+func TestHarnessManifestHookAndMalformedReplyBoundaries(t *testing.T) {
+	h := sdktest.New(t).WithHooks([]string{"run_on_tick"})
+	r := h.NewRequest()
+	if got := r.BeforeRequest(nil); got.Err == nil {
+		t.Fatal("undeclared hook dispatched")
+	}
+	h2 := sdktest.New(t).WithPermissions([]string{"env.cache_get"})
+	h2.StubHostCall("env.cache_get", func(string) (string, error) { return "malformed", nil })
+	r2 := h2.NewRequest()
+	r2.Run(func() { _, _, _ = sdk.CacheGet("bad") })
+	if len(r2.AcceptedCalls()) != 0 || len(r2.Calls()) != 1 {
+		t.Fatalf("malformed reply calls=%+v accepted=%+v", r2.Calls(), r2.AcceptedCalls())
+	}
+}
