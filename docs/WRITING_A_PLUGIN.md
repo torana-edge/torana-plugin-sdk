@@ -121,7 +121,7 @@ constructors (`PassRequest`, `ReplaceRequest`, `PassEvent`, `SuppressEvent`,
 the host applies `failure_mode`. Verdicts (`BlockRequest`, `RespondRequest`,
 `RouteRequest`, `SetIdentity`) are attributed host calls — invalid arguments
 and protocol failures panic; classified host refusals are fire-and-forget.
-Typed `HostCall(cmd, args)` returns `(value, *HostError, error)`. For stream
+Typed `HostCall(cmd, args)` and `HostCallExtension` return `([]byte, error)`. For stream
 tool-call assembly prefer `sdk.NewStreamHandler().OnToolCall(...).Register()`.
 ---
 
@@ -566,7 +566,7 @@ extension helpers such as `sdk.SendRequest` own their extension framing.
 | `env.emit_metric` | `sdk.EmitMetric` | OTel metrics. |
 | `env.host_call.torana_plugin_counter` | `sdk.HostCallExtension` | Named counters that appear in `/stats`. |
 | `env.serve_http` | `sdk.OnHTTPRequest` | Serve pages and JSON under `/_torana/plugin/<name>/`. |
-| `env.plugin_config` | `sdk.PluginConfigStrict` | Read and strictly decode your own `plugins.config.<name>` blob; malformed configuration is an error. |
+| `env.plugin_config` | `sdk.PluginConfig` | Read your own `plugins.config.<name>` JSON blob and handle the returned error. |
 
 ### What the host tells you about a request
 
