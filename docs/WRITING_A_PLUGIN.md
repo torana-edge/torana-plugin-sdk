@@ -245,7 +245,7 @@ so a plugin should degrade rather than assume.
 | --- | --- | --- |
 | `env.set_identity` | (v1 host call; `SetIdentityArgs`) | Override the rate-limit / identity key for this request. |
 | `env.block_request` | `sdk.BlockRequest` → v1 `BlockRequestArgs` | Reject the request with a provider-shaped error. |
-| `env.respond_request` | `sdk.RespondRequest` → v1 `RespondRequestArgs` | Answer directly without going upstream. |
+| `env.respond_request` | `sdk.RespondText` / `sdk.RespondRequest` → v1 synthetic response | Answer directly with a canonical response; tool IDs and signatures are host-owned. |
 | `env.route_request` | `sdk.RouteRequest` → v1 `RouteRequestArgs` | Send the request to a different provider. |
 
 **Credentials, private files, and scoped HTTP**
@@ -483,7 +483,8 @@ grant.
 | `env.meta_append` (permission `env.meta_set`) | v1 `MetaAppendArgs` | Atomic append by block index. Non-empty fragment → empty success value (ack). Empty fragment → complete buffer read (absent → empty bytes). Dispatcher maps the command onto `env.meta_set` — there is no separate grant. |
 | `env.cache_get` / `env.cache_set` | `sdk.CacheGet`, `sdk.CacheSet` | Across requests, TTL'd, and private to the exact executing plugin. Another plugin cannot read or overwrite the key. |
 | `env.shared_cache_get` / `env.shared_cache_set` | `sdk.SharedCacheGet`, `sdk.SharedCacheSet` | Explicit cross-plugin exchange. Request only for a documented producer/consumer key contract; private cache grants never imply these capabilities. |
-| `env.state_get` / `env.state_set` / `env.state_delete` / `env.state_keys` | `sdk.StateGet`, `sdk.StateSet`, `sdk.StateDelete`, `sdk.StateKeys` | Across requests **and restarts**, private, never expires. You must delete your own keys — with `StateDelete`, not by setting an empty value. `env.state_delete` is authorised by the **`env.state_set`** grant; there is no fourth capability. |
+| `env.state_get` / `env.state_set` / `env.state_delete` / `env.state_keys` | `sdk.StateGet`, `sdk.StateSet`, `sdk.StateDelete`, `sdk.StateKeys` | Across requests and restarts, private, never expires. Empty is a stored value. |
+| `env.state_compare_and_set` / `env.state_compare_and_delete` / `env.state_scan` | `sdk.StateCompareAndSet`, `sdk.StateCompareAndDelete`, `sdk.StateScan` | Versioned updates use opaque non-reusable versions, so retries cannot overwrite a newer value (no ABA). Scans are ordered, cursor-based, and limited to 256 entries per page. |
 
 **Reading meta and cache: three outcomes, not two**
 
@@ -576,7 +577,7 @@ extension helpers such as `sdk.SendRequest` own their extension framing.
 | `env.emit_metric` | `sdk.EmitMetric` | OTel metrics. |
 | `env.host_call.torana_plugin_counter` | `sdk.HostCallExtension` | Named counters that appear in `/stats`. |
 | `env.serve_http` | `sdk.OnHTTPRequest` | Serve pages and JSON under `/_torana/plugin/<name>/`. |
-| `env.plugin_config` | `sdk.PluginConfigStrict` / `sdk.PluginConfig` | Read your own `plugins.config.<name>` blob. |
+| `env.plugin_config` | `sdk.PluginConfigStrict` | Read and strictly decode your own `plugins.config.<name>` blob; malformed configuration is an error. |
 
 ### What the host tells you about a request
 
@@ -826,7 +827,7 @@ func TestBlocksOnDetectedPII(t *testing.T) {
 	h := sdktest.New(t)
 	h.SetConfig(`{"on_error":"block"}`)
 	h.StubModelComplete(func(args *pbv1.ModelCompleteArgs) (*pbv1.ModelCompleteResult, *pbv1.HostError, error) {
-		return &pbv1.ModelCompleteResult{Content: `{"pii":true,"findings":[{"type":"email","line":1}]}`}, nil, nil
+		return &pbv1.ModelCompleteResult{Message: &pbv1.ResponseMessage{Blocks: []*pbv1.ResponseBlock{{Kind: &pbv1.ResponseBlock_Text{Text: &pbv1.ResponseTextBlock{Text: `{"pii":true,"findings":[{"type":"email","line":1}]}`}}}}}}, nil, nil
 	})
 
 	res := h.BeforeRequest(&pbv1.ChatRequest{Messages: []*pbv1.Message{{

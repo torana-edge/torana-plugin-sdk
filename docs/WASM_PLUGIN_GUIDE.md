@@ -122,6 +122,17 @@ closed command vocabulary. Do not pass permission strings as command names.
 Absence and an empty stored value are different. Cache, metadata, and state
 lookups report absence as `NOT_FOUND`; a present empty value remains a success.
 State deletion uses the typed delete command, authorized by `env.state_set`.
+Versioned state updates use opaque, non-reusable versions through compare-and-set
+and compare-and-delete; use them for concurrent writers and do not invent
+versions. State scans are ordered cursor pages capped at 256 entries. Private
+cache entries may carry a bounded TTL; a cache read distinguishes a missing key
+from a present empty value.
+
+Resource and execution snapshots expose effective limits and routing facts only;
+they never expose credentials, secrets, or arbitrary destinations. Model calls
+use canonical `Message.blocks`, declared tools, and `OutputFormat`; completion
+results likewise contain a canonical response message. Synthetic responses use
+the same shape, with host-owned tool identities and signatures.
 
 ## 4. Mutation authority and provenance
 
