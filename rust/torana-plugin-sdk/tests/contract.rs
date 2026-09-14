@@ -293,3 +293,115 @@ fn stream_assembler_propagates_meta_refusal() {
         Err(torana_plugin_sdk::HostCallError::Refused(_))
     ));
 }
+
+#[test]
+fn stream_handler_preserves_or_clears_signature_and_supports_freeform() {
+    use std::sync::{Arc, Mutex};
+    let buffers = Arc::new(Mutex::new(std::collections::HashMap::<i32, Vec<u8>>::new()));
+    let state = buffers.clone();
+    let _guard = torana_plugin_sdk::install_native_host(move |cmd, args| {
+        let a = pbv1::MetaAppendArgs::decode(args).unwrap();
+        let mut m = state.lock().unwrap();
+        let v = m.entry(a.block_index).or_default();
+        if a.fragment.is_empty() {
+            return Ok(pbv1::HostCallResult {
+                result: Some(pbv1::host_call_result::Result::Value(v.clone())),
+            }
+            .encode_to_vec());
+        }
+        v.extend(a.fragment);
+        Ok(pbv1::HostCallResult {
+            result: Some(pbv1::host_call_result::Result::Value(vec![])),
+        }
+        .encode_to_vec())
+    });
+    fn events(kind: pbv1::ToolInvocationKind, sig: &str) -> Vec<pbv1::StreamEvent> {
+        vec![
+            pbv1::StreamEvent {
+                event: Some(pbv1::stream_event::Event::ContentBlockStart(
+                    pbv1::ContentBlockStart {
+                        index: 2,
+                        block: Some(pbv1::content_block_start::Block::ToolCall(
+                            pbv1::ToolCallRef {
+                                id: "id".into(),
+                                name: "name".into(),
+                                signature: sig.into(),
+                                invocation_kind: kind as i32,
+                            },
+                        )),
+                    },
+                )),
+            },
+            pbv1::StreamEvent {
+                event: Some(pbv1::stream_event::Event::ToolCallDelta(
+                    pbv1::ToolCallDelta {
+                        index: 2,
+                        arguments_delta: "{}".into(),
+                        ..Default::default()
+                    },
+                )),
+            },
+            pbv1::StreamEvent {
+                event: Some(pbv1::stream_event::Event::ContentBlockStop(
+                    pbv1::ContentBlockStop { index: 2 },
+                )),
+            },
+        ]
+    }
+    let unchanged = torana_plugin_sdk::StreamHandler::new(|_| Ok::<_, String>(None));
+    for e in events(pbv1::ToolInvocationKind::Function, "sig") {
+        let _ = unchanged.handle(e).unwrap();
+    }
+    let edited =
+        torana_plugin_sdk::StreamHandler::new(|_| Ok::<_, String>(Some("{\"x\":1}".into())));
+    let mut out = Vec::new();
+    for e in events(pbv1::ToolInvocationKind::Function, "sig") {
+        out = edited.handle(e).unwrap();
+    }
+    let Some(pbv1::stream_event::Event::ContentBlockStart(s)) = out[0].event.as_ref() else {
+        panic!()
+    };
+    let Some(pbv1::content_block_start::Block::ToolCall(r)) = s.block.as_ref() else {
+        panic!()
+    };
+    assert!(r.signature.is_empty());
+    let free =
+        torana_plugin_sdk::StreamHandler::new(|call: torana_plugin_sdk::AssembledToolCall| {
+            Ok::<_, String>(call.input_text)
+        });
+    let mut out = Vec::new();
+    for e in events(pbv1::ToolInvocationKind::Freeform, "") {
+        out = free.handle(e).unwrap();
+    }
+    assert_eq!(out.len(), 3);
+}
+
+#[test]
+fn plugin_config_is_strict_and_typed() {
+    #[derive(serde::Deserialize, Debug, PartialEq)]
+    struct C {
+        enabled: bool,
+    }
+    let _guard = torana_plugin_sdk::install_native_host(|_, _| {
+        Ok(pbv1::HostCallResult {
+            result: Some(pbv1::host_call_result::Result::Value(
+                br#"{"enabled":true}"#.to_vec(),
+            )),
+        }
+        .encode_to_vec())
+    });
+    assert_eq!(
+        torana_plugin_sdk::plugin_config::<C>().unwrap(),
+        C { enabled: true }
+    );
+    drop(_guard);
+    let _guard = torana_plugin_sdk::install_native_host(|_, _| {
+        Ok(pbv1::HostCallResult {
+            result: Some(pbv1::host_call_result::Result::Value(
+                br#"{"x":1,"x":2}"#.to_vec(),
+            )),
+        }
+        .encode_to_vec())
+    });
+    assert!(torana_plugin_sdk::plugin_config::<C>().is_err());
+}
