@@ -13,5 +13,8 @@
   {"name":"stream_event_duplicate_oneof","message_type":"torana.v1.StreamEvent","wire_hex":"0a001200","valid":false},
   {"name":"output_format_bad_schema_json","message_type":"torana.v1.OutputFormat","wire_hex":"1a0178","valid":false},
   {"name":"hook_input_after_response_missing_wrapper","message_type":"torana.v1.HookInput","wire_hex":"2a00","valid":false},
-  {"name":"hook_result_unknown_nested_field","message_type":"torana.v1.HookResult","wire_hex":"0a02a206","valid":false}
+  {"name":"hook_result_unknown_nested_field","message_type":"torana.v1.HookResult","wire_hex":"0a02a206","valid":false},
+  {"name":"stream_tool_start_function_zero","message_type":"torana.v1.StreamEvent","wire_hex":"4a0822060a0163120166","valid":true},
+  {"name":"stream_tool_start_freeform_one","message_type":"torana.v1.StreamEvent","wire_hex":"4a0a22080a01631201662001","valid":true},
+  {"name":"stream_tool_start_unknown_two","message_type":"torana.v1.StreamEvent","wire_hex":"4a0a22080a01631201662002","valid":false}
 ]

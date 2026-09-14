@@ -239,6 +239,8 @@ fn shared_wire_vectors_match_rust_validation() {
             }
         } else if ty == "torana.v1.HookInput" {
             torana_plugin_sdk::__validate_wire_message(&bytes, ".torana.v1.HookInput").is_ok() && pbv1::HookInput::decode(bytes.as_slice()).map(|i| !matches!(i.payload, Some(pbv1::hook_input::Payload::AfterResponse(ref r)) if r.response.is_none())).unwrap_or(false)
+        } else if ty == "torana.v1.StreamEvent" {
+            torana_plugin_sdk::__validate_stream_event(&bytes).is_ok()
         } else {
             torana_plugin_sdk::__validate_wire_message(&bytes, &format!(".{ty}")).is_ok()
         };
@@ -348,6 +350,8 @@ fn stream_assembler_passes_non_tool_events_and_rejects_corrupt_frames() {
         Vec::<u8>::new(),
         vec![0x01],
         vec![0, 0, 0, 1, 0xff],
+        vec![0xff, 0xff, 0xff, 0xff],
+        vec![0, 0, 0, 9, 0x0a, 1, b'i', 0x12, 1, b'n', 0x98, 0x06, 1],
     ]));
     let transport_replies = replies.clone();
     let _guard = torana_plugin_sdk::install_native_host(move |command, args| {
@@ -383,8 +387,15 @@ fn stream_assembler_passes_non_tool_events_and_rejects_corrupt_frames() {
     assert!(
         matches!(assembler.feed(stop()), Err(torana_plugin_sdk::HostCallError::Protocol(message)) if message.contains("header"))
     );
+    assert!(matches!(
+        assembler.feed(stop()),
+        Err(torana_plugin_sdk::HostCallError::Protocol(_))
+    ));
     assert!(
-        matches!(assembler.feed(stop()), Err(torana_plugin_sdk::HostCallError::Protocol(message)) if message.contains("decode") || message.contains("reference"))
+        matches!(assembler.feed(stop()), Err(torana_plugin_sdk::HostCallError::Protocol(message)) if message.contains("corrupt tool frame"))
+    );
+    assert!(
+        matches!(assembler.feed(stop()), Err(torana_plugin_sdk::HostCallError::Protocol(message)) if message.contains("unknown field"))
     );
 }
 

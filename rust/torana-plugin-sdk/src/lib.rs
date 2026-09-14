@@ -688,6 +688,14 @@ fn validate_stream_event(event: &pbv1::StreamEvent) -> Result<(), String> {
 }
 
 #[doc(hidden)]
+pub fn __validate_stream_event(bytes: &[u8]) -> Result<(), String> {
+    __validate_wire_message(bytes, ".torana.v1.StreamEvent")?;
+    let event = pbv1::StreamEvent::decode(bytes)
+        .map_err(|error| format!("torana sdk: decode StreamEvent: {error}"))?;
+    validate_stream_event(&event)
+}
+
+#[doc(hidden)]
 pub fn __validate_wire_message(mut bytes: &[u8], name: &str) -> Result<(), String> {
     use prost::Message;
     use prost_types::{
@@ -1838,10 +1846,15 @@ impl StreamAssembler {
                     return Err(HostCallError::Protocol("corrupt tool frame header".into()));
                 }
                 let n = u32::from_be_bytes(b[..4].try_into().unwrap()) as usize;
-                if n + 4 > b.len() {
+                let end = n.checked_add(4).ok_or_else(|| {
+                    HostCallError::Protocol("corrupt tool frame length overflow".into())
+                })?;
+                if end > b.len() {
                     return Err(HostCallError::Protocol("corrupt tool frame".into()));
                 }
-                let r = pbv1::ToolCallRef::decode(&b[4..4 + n])
+                __validate_wire_message(&b[4..end], ".torana.v1.ToolCallRef")
+                    .map_err(HostCallError::Protocol)?;
+                let r = pbv1::ToolCallRef::decode(&b[4..end])
                     .map_err(|e| HostCallError::Protocol(e.to_string()))?;
                 if r.id.is_empty()
                     || r.name.is_empty()
@@ -1855,7 +1868,7 @@ impl StreamAssembler {
                         "corrupt tool frame reference".into(),
                     ));
                 }
-                let args = String::from_utf8(b[4 + n..].to_vec())
+                let args = String::from_utf8(b[end..].to_vec())
                     .map_err(|_| HostCallError::Protocol("tool arguments not UTF-8".into()))?;
                 let input = (r.invocation_kind == pbv1::ToolInvocationKind::Freeform as i32)
                     .then_some(args.clone());
