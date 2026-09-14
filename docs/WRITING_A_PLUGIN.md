@@ -777,29 +777,26 @@ torana plugin build . -o plugin.wasm
 ### Rust
 
 Use `torana-plugin-sdk` and compile a `cdylib` for `wasm32-wasip1`. A plugin
-provides one typed dispatcher and declares its exact hook bitmap with
-`export_plugin_v1!`; the macro exports `supported_hooks` and `run_hook`.
+implements the typed `Plugin` trait and declares its exact hook bitmap with
+`export_plugin_v1!`; the macro exports `abi_version`, `supported_hooks`, and
+`run_hook`.
 
 ```rust
-use torana_plugin_sdk::{export_plugin_v1, pbv1, HOOK_BEFORE_REQUEST};
-
-fn dispatch(input: pbv1::HookInput) -> Result<Option<pbv1::HookResult>, String> {
-    let Some(pbv1::hook_input::Payload::ChatRequest(request)) = input.payload else {
-        return Err("received an undeclared hook".into());
-    };
-    torana_plugin_sdk::log(&format!("model: {}", request.model),
-                           torana_plugin_sdk::LOG_INFO);
-    Ok(None)
+use torana_plugin_sdk::{export_plugin_v1, pbv1, Plugin, RequestResult, HOOK_BEFORE_REQUEST};
+struct Logger;
+impl Plugin for Logger {
+    const SUPPORTED_HOOKS: u32 = HOOK_BEFORE_REQUEST;
+    fn before_request(_: pbv1::ChatRequest) -> Result<RequestResult, String> {
+        Ok(RequestResult::pass())
+    }
 }
-
-export_plugin_v1!(HOOK_BEFORE_REQUEST, dispatch);
+export_plugin_v1!(Logger);
 ```
 
-Combine multiple hooks by OR-ing the exported hook constants and matching the
-corresponding `HookInput.payload` arms. Return `Ok(None)` to pass through. A
-mutation returns the single `HookResult.action` valid for that hook. Host calls
-use protobuf arguments and `host_call`; typed refusals preserve the stable
-`ErrorCode` classification.
+Combine multiple hooks by OR-ing the exported hook constants and implementing
+the corresponding typed trait methods. Each family has its own result type;
+`RequestResult` cannot be returned from an after-response callback. Host calls
+use protobuf arguments and typed refusals preserve stable `ErrorCode` values.
 
 ---
 

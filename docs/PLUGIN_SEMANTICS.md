@@ -36,7 +36,9 @@ When Torana invokes `run_before_request`, it passes serialized bytes of
 
 The Go plugin SDK handles all the underlying memory allocation, pointer packing, and Protobuf marshaling for you.
 
-**CRITICAL:** Do NOT attempt to read raw JSON or use `map[string]any`. You will lose the benefits of Protobuf unknown field preservation.
+JSON fields are opaque provider bytes. Rust helpers validate strict JSON shape,
+reject duplicate keys, and preserve the original bytes; do not decode and
+re-encode provider JSON when ordering or signatures matter.
 
 ### The Correct Unmarshaling Pattern
 

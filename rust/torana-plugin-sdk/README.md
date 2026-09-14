@@ -49,3 +49,10 @@ or credentials from guest code.
 See the repository's
 [Rust authoring guide](https://github.com/torana-edge/torana-plugin-sdk/blob/main/docs/WRITING_A_PLUGIN.md#rust)
 for hooks, manifests, capabilities, and bundle installation.
+Rust authors implement the typed `Plugin` trait and use
+`export_plugin_v1!(PluginType)`. Result families are hook-specific, and helper
+errors remain classified rather than being converted to pass-through. Use
+`plugin_config::<T>()` for strict typed JSON configuration,
+`state_compare_and_set` for opaque versioned updates, and `StreamHandler` for
+host-backed tool-call assembly. `execution()` exposes only the current
+invocation snapshot; it never contains credentials or destinations.

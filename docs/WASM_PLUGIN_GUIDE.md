@@ -81,16 +81,15 @@ result, because empty output means “continue unchanged.”
 Minimal Rust shape:
 
 ```rust
-use torana_plugin_sdk::{export_plugin_v1, pbv1, HOOK_BEFORE_REQUEST};
-
-fn dispatch(input: pbv1::HookInput) -> Result<Option<pbv1::HookResult>, String> {
-    let Some(pbv1::hook_input::Payload::ChatRequest(_request)) = input.payload else {
-        return Err("received an undeclared hook".into());
-    };
-    Ok(None) // pass through
+use torana_plugin_sdk::{export_plugin_v1, pbv1, Plugin, RequestResult, HOOK_BEFORE_REQUEST};
+struct PluginImpl;
+impl Plugin for PluginImpl {
+    const SUPPORTED_HOOKS: u32 = HOOK_BEFORE_REQUEST;
+    fn before_request(_: pbv1::ChatRequest) -> Result<RequestResult, String> {
+        Ok(RequestResult::pass())
+    }
 }
-
-export_plugin_v1!(HOOK_BEFORE_REQUEST, dispatch);
+export_plugin_v1!(PluginImpl);
 ```
 
 ## 3. Host imports and refusal framing
