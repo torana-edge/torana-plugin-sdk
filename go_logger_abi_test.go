@@ -73,7 +73,7 @@ func TestRustLoggerManifestMatchesV1Surface(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(src)
-	for _, required := range []string{"export_plugin_v1!", "HOOK_BEFORE_REQUEST", "pbv1::HookInput"} {
+	for _, required := range []string{"export_plugin_v1!", "HOOK_BEFORE_REQUEST", "impl Plugin for Logger", "Result<RequestResult, String>"} {
 		if !strings.Contains(body, required) {
 			t.Fatalf("rust-logger source is missing %q", required)
 		}
