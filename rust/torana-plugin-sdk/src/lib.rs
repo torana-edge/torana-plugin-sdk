@@ -6,6 +6,7 @@
 
 use core::alloc::Layout;
 use core::{ptr, slice};
+use prost::Message;
 
 #[cfg(not(target_arch = "wasm32"))]
 thread_local! { static NATIVE_HOST: std::cell::RefCell<Option<Box<dyn Fn(&str, &[u8]) -> Result<Vec<u8>, HostCallError>>>> = const { std::cell::RefCell::new(None) }; }
@@ -1544,6 +1545,98 @@ pub fn set_identity(identity: &str) -> Result<(), HostCallError> {
         },
     )
     .map(|_| ())
+}
+
+pub struct AssembledToolCall {
+    pub index: i32,
+    pub id: String,
+    pub name: String,
+    pub signature: String,
+    pub invocation_kind: pbv1::ToolInvocationKind,
+    pub arguments: String,
+    pub input_text: Option<String>,
+}
+pub struct StreamFeed {
+    pub emit: Vec<pbv1::StreamEvent>,
+    pub suppress: bool,
+    pub complete: Option<AssembledToolCall>,
+}
+pub struct StreamAssembler;
+impl StreamAssembler {
+    pub fn new() -> Self {
+        Self
+    }
+    pub fn feed(&self, event: pbv1::StreamEvent) -> Result<StreamFeed, HostCallError> {
+        let original = event.clone();
+        use pbv1::stream_event::Event;
+        match event.event {
+            Some(Event::ContentBlockStart(s)) => {
+                if let Some(pbv1::content_block_start::Block::ToolCall(r)) = s.block {
+                    let mut h = r.encode_to_vec();
+                    let mut f = (h.len() as u32).to_be_bytes().to_vec();
+                    f.append(&mut h);
+                    meta_append(s.index, &f)?;
+                    return Ok(StreamFeed {
+                        emit: vec![],
+                        suppress: true,
+                        complete: None,
+                    });
+                }
+            }
+            Some(Event::ToolCallDelta(d)) => {
+                let f = d.input_text_delta.unwrap_or(d.arguments_delta).into_bytes();
+                if !f.is_empty() {
+                    meta_append(d.index, &f)?;
+                }
+                return Ok(StreamFeed {
+                    emit: vec![],
+                    suppress: true,
+                    complete: None,
+                });
+            }
+            Some(Event::ContentBlockStop(s)) => {
+                let b = meta_append(s.index, &[])?;
+                if b.len() < 4 {
+                    return Ok(StreamFeed {
+                        emit: vec![],
+                        suppress: true,
+                        complete: None,
+                    });
+                }
+                let n = u32::from_be_bytes(b[..4].try_into().unwrap()) as usize;
+                if n + 4 > b.len() {
+                    return Err(HostCallError::Protocol("corrupt tool frame".into()));
+                }
+                let r = pbv1::ToolCallRef::decode(&b[4..4 + n])
+                    .map_err(|e| HostCallError::Protocol(e.to_string()))?;
+                let args = String::from_utf8(b[4 + n..].to_vec())
+                    .map_err(|_| HostCallError::Protocol("tool arguments not UTF-8".into()))?;
+                let input = (r.invocation_kind == pbv1::ToolInvocationKind::Freeform as i32)
+                    .then_some(args.clone());
+                let arguments = if input.is_none() { args } else { String::new() };
+                return Ok(StreamFeed {
+                    emit: vec![],
+                    suppress: true,
+                    complete: Some(AssembledToolCall {
+                        index: s.index,
+                        id: r.id,
+                        name: r.name,
+                        signature: r.signature,
+                        invocation_kind: pbv1::ToolInvocationKind::try_from(r.invocation_kind)
+                            .unwrap_or(pbv1::ToolInvocationKind::Function),
+                        arguments,
+                        input_text: input,
+                    }),
+                });
+            }
+            _ => {}
+        }
+        Ok(StreamFeed {
+            emit: vec![original],
+            suppress: false,
+            complete: None,
+        })
+    }
 }
 
 pub fn append_file(path: &str, data: &[u8]) -> Result<(), HostCallError> {
