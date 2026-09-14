@@ -119,8 +119,9 @@ Returning `Pass*` (or a zero result) means pass-through. Prefer the typed
 constructors (`PassRequest`, `ReplaceRequest`, `PassEvent`, `SuppressEvent`,
 `EmitEvents`, `ServeHTTP`, `TickIdle`, …). A non-nil error traps the guest so
 the host applies `failure_mode`. Verdicts (`BlockRequest`, `RespondRequest`,
-`RouteRequest`, `SetIdentity`) are attributed host calls — invalid arguments
-and protocol failures panic; classified host refusals are fire-and-forget.
+`RouteRequest`, `SetIdentity`) are checked attributed host calls and return an
+`error`, including classified host refusals. Return that error from the hook.
+Use their `Must*` variants only when failure must trap immediately.
 Typed `HostCall(cmd, args)` and `HostCallExtension` return `([]byte, error)`. For stream
 tool-call assembly prefer `sdk.NewStreamHandler().OnToolCall(...).Register()`.
 ---
@@ -233,12 +234,17 @@ its transformation logic. Only install artifacts you intend to run, approve the
 full declared permission set (there is no per-capability subset under v1), and
 prefer `failure_mode: "block"` when silent pass-through would be unsafe.
 
-### Available Capability Strings
+### Capability recipes
 
 Every capability must be requested in `plugin.json` **and** approved with the
 rest of the declared set against your exact bundle digest. A denied capability
 does not trap: core and extension host calls return a classified `*HostError`,
 so a plugin should degrade rather than assume.
+
+The tables below explain common authoring choices; they are not a second
+capability catalog. The checked-in [`capabilities.json`](../capabilities.json)
+is authoritative, and the Go `sdk.Commands`, `sdk.CommandPermission`, and
+`sdk.HelperPermissions` APIs expose that same generated inventory to tooling.
 **Verdicts — change what happens to the request**
 
 | Capability | SDK | Description |
@@ -266,11 +272,21 @@ so a plugin should degrade rather than assume.
 | --- | --- | --- |
 | `env.model_complete` | `sdk.ModelComplete` | Run a provider-neutral prompt through one declared model-service slot. The operator binding owns provider, URL, model, credential, timeout, and hard budgets. |
 | `env.model_pricing` | `sdk.GetModelPricing` | Resolve one declared pricing slot without letting the plugin select arbitrary provider/model coordinates. Missing rates remain unknown rather than being guessed. |
+| `env.resource_info` | `sdk.GetResourceInfo` | Inspect the effective kind, name, operations, and hard limits of one declared resource without receiving its URL, credential, or secret configuration. |
 
 Model-service calls are attributed plugin egress and do not recursively run
 the caller-facing plugin pipeline. This prevents a scanner or compactor from
 calling itself, while retaining the same host-side provider adapters,
 credential isolation, limits, and observability as other model traffic.
+
+Build model requests from canonical `Message` blocks, optional canonical
+`ToolDef` values, and `OutputFormat`; read `ModelCompleteResult.Message`, a
+canonical `ResponseMessage`, rather than a legacy flat content string. For a
+direct reply, `RespondText` is the shortest safe helper. A structured
+`SyntheticResponse` may contain response text and tool-call blocks, but leaves
+tool-call IDs and signatures empty: the host generates those identities after
+it accepts the response. Never copy an observed provider tool ID into a
+synthetic response.
 
 Credential and HTTP approval are deliberately separate. A plugin granted both
 can transmit that credential, which is sometimes the point and always part of
@@ -481,16 +497,15 @@ grant.
 | --- | --- | --- |
 | `env.meta_get` / `env.meta_set` | `sdk.MetaGet`, `sdk.MetaSet` | One request, private to your plugin (the host namespaces your keys). Gone when the request ends. |
 | `env.meta_append` (permission `env.meta_set`) | v1 `MetaAppendArgs` | Atomic append by block index. Non-empty fragment → empty success value (ack). Empty fragment → complete buffer read (absent → empty bytes). Dispatcher maps the command onto `env.meta_set` — there is no separate grant. |
-| `env.cache_get` / `env.cache_set` | `sdk.CacheGet`, `sdk.CacheSet` | Across requests, TTL'd, and private to the exact executing plugin. Another plugin cannot read or overwrite the key. |
-| `env.shared_cache_get` / `env.shared_cache_set` | `sdk.SharedCacheGet`, `sdk.SharedCacheSet` | Explicit cross-plugin exchange. Request only for a documented producer/consumer key contract; private cache grants never imply these capabilities. |
-| `env.state_get` / `env.state_set` / `env.state_delete` / `env.state_keys` | `sdk.StateGet`, `sdk.StateSet`, `sdk.StateDelete`, `sdk.StateKeys` | Across requests and restarts, private, never expires. Empty is a stored value. |
-| `env.state_compare_and_set` / `env.state_compare_and_delete` / `env.state_scan` | `sdk.StateCompareAndSet`, `sdk.StateCompareAndDelete`, `sdk.StateScan` | Versioned updates use opaque non-reusable versions, so retries cannot overwrite a newer value (no ABA). Scans are ordered, cursor-based, and limited to 256 entries per page. |
+| `env.cache_get` / `env.cache_set` | `sdk.CacheGet`; `sdk.CacheSet`, `sdk.CacheSetTTL`, `sdk.CacheDelete` | Across requests, optionally TTL'd, and private to the exact executing plugin. Delete uses the `env.cache_set` grant. Empty is a stored value. |
+| `env.shared_cache_get` / `env.shared_cache_set` | `sdk.SharedCacheGet`; `sdk.SharedCacheSet`, `sdk.SharedCacheSetTTL`, `sdk.SharedCacheDelete` | Explicit cross-plugin exchange. Delete uses the set grant. Private cache grants never imply these capabilities. |
+| `env.state_get` / `env.state_set` / `env.state_keys` | `sdk.StateGet`, `sdk.StateGetVersioned`; `sdk.StateSet`, `sdk.StateDelete`, `sdk.StateCompareAndSet`, `sdk.StateCompareAndDelete`; `sdk.StateKeys`, `sdk.StateScan` | Across requests and restarts, private, never expires. Commands share their read, write, or keys grant as grouped here. Empty is a stored value. Versions are opaque and non-reusable; scans are ordered cursor pages limited to 256 entries. |
 
 **Reading meta and cache: distinguish missing from empty**
 
 Reads return `(value, found, error)`; writes return `error`. `MetaAppend`
 returns `([]byte, error)` and an empty fragment reads the assembled value.
-The same shape applies to `StateGet` / `StateSet`, and the same
+The same read shape applies to `StateGet`; writes return `error`. The same
 absence-vs-emptiness rule applies to all three stores. The read pattern is where
 the three channels matter — branch on the middle one:
 
@@ -507,8 +522,9 @@ explicitly at that call site, as a deliberate choice with a comment — it is no
 the default.
 
 **Absence is not emptiness.** A key that was never written returns a
-`NOT_FOUND` `HostError`; a key holding `""` returns success with an empty
-value. `MetaSet(k, "")` stores an empty string — it does not delete `k`.
+`NOT_FOUND` `HostError`; a state or cache key holding `""` returns success with
+an empty value. Metadata is the exception: `MetaSet(k, "")` deletes the key.
+Use `StateDelete` and `CacheDelete` for the durable stores.
 Do not test `v == ""` to decide whether something was stored.
 
 Do **not** reach these through `sdk.HostCall` directly. The typed helpers
@@ -562,13 +578,19 @@ extension helpers such as `sdk.SendRequest` own their extension framing.
 
 | Capability | SDK | Description |
 | --- | --- | --- |
-| `env.log` | `sdk.Log` | Diagnostic logging. |
-| `env.emit_metric` | `sdk.EmitMetric` | OTel metrics. |
+| `env.log` | `sdk.Debug`, `sdk.Info` (or typed `sdk.Log`) | Best-effort diagnostics; the void import cannot acknowledge delivery. |
+| `env.emit_metric` | `sdk.Counter`, `sdk.Histogram`, `sdk.Gauge` (or typed `sdk.EmitMetric`) | Best-effort OTel metrics; use low-cardinality labels. |
 | `env.host_call.torana_plugin_counter` | `sdk.HostCallExtension` | Named counters that appear in `/stats`. |
 | `env.serve_http` | `sdk.OnHTTPRequest` | Serve pages and JSON under `/_torana/plugin/<name>/`. |
-| `env.plugin_config` | `sdk.PluginConfig` | Read your own `plugins.config.<name>` JSON blob and handle the returned error. |
+| `env.plugin_config` | `sdk.PluginConfig` | Read your own strict JSON object. Empty configuration becomes `{}`; malformed JSON, duplicate keys, scalar/array values, and host refusals return errors. |
 
 ### What the host tells you about a request
+
+Every callback context carries the typed invocation snapshot returned by
+`sdk.Execution(ctx)`: effective provider/model, optional conversation identity
+and deadline, synthetic-response status, and the host's memory, host-response,
+and stream-buffer limits. `sdk.RequestID(ctx)` returns the invocation ID. These
+are observations, not authority to select a destination or exceed a limit.
 
 Beyond the request itself, Torana publishes routing context in
 `ChatRequest.ToranaMetaJson`. It never reaches the wire and is excluded from the
@@ -783,10 +805,28 @@ impl Plugin for Logger {
 export_plugin_v1!(Logger);
 ```
 
+The five Rust trait methods are:
+
+```rust
+fn before_request(pbv1::ChatRequest) -> Result<RequestResult, String>;
+fn after_response(pbv1::ChatResponse) -> Result<ResponseResult, String>;
+fn on_stream(pbv1::StreamEvent) -> Result<StreamResult, String>;
+fn on_http(pbv1::HttpRequest) -> Result<HttpResult, String>;
+fn on_tick(pbv1::TickRequest) -> Result<TickResult, String>;
+```
+
 Combine multiple hooks by OR-ing the exported hook constants and implementing
 the corresponding typed trait methods. Each family has its own result type;
 `RequestResult` cannot be returned from an after-response callback. Host calls
 use protobuf arguments and typed refusals preserve stable `ErrorCode` values.
+
+The repository keeps a complete Go example with all five hook signatures,
+checked verdict errors, execution context, versioned state CAS, and a canonical
+structured model call in [`examples/authoring-go`](../examples/authoring-go).
+The maintained Rust guest is [`examples/rust-logger`](../examples/rust-logger),
+and the compiled [all-hooks guest](../conformance/guests/rust-allhooks) pins all
+five default method signatures.
+Run `scripts/check-doc-examples.sh` after changing either guide or SDK surface.
 
 ---
 
@@ -812,7 +852,9 @@ import (
 )
 
 func TestBlocksOnDetectedPII(t *testing.T) {
-	h := sdktest.New(t)
+	h := sdktest.New(t).
+		WithPermissions([]string{"env.plugin_config", "env.model_complete", "env.block_request"}).
+		WithHooks([]string{"run_before_request"})
 	h.SetConfig(`{"on_error":"block"}`)
 	h.StubModelComplete(func(args *pbv1.ModelCompleteArgs) (*pbv1.ModelCompleteResult, *pbv1.HostError, error) {
 		return &pbv1.ModelCompleteResult{Message: &pbv1.ResponseMessage{Blocks: []*pbv1.ResponseBlock{{Kind: &pbv1.ResponseBlock_Text{Text: &pbv1.ResponseTextBlock{Text: `{"pii":true,"findings":[{"type":"email","line":1}]}`}}}}}}, nil, nil
@@ -845,8 +887,10 @@ runs, so there is nothing to wire up.
 | `BeforeRequest` / `AfterResponse` | dispatch a request/response hook; results report `PassedThrough` only on success with a zero-byte result. `AfterResponse` exposes `Replacement` (guest proposal) and `Applied` (only when `mutable`) |
 | `StreamChunk` | dispatch one stream event; prefer `StreamHandler` in the plugin under test for tool assembly |
 | `HTTPRequest` / `Tick` | dispatch the remaining hooks |
-| `BlockCalls` / `Calls` | assert attributed verdicts and other host calls |
+| `NewRequest` | create an isolated invocation lifecycle and retain its attempted, accepted, and effective calls across hooks |
+| `Calls` / `AcceptedCalls` / `EffectiveBlockCalls` (and related verdict accessors) | distinguish what the plugin attempted, what the host accepted, and which accepted verdict finally controlled the request |
 | `SetConfig` | what `sdk.PluginConfig()` returns |
+| `WithPermissions` / `WithHooks` | enforce the exact manifest surface in tests; undeclared commands and cross-hook operations are refused before a stub runs |
 | `StubHostCall` / `DenyPermission` | override one command, or make it answer with the host's permission-denied envelope |
 | `HostResultValue` / `HostResultError` | frame a stub's reply. Typed and extension commands speak `HostCallResult`, so a stub returning a bare payload produces a decode error rather than the value it meant |
 | `Run(fn)` | run helper code that makes host calls outside a hook. Do not nest a dispatch method inside it |

@@ -84,8 +84,9 @@ func init() {
 | `sdk.EmitEvents(ev…)` | substitute one or more events |
 
 Prefer `sdk.NewStreamHandler()` for tool-call assembly and text rewrites: it
-buffers via host metadata (`meta_append` / `meta_set`), never Go-object state,
-and re-emits the exact assembled original on callback errors (fail-open).
+buffers via the host-bounded request journal (`meta_append` / `meta_set`), never
+Go-object state. Assembler errors, callback errors, and invalid callback actions
+return an error to the host, which applies the plugin's `failure_mode`.
 
 ```go
 sdk.NewStreamHandler().
@@ -104,12 +105,12 @@ sdk.NewStreamHandler().
 ```
 
 Never coerce between these families: use `ReplaceToolArguments` for function
-calls and `ReplaceToolInput` for free-form calls. A mismatched action re-emits
-the original assembled call unchanged.
+calls and `ReplaceToolInput` for free-form calls. A mismatched action returns an
+error; it never silently passes the original call.
 
-Raw `OnStreamChunk` handlers that return a non-nil error trap so `failure_mode`
-applies. Once buffering begins, never forward only the current fragment — fail
-closed or re-emit the assembled original.
+Raw `OnStreamChunk` handlers and `StreamHandler` callbacks that return a
+non-nil error trap so `failure_mode` applies. Once buffering begins, never
+forward only the current fragment.
 
 **State scoping rules:**
 - `env.meta_set` / `env.meta_get` — plugin-private AND request-scoped. Other
@@ -150,9 +151,9 @@ means most of what a plugin normally relies on is simply absent.
 
 | Host call | Inside a request | Inside a tick |
 |---|---|---|
-| `env.meta_get` / `env.meta_set` | per-request scratch space | **empty** — there is no request to scope to |
-| `env.original_request` | the caller's pristine request | **empty** |
-| `env.original_response` | the raw upstream body | **empty** |
+| `env.meta_get` / `env.meta_set` | per-request scratch space | **classified refusal** — there is no request to scope to |
+| `env.original_request` | the caller's pristine request | **classified refusal** |
+| `env.original_response` | the raw upstream body | **classified refusal** |
 | `env.plugin_config` | your config | your config |
 | `env.cache_get` / `env.cache_set` | plugin-private, cross-request | plugin-private, cross-request |
 | `env.shared_cache_get` / `env.shared_cache_set` | shared, cross-request | shared, cross-request |

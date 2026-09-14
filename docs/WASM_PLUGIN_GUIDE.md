@@ -46,12 +46,17 @@ The Rust crate similarly owns the allocator and v1 exports. Its
 
 ## 2. Exports, hook bitmap, and result framing
 
-ABI v1 has one dispatcher and one declaration bitmap:
+ABI v1 has one exact contract revision, one dispatcher, and one declaration bitmap:
 
 ```text
+abi_version() -> u64
 supported_hooks() -> u32
 run_hook(ptr: u32, size: u32) -> u64
 ```
+
+`abi_version` returns `(1 << 32) | 1`: ABI major 1 and contract revision 1.
+The host requires this exact value. Contract revisions are whole contracts;
+there is no ABI-minor or additive-compatibility negotiation in v1.
 
 `supported_hooks` returns the OR of the `Hook` bits the plugin implements.
 `run_hook` receives one serialized `HookInput`. The hook named by its oneof arm
@@ -119,16 +124,17 @@ Core `env.*` operations use protobuf arguments through the typed SDK helpers.
 Feature calls such as `torana_send_request` use the extension path and their
 closed command vocabulary. Do not pass permission strings as command names.
 
-Absence and an empty stored value are different. Cache, metadata, and state
-lookups report absence as `NOT_FOUND`; a present empty value remains a success.
-State deletion uses the typed delete command, authorized by `env.state_set`.
+Absence and an empty stored value are different. The Go lookup helpers return
+`(value, found, error)` and Rust returns a typed optional value or refusal.
+`MetaSet(key, "")` deletes request metadata. State and cache accept an empty
+stored value and expose separate typed delete commands.
 Versioned state updates use opaque, non-reusable versions through compare-and-set
 and compare-and-delete; use them for concurrent writers and do not invent
 versions. State scans are ordered cursor pages capped at 256 entries. Private
 cache entries may carry a bounded TTL; a cache read distinguishes a missing key
 from a present empty value.
 
-Resource and execution snapshots expose effective limits and routing facts only;
+Resource and per-invocation `ExecutionInfo` snapshots expose effective limits and routing facts only;
 they never expose credentials, secrets, or arbitrary destinations. Model calls
 use canonical `Message.blocks`, declared tools, and `OutputFormat`; completion
 results likewise contain a canonical response message. Synthetic responses use
@@ -188,7 +194,8 @@ Suppressing, reindexing, splitting, joining, or fanning out events requires
 delta rewrite needs only `ir.messages.write.assistant`.
 
 `run_on_tick` has no caller request or credential. Original request/response
-calls are unavailable; durable work must come from plugin state, cache, config,
+calls return a classified refusal; they do not succeed with empty bytes.
+Durable work must come from plugin state, cache, config,
 or explicitly budgeted provider egress. Return pass-through when idle and a
 `TickOutcome` only for completed work. Background execution requires both the
 `env.background_tick` permission and an operator-configured cadence.
@@ -197,7 +204,8 @@ or explicitly budgeted provider egress. Return pass-through when idle and a
 
 1. Is the manifest ABI exactly `v1`?
 2. Does the guest use a real allocator and matching deallocator?
-3. Does it export `supported_hooks` and `run_hook` with the exact signatures?
+3. Does it export `abi_version`, `supported_hooks`, and `run_hook` with the
+   exact signatures and contract revision 1?
 4. Does zero output mean only intentional pass-through?
 5. Are `HookInput`, `HookResult`, and `HostCallResult` decoded and validated
    before use?
