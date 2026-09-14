@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -12,6 +13,10 @@ import (
 // intentionally small and deterministic; CI runs it and then this test catches
 // any generated artifact that was forgotten in a commit.
 func TestCapabilityCatalogGeneratedArtifactsAreCurrent(t *testing.T) {
+	if output, err := exec.Command("sh", "scripts/check-capabilities.sh").CombinedOutput(); err != nil {
+		t.Fatalf("generated capability inventory: %v\n%s", err, output)
+	}
+
 	root, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
