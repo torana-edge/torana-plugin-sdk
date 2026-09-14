@@ -42,21 +42,56 @@ not merely two crates that happen to compile.
 2. **Verify** — `go test ./...`, `cargo test --manifest-path rust/torana-plugin-sdk/Cargo.toml`,
    and a `GOOS=wasip1 GOARCH=wasm go build ./...` (a compile check of the SDK
    library — no `-buildmode=c-shared`, because nothing here is a plugin).
-3. **Tag and push.**
+3. **Check publishing access before tagging.** The repository needs a
+   `CARGO_REGISTRY_TOKEN` Actions secret restricted to the crate name
+   `torana-plugin-sdk`. For the first publication, grant `publish-new` and
+   `publish-update`; after that, an update-only replacement is sufficient.
+   Do not grant owner-management, yank, or unrestricted legacy access. Use an
+   expiration date and rotate the secret before it expires. Never put a token
+   in a command argument, release note, issue, or pull request.
+4. **Tag and push.**
    ```bash
    git tag -a vX.Y.Z -m "…"
    git push origin vX.Y.Z
    ```
    Write a real annotation: new hooks, new host calls, behaviour changes, and
    anything a plugin author has to change. It becomes the release notes.
-4. **Ensure the repository has a `CARGO_REGISTRY_TOKEN` secret** authorized to
-   publish `torana-plugin-sdk`.
 5. **Watch the release workflow.** It runs both test suites, asserts the version
    match, packages the Rust crate, builds the example plugins, publishes a
    GitHub Release with checksums, and attests build provenance. Rust publishing
    runs last: a crates.io failure stays visible but leaves the GitHub release
    and Go module available. Resolve Rust publication separately without moving
    the tag; verify the failing step before proceeding with Go consumers.
+
+## Recover Rust publication without replacing the GitHub release
+
+SDK v0.5.0's GitHub release and Go module were published, but its Rust upload
+failed because `CARGO_REGISTRY_TOKEN` was empty. This is a distribution failure,
+not a reason to change the already-published tag or regenerate release assets.
+The Edge Rust scaffold uses an exact Git revision and works independently of
+crates.io publication.
+
+1. Confirm the registry does not already contain the intended version. A
+   publish timeout can occur after the upload succeeds; do not assume failure
+   means nothing was published. See [Cargo's publish behavior](https://doc.rust-lang.org/cargo/commands/cargo-publish.html).
+2. Add or repair the repository Actions secret described above. Ensure the
+   crates.io account can publish this crate and has completed email verification.
+3. Once `publish-rust.yml` is on the default branch, dispatch the existing tag:
+
+   ```bash
+   gh workflow run publish-rust.yml --repo torana-edge/torana-plugin-sdk -f tag=v0.5.0
+   ```
+
+   The recovery workflow requires an existing published `vX.Y.Z` GitHub
+   release, resolves its tag to an immutable commit, checks the crate version,
+   runs Rust tests and the independent packaged-consumer check, and publishes
+   only the Rust crate. It does not modify a tag, GitHub release, or its assets.
+4. Verify the version on crates.io and its docs.rs build. A green GitHub release
+   job alone is not evidence that every distribution channel is available.
+
+Token scope details: [crates.io scope definitions](https://rust-lang.github.io/rfcs/2947-crates-io-token-scopes.html).
+Manual dispatch requires the workflow on the default branch:
+[GitHub workflow documentation](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
 
 ## Then the downstream repos
 

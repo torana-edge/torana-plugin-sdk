@@ -2,6 +2,12 @@
 
 The versioned Go and Rust SDKs for Torana WASM Plugin ABI v1.
 
+SDK **v0.5.0** implements ABI major 1, contract revision 1. The SDK package
+version, ABI contract, and Edge binary release are separate version numbers.
+Go consumers use the module tag; Edge's Rust scaffold pins the matching source
+commit with `git` and `rev`, so authoring does not depend on crates.io availability.
+For publishing and recovery, see [RELEASING.md](RELEASING.md).
+
 ```bash
 go test ./...
 GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o plugin.wasm ./examples/go-logger
