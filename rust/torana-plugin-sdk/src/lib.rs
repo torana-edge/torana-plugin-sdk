@@ -9,8 +9,7 @@ use core::{ptr, slice};
 
 #[cfg(not(target_arch = "wasm32"))]
 thread_local! { static NATIVE_HOST: std::cell::RefCell<Option<Box<dyn Fn(&str, &[u8]) -> Result<Vec<u8>, HostCallError>>>> = const { std::cell::RefCell::new(None) }; }
-#[cfg(not(target_arch = "wasm32"))]
-thread_local! { static EXECUTION_CTX: std::cell::RefCell<Option<(u64, pbv1::ExecutionInfo)>> = const { std::cell::RefCell::new(None) }; }
+thread_local! { static EXECUTION_CTX: std::cell::RefCell<Option<(u64, Option<pbv1::ExecutionInfo>)>> = const { std::cell::RefCell::new(None) }; }
 
 #[doc(hidden)]
 pub use prost;
@@ -235,23 +234,25 @@ pub fn hook_of(input: &pbv1::HookInput) -> Result<pbv1::Hook, String> {
     }
 }
 pub fn execution() -> Option<pbv1::ExecutionInfo> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        return EXECUTION_CTX.with(|x| x.borrow().as_ref().map(|(_, e)| e.clone()));
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        None
-    }
+    EXECUTION_CTX.with(|x| x.borrow().as_ref().and_then(|(_, e)| e.clone()))
 }
 pub fn request_id() -> Option<u64> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        return EXECUTION_CTX.with(|x| x.borrow().as_ref().map(|(id, _)| *id));
+    EXECUTION_CTX.with(|x| x.borrow().as_ref().map(|(id, _)| *id))
+}
+
+struct ExecutionGuard(Option<(u64, Option<pbv1::ExecutionInfo>)>);
+impl ExecutionGuard {
+    fn enter(input: &pbv1::HookInput) -> Self {
+        let old = EXECUTION_CTX
+            .with(|slot| slot.replace(Some((input.request_id, input.execution.clone()))));
+        Self(old)
     }
-    #[cfg(target_arch = "wasm32")]
-    {
-        None
+}
+impl Drop for ExecutionGuard {
+    fn drop(&mut self) {
+        EXECUTION_CTX.with(|slot| {
+            slot.replace(self.0.take());
+        });
     }
 }
 
@@ -708,6 +709,7 @@ pub fn __dispatch_v1<E: core::fmt::Display>(
             hook.as_str_name()
         ));
     }
+    let _execution_guard = ExecutionGuard::enter(&input);
     let Some(result) = handler(input).map_err(|err| format!("torana plugin: {err}"))? else {
         return Ok(Vec::new());
     };
@@ -1404,6 +1406,30 @@ pub fn model_complete(
     let value = host_call("env.model_complete", request)?;
     pbv1::ModelCompleteResult::decode(value.as_slice())
         .map_err(|error| HostCallError::Protocol(format!("decode ModelCompleteResult: {error}")))
+}
+
+pub fn model_complete_text(request: &pbv1::ModelCompleteArgs) -> Result<String, HostCallError> {
+    let result = model_complete(request)?;
+    let message = result
+        .message
+        .ok_or_else(|| HostCallError::Protocol("model result has no message".into()))?;
+    let mut text = String::new();
+    for block in message.blocks {
+        match block.kind {
+            Some(pbv1::response_block::Kind::Text(t)) => text.push_str(&t.text),
+            Some(_) => {
+                return Err(HostCallError::Protocol(
+                    "model result contains non-text block".into(),
+                ))
+            }
+            None => {
+                return Err(HostCallError::Protocol(
+                    "model result contains empty block".into(),
+                ))
+            }
+        }
+    }
+    Ok(text)
 }
 
 /// Resolves one operator-bound pricing resource. `None` means an unknown rate;
