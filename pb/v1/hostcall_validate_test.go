@@ -200,7 +200,7 @@ func TestVerdictAndMetaAppendArgs(t *testing.T) {
 		}
 	})
 	t.Run("respond", func(t *testing.T) {
-		if err := (&v1.RespondRequestArgs{}).Validate(); err != nil {
+		if err := (&v1.RespondRequestArgs{Response: &v1.SyntheticResponse{Message: &v1.ResponseMessage{Blocks: []*v1.ResponseBlock{{Kind: &v1.ResponseBlock_Text{Text: &v1.ResponseTextBlock{Text: "hi"}}}}}, FinishReason: "stop"}}).Validate(); err != nil {
 			t.Fatal(err)
 		}
 		if err := (*v1.RespondRequestArgs)(nil).Validate(); err == nil {
@@ -240,11 +240,11 @@ func TestHostCallArgRoundTrip(t *testing.T) {
 	// Schemas must survive marshal/unmarshal so host and guest agree on wire.
 	msgs := []proto.Message{
 		&v1.BlockRequestArgs{Status: 403, Code: "denied", Message: "no"},
-		&v1.RespondRequestArgs{Content: "hi"},
+		&v1.RespondRequestArgs{Response: &v1.SyntheticResponse{Message: &v1.ResponseMessage{Blocks: []*v1.ResponseBlock{{Kind: &v1.ResponseBlock_Text{Text: &v1.ResponseTextBlock{Text: "hi"}}}}}, FinishReason: "stop"}},
 		&v1.RouteRequestArgs{Provider: "p", Model: "m"},
 		&v1.SetIdentityArgs{Identity: "id"},
 		&v1.MetaAppendArgs{BlockIndex: 2, Fragment: []byte("frag")},
-		&v1.ModelCompleteArgs{Service: "summarizer", Messages: []*v1.ModelMessage{{Role: "user", Content: "text"}}},
+		&v1.ModelCompleteArgs{Service: "summarizer", Messages: []*v1.Message{{Role: "user", Blocks: []*v1.RequestBlock{{Kind: &v1.RequestBlock_Text{Text: &v1.RequestTextBlock{Text: "text"}}}}}}},
 		&v1.ModelPricingGetArgs{Resource: "request-model"},
 		&v1.PromptCachePolicyGetArgs{Resource: "request-cache"},
 		&v1.PromptCachePolicy{Tiers: []*v1.PromptCacheTier{{TtlSeconds: 300, MarkerJson: []byte(`{"type":"ephemeral"}`)}}},
@@ -327,7 +327,7 @@ func TestModelResourceValidation(t *testing.T) {
 	nan := math.NaN()
 	valid := &v1.ModelCompleteArgs{
 		Service:     "scanner",
-		Messages:    []*v1.ModelMessage{{Role: "system", Content: "classify"}, {Role: "user", Content: "text"}},
+		Messages:    []*v1.Message{{Role: "system", Blocks: []*v1.RequestBlock{{Kind: &v1.RequestBlock_Text{Text: &v1.RequestTextBlock{Text: "classify"}}}}}, {Role: "user", Blocks: []*v1.RequestBlock{{Kind: &v1.RequestBlock_Text{Text: &v1.RequestTextBlock{Text: "text"}}}}}},
 		MaxTokens:   &one,
 		Temperature: &finite,
 	}
@@ -336,12 +336,12 @@ func TestModelResourceValidation(t *testing.T) {
 	}
 	for name, request := range map[string]*v1.ModelCompleteArgs{
 		"nil":             nil,
-		"invalid slot":    {Service: "../scanner", Messages: []*v1.ModelMessage{{Role: "user"}}},
+		"invalid slot":    {Service: "../scanner", Messages: []*v1.Message{{Role: "user", Blocks: []*v1.RequestBlock{{Kind: &v1.RequestBlock_Text{Text: &v1.RequestTextBlock{Text: "x"}}}}}}},
 		"no messages":     {Service: "scanner"},
-		"nil message":     {Service: "scanner", Messages: []*v1.ModelMessage{nil}},
-		"empty role":      {Service: "scanner", Messages: []*v1.ModelMessage{{Content: "x"}}},
-		"zero tokens":     {Service: "scanner", Messages: []*v1.ModelMessage{{Role: "user"}}, MaxTokens: &zero},
-		"nan temperature": {Service: "scanner", Messages: []*v1.ModelMessage{{Role: "user"}}, Temperature: &nan},
+		"nil message":     {Service: "scanner", Messages: []*v1.Message{nil}},
+		"empty role":      {Service: "scanner", Messages: []*v1.Message{{Blocks: []*v1.RequestBlock{{Kind: &v1.RequestBlock_Text{Text: &v1.RequestTextBlock{Text: "x"}}}}}}},
+		"zero tokens":     {Service: "scanner", Messages: []*v1.Message{{Role: "user", Blocks: []*v1.RequestBlock{{Kind: &v1.RequestBlock_Text{Text: &v1.RequestTextBlock{Text: "x"}}}}}}, MaxTokens: &zero},
+		"nan temperature": {Service: "scanner", Messages: []*v1.Message{{Role: "user", Blocks: []*v1.RequestBlock{{Kind: &v1.RequestBlock_Text{Text: &v1.RequestTextBlock{Text: "x"}}}}}}, Temperature: &nan},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := request.Validate(); err == nil {

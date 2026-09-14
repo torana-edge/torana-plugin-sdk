@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"google.golang.org/protobuf/proto"
 	"strconv"
 
 	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
@@ -39,32 +40,43 @@ import (
 // configured. Plugins must tolerate this rather than assuming persistence — a
 // proxy without a data directory has nowhere to put it.
 //
-// It is wrapped by the JSON convenience helpers (StateGetJSON, StateSetJSON),
-// so errors.Is works there. The raw typed helpers (StateGet, StateSet,
-// StateDelete, StateKeys) return a *HostError instead and let the caller
-// classify — check for ErrorCode_ERROR_CODE_NOT_CONFIGURED.
+// It is joined into NOT_CONFIGURED errors from state helpers, including the
+// JSON conveniences, so errors.Is works without losing the classified
+// *HostCallRefusalError available through errors.As.
 var ErrStateUnavailable = errors.New("torana: durable plugin state is not available")
 
 // StateGet reads one of this plugin's durable keys.
 //
-// A key that was never written returns a NOT_FOUND HostError; a key holding an
-// empty string returns "" with no HostError. Branch with IsNotFound rather than
-// testing the value — the same rule as MetaGet and CacheGet.
-func StateGet(key string) (string, *pbv1.HostError, error) {
-	raw, herr, err := HostCall("env.state_get", &pbv1.StateGetArgs{Key: key})
-	if err != nil || herr != nil {
-		return "", herr, err
+// A missing key returns ("", false, nil); a key holding an empty string returns
+// ("", true, nil). Other host refusals return an error. Branch on found rather
+// than testing the value.
+func StateGet(key string) (string, bool, error) {
+	raw, herr, err := hostCallChecked("env.state_get", &pbv1.StateGetArgs{Key: key})
+	if err != nil {
+		return "", false, err
 	}
-	return string(raw), nil, nil
+	if herr != nil {
+		if IsNotFound(herr) {
+			return "", false, nil
+		}
+		return "", false, stateError(key, herr)
+	}
+	return string(raw), true, nil
 }
 
 // StateSet writes one of this plugin's durable keys.
 //
 // An empty value stores an empty value. It does not delete; use StateDelete to
 // release a key.
-func StateSet(key, value string) (*pbv1.HostError, error) {
-	_, herr, err := HostCall("env.state_set", &pbv1.StateSetArgs{Key: key, Value: value})
-	return herr, err
+func StateSet(key, value string) error {
+	_, herr, err := hostCallChecked("env.state_set", &pbv1.StateSetArgs{Key: key, Value: value})
+	if err != nil {
+		return err
+	}
+	if herr != nil {
+		return stateError(key, herr)
+	}
+	return nil
 }
 
 // StateDelete releases one durable key.
@@ -80,26 +92,32 @@ func StateSet(key, value string) (*pbv1.HostError, error) {
 // The host maps the command to pbv1.StateDeletePermission; deriving the
 // permission from the command string would look for a capability that does not
 // exist.
-func StateDelete(key string) (*pbv1.HostError, error) {
-	_, herr, err := HostCall(pbv1.StateDeleteCommand, &pbv1.StateDeleteArgs{Key: key})
-	return herr, err
+func StateDelete(key string) error {
+	_, herr, err := hostCallChecked(pbv1.StateDeleteCommand, &pbv1.StateDeleteArgs{Key: key})
+	if err != nil {
+		return err
+	}
+	if herr != nil {
+		return stateError(key, herr)
+	}
+	return nil
 }
 
 // StateKeys lists this plugin's durable keys, sorted. Useful when a plugin
 // stores one key per conversation and must enumerate them on a tick.
-func StateKeys() ([]string, *pbv1.HostError, error) {
-	raw, herr, err := HostCall("env.state_keys", nil)
-	if err != nil || herr != nil {
-		return nil, herr, err
+func StateKeys() ([]string, error) {
+	raw, err := checkedHostCallRequired("env.state_keys", nil)
+	if err != nil {
+		return nil, err
 	}
 	if len(raw) == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 	var keys []string
 	if err := json.Unmarshal(raw, &keys); err != nil {
-		return nil, nil, fmt.Errorf("torana: decode state keys: %w", err)
+		return nil, fmt.Errorf("torana: decode state keys: %w", err)
 	}
-	return keys, nil, nil
+	return keys, nil
 }
 
 // StateGetJSON reads a key and decodes it into v.
@@ -111,15 +129,12 @@ func StateKeys() ([]string, *pbv1.HostError, error) {
 // a denied capability as "not stored yet" will quietly rewrite state it could
 // not read.
 func StateGetJSON(key string, v any) (found bool, err error) {
-	raw, herr, err := StateGet(key)
+	raw, found, err := StateGet(key)
 	if err != nil {
 		return false, err
 	}
-	if IsNotFound(herr) {
+	if !found {
 		return false, nil
-	}
-	if herr != nil {
-		return false, stateError(key, herr)
 	}
 	// No value-based absence check. A key stored with StateSet(key, "") is
 	// PRESENT, and reporting it as absent would contradict both the state
@@ -164,11 +179,79 @@ func StateSetJSON(key string, v any) error {
 	if err != nil {
 		return fmt.Errorf("torana: encode state %q: %w", key, err)
 	}
-	herr, err := StateSet(key, string(b))
-	if err != nil {
-		return err
+	return StateSet(key, string(b))
+}
+
+// StateGetVersioned reads a value with its opaque concurrency version. A miss
+// returns (nil, false, nil); other refusals return an error.
+func StateGetVersioned(key string) (*pbv1.StateValue, bool, error) {
+	raw, found, err := checkedHostCallValue("env.state_get_versioned", &pbv1.StateGetArgs{Key: key})
+	if err != nil || !found {
+		return nil, found, err
 	}
-	return stateError(key, herr)
+	var value pbv1.StateValue
+	if err := pbv1.ValidateWire(raw, value.ProtoReflect().Descriptor()); err != nil {
+		return nil, false, fmt.Errorf("torana: versioned state wire: %w", err)
+	}
+	if err := proto.Unmarshal(raw, &value); err != nil {
+		return nil, false, fmt.Errorf("torana: decode versioned state: %w", err)
+	}
+	if err := value.Validate(); err != nil {
+		return nil, false, err
+	}
+	return &value, true, nil
+}
+
+// StateCompareAndSet creates when expectedVersion is nil or updates only the
+// version read by StateGetVersioned. Applied=false is a clean conflict; reread
+// before retrying because versions are opaque and non-reusable.
+func StateCompareAndSet(key, value string, expectedVersion *string) (*pbv1.StateMutationResult, error) {
+	raw, err := checkedHostCallRequired("env.state_compare_and_set", &pbv1.StateCompareAndSetArgs{Key: key, Value: value, ExpectedVersion: expectedVersion})
+	if err != nil {
+		return nil, err
+	}
+	var result pbv1.StateMutationResult
+	if err := pbv1.ValidateWire(raw, result.ProtoReflect().Descriptor()); err != nil {
+		return nil, fmt.Errorf("torana: state mutation wire: %w", err)
+	}
+	if err := proto.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("torana: decode state mutation: %w", err)
+	}
+	return &result, result.Validate()
+}
+
+// StateCompareAndDelete removes key only at expectedVersion. Applied=false is
+// a clean conflict or absence, not a host-call failure.
+func StateCompareAndDelete(key, expectedVersion string) (*pbv1.StateMutationResult, error) {
+	raw, err := checkedHostCallRequired("env.state_compare_and_delete", &pbv1.StateCompareAndDeleteArgs{Key: key, ExpectedVersion: expectedVersion})
+	if err != nil {
+		return nil, err
+	}
+	var result pbv1.StateMutationResult
+	if err := pbv1.ValidateWire(raw, result.ProtoReflect().Descriptor()); err != nil {
+		return nil, fmt.Errorf("torana: state mutation wire: %w", err)
+	}
+	if err := proto.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("torana: decode state mutation: %w", err)
+	}
+	return &result, result.Validate()
+}
+
+// StateScan returns a stable lexical page for prefix. Pass the returned cursor
+// to continue; limit must be within the ABI bound of 1..256.
+func StateScan(prefix, cursor string, limit uint32) (*pbv1.StateScanResult, error) {
+	raw, err := checkedHostCallRequired("env.state_scan", &pbv1.StateScanArgs{Prefix: prefix, Cursor: cursor, Limit: limit})
+	if err != nil {
+		return nil, err
+	}
+	var result pbv1.StateScanResult
+	if err := pbv1.ValidateWire(raw, result.ProtoReflect().Descriptor()); err != nil {
+		return nil, fmt.Errorf("torana: state scan wire: %w", err)
+	}
+	if err := proto.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("torana: decode state scan: %w", err)
+	}
+	return &result, result.Validate()
 }
 
 // Now returns the host's wall-clock time in Unix milliseconds.
@@ -187,7 +270,7 @@ func StateSetJSON(key string, v any) error {
 // multiplies the operator's token spend. Torana's determinism test exists to
 // catch exactly this. Use it to decide *whether* to act, never as content.
 func Now() (int64, error) {
-	raw, herr, err := HostCall("env.now", nil)
+	raw, herr, err := hostCallChecked("env.now", nil)
 	if err != nil {
 		return 0, err
 	}

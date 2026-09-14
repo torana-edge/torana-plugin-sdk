@@ -60,13 +60,13 @@ import (
 // LogEntry is one captured sdk.Log call.
 type LogEntry struct {
 	Message string
-	Level   int32
+	Level   sdk.LogLevel
 }
 
 // MetricEntry is one captured sdk.EmitMetric call.
 type MetricEntry struct {
 	Name   string
-	Type   int32
+	Type   sdk.MetricKind
 	Value  float64
 	Labels map[string]string
 }
@@ -75,9 +75,11 @@ type MetricEntry struct {
 // to prove a plugin asked for what you expect — and, just as usefully, that it
 // did not ask for anything it never declared a permission for.
 type HostCallEntry struct {
-	Command string
-	Args    string
-	Result  string
+	Command   string
+	Args      string
+	Result    string
+	Effective bool
+	index     int
 }
 
 // Harness is a fake Torana host. Create one with New.
@@ -85,23 +87,27 @@ type Harness struct {
 	t    testing.TB
 	host *sdk.TestHost
 
-	// scopeMu serializes the complete request-metadata install, dispatch,
-	// capture, and restore transaction. It must remain distinct from mu:
-	// host calls made during the dispatch acquire mu themselves.
-	scopeMu     sync.Mutex
-	mu          sync.Mutex
-	meta        map[string]string
-	cache       map[string]string
-	sharedCache map[string]string
-	state       map[string]string
-	files       map[string][]byte
-	credentials map[string][]byte
-	config      string
-	stubs       map[string]func(args string) (string, error)
-	logs        []LogEntry
-	metrics     []MetricEntry
-	calls       []HostCallEntry
-	now         func() int64
+	mu           sync.Mutex
+	meta         map[string]string
+	cache        map[string]string
+	cacheExpiry  map[string]int64
+	sharedCache  map[string]string
+	sharedExpiry map[string]int64
+	state        map[string]string
+	stateVersion map[string]string
+	stateSeq     uint64
+	files        map[string][]byte
+	credentials  map[string][]byte
+	config       string
+	stubs        map[string]func(args string) (string, error)
+	logs         []LogEntry
+	metrics      []MetricEntry
+	calls        []HostCallEntry
+	accepted     []HostCallEntry
+	permissions  map[string]bool
+	hooks        map[string]bool
+	active       *Request
+	now          func() int64
 	// Presence is tracked separately from the byte slices. An all-default
 	// ChatRequest marshals to zero bytes and an upstream body can legitimately
 	// be empty, so length is not presence — a harness that conflated them
@@ -139,8 +145,11 @@ func New(t testing.TB) *Harness {
 		t:               t,
 		meta:            map[string]string{},
 		cache:           map[string]string{},
+		cacheExpiry:     map[string]int64{},
 		sharedCache:     map[string]string{},
+		sharedExpiry:    map[string]int64{},
 		state:           map[string]string{},
+		stateVersion:    map[string]string{},
 		files:           map[string][]byte{},
 		credentials:     map[string][]byte{},
 		config:          "{}",
@@ -159,14 +168,20 @@ func New(t testing.TB) *Harness {
 
 	h.host = &sdk.TestHost{
 		HostCall: h.hostCallBytes,
-		Log: func(msg string, level int32) {
+		Log: func(msg string, level sdk.LogLevel) {
 			h.mu.Lock()
 			defer h.mu.Unlock()
+			if h.permissions != nil && !h.permissions["env.log"] {
+				return
+			}
 			h.logs = append(h.logs, LogEntry{Message: msg, Level: level})
 		},
-		Metric: func(name string, typ int32, value float64, labels map[string]string) {
+		Metric: func(name string, typ sdk.MetricKind, value float64, labels map[string]string) {
 			h.mu.Lock()
 			defer h.mu.Unlock()
+			if h.permissions != nil && !h.permissions["env.emit_metric"] {
+				return
+			}
 			h.metrics = append(h.metrics, MetricEntry{Name: name, Type: typ, Value: value, Labels: labels})
 		},
 	}
@@ -218,6 +233,52 @@ func (h *Harness) StubHostCall(cmd string, fn func(args string) (string, error))
 	defer h.mu.Unlock()
 	h.stubs[cmd] = fn
 	return h
+}
+
+// WithPermissions enables manifest-like permission enforcement for this
+// harness. An unset permission set keeps the historical unrestricted fixture
+// mode; once configured, refusals happen before any stub callback runs.
+func (h *Harness) WithPermissions(permissions []string) *Harness {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.permissions = make(map[string]bool, len(permissions))
+	for _, p := range permissions {
+		if !sdk.IsPermission(p) {
+			h.t.Fatalf("sdktest: unknown permission %q", p)
+		}
+		h.permissions[p] = true
+	}
+	return h
+}
+
+// WithHooks constrains dispatch to the hooks declared by a manifest.
+func (h *Harness) WithHooks(hooks []string) *Harness {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.hooks = make(map[string]bool, len(hooks))
+	for _, hook := range hooks {
+		if !sdk.IsHook(hook) {
+			h.t.Fatalf("sdktest: unknown hook %q", hook)
+		}
+		h.hooks[hook] = true
+	}
+	return h
+}
+
+func (h *Harness) hookAllowed(name string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.hooks != nil && !h.hooks[name] {
+		return false
+	}
+	if h.permissions != nil {
+		for permission, hook := range sdk.HookGrants() {
+			if hook == name && !h.permissions[permission] {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // StubModelComplete installs a typed model-service double. The callback sees
@@ -294,6 +355,28 @@ func (h *Harness) StubPromptCachePolicy(fn func(*pbv1.PromptCachePolicyGetArgs) 
 			return "", err
 		}
 		return HostResultValue(raw), nil
+	})
+}
+
+// StubResourceInfo installs a typed resource metadata double.
+func (h *Harness) StubResourceInfo(fn func(*pbv1.ResourceInfoArgs) (*pbv1.ResourceInfo, *pbv1.HostError, error)) *Harness {
+	return h.StubHostCall("env.resource_info", func(raw string) (string, error) {
+		var a pbv1.ResourceInfoArgs
+		if err := proto.Unmarshal([]byte(raw), &a); err != nil {
+			return string(hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid ResourceInfoArgs")), nil
+		}
+		v, he, err := fn(&a)
+		if err != nil {
+			return "", err
+		}
+		if he != nil {
+			return string(hostCallResultError(he.Code, he.Message)), nil
+		}
+		b, err := proto.Marshal(v)
+		if err != nil {
+			return "", err
+		}
+		return string(hostCallResultValue(b)), nil
 	})
 }
 
@@ -443,16 +526,61 @@ func (h *Harness) State(key string) (string, bool) {
 func (h *Harness) hostCallBytes(cmd string, args []byte) ([]byte, error) {
 	h.mu.Lock()
 	stub := h.stubs[cmd]
+	if h.active != nil && h.active.invocationHook != "" {
+		spec, ok := sdk.Command(cmd)
+		if !ok || !containsString(spec.Hooks, h.active.invocationHook) {
+			denied := []byte(HostResultError(pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "command unavailable in this hook"))
+			entry := HostCallEntry{Command: cmd, Args: string(args), Result: string(denied)}
+			entry.index = len(h.calls)
+			h.calls = append(h.calls, entry)
+			h.active.calls = append(h.active.calls, entry)
+			h.mu.Unlock()
+			return denied, nil
+		}
+	}
+	if h.permissions != nil {
+		permission, ok := sdk.CommandPermission(cmd)
+		if !ok || !h.permissions[permission] {
+			denied := []byte(HostResultError(pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "permission denied"))
+			entry := HostCallEntry{Command: cmd, Args: string(args), Result: string(denied)}
+			entry.index = len(h.calls)
+			h.calls = append(h.calls, entry)
+			if h.active != nil {
+				h.active.calls = append(h.active.calls, entry)
+			}
+			h.mu.Unlock()
+			return denied, nil
+		}
+	}
 	h.mu.Unlock()
 
 	argsStr := string(args)
 	if stub != nil {
 		res, err := stub(argsStr)
 		if err != nil {
+			h.mu.Lock()
+			entry := HostCallEntry{Command: cmd, Args: argsStr, Result: "<transport error>"}
+			entry.index = len(h.calls)
+			h.calls = append(h.calls, entry)
+			if h.active != nil {
+				h.active.calls = append(h.active.calls, entry)
+			}
+			h.mu.Unlock()
 			return nil, err
 		}
 		h.mu.Lock()
-		h.calls = append(h.calls, HostCallEntry{Command: cmd, Args: argsStr, Result: res})
+		entry := HostCallEntry{Command: cmd, Args: argsStr, Result: res, Effective: hostResultAccepted([]byte(res))}
+		entry.index = len(h.calls)
+		h.calls = append(h.calls, entry)
+		if h.active != nil {
+			h.active.calls = append(h.active.calls, entry)
+		}
+		if hostResultAccepted([]byte(res)) {
+			h.accepted = append(h.accepted, entry)
+			if h.active != nil {
+				h.active.accepted = append(h.active.accepted, entry)
+			}
+		}
 		h.mu.Unlock()
 		return []byte(res), nil
 	}
@@ -462,9 +590,52 @@ func (h *Harness) hostCallBytes(cmd string, args []byte) ([]byte, error) {
 		return nil, err
 	}
 	h.mu.Lock()
-	h.calls = append(h.calls, HostCallEntry{Command: cmd, Args: argsStr, Result: string(raw)})
+	entry := HostCallEntry{Command: cmd, Args: argsStr, Result: string(raw), Effective: hostResultAccepted(raw)}
+	entry.index = len(h.calls)
+	h.calls = append(h.calls, entry)
+	if h.active != nil {
+		h.active.calls = append(h.active.calls, entry)
+	}
+	if hostResultAccepted(raw) {
+		h.accepted = append(h.accepted, entry)
+		if h.active != nil {
+			h.active.accepted = append(h.active.accepted, entry)
+		}
+	}
 	h.mu.Unlock()
 	return raw, nil
+}
+
+func hostResultAccepted(raw []byte) bool {
+	r, err := pbv1.DecodeHostCallResult(raw)
+	if err != nil {
+		return false
+	}
+	_, ok := r.Result.(*pbv1.HostCallResult_Value)
+	return ok
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+func (h *Harness) AcceptedCalls() []HostCallEntry {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]HostCallEntry(nil), h.accepted...)
+}
+func (h *Harness) EffectiveBlockCalls() []HostCallEntry {
+	var out []HostCallEntry
+	for _, c := range h.AcceptedCalls() {
+		if c.Command == "env.block_request" && c.Effective {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // isExtensionCommand reports whether cmd is a host-feature call rather than a
@@ -663,6 +834,11 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
 		}
 		v, present := h.cache[a.Key]
+		if present && h.cacheExpiry[a.Key] > 0 && h.now() >= h.cacheExpiry[a.Key] {
+			delete(h.cache, a.Key)
+			delete(h.cacheExpiry, a.Key)
+			present = false
+		}
 		if !present {
 			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_FOUND, "cache key not found"), nil
 		}
@@ -677,6 +853,19 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, err.Error()), nil
 		}
 		h.cache[a.Key] = a.Value
+		if a.TtlMs != nil {
+			h.cacheExpiry[a.Key] = h.now() + int64(*a.TtlMs)
+		} else {
+			delete(h.cacheExpiry, a.Key)
+		}
+		return hostCallResultValue(nil), nil
+	case "env.cache_delete":
+		var a pbv1.CacheDeleteArgs
+		if err := proto.Unmarshal(args, &a); err != nil || a.Validate() != nil {
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid CacheDeleteArgs"), nil
+		}
+		delete(h.cache, a.Key)
+		delete(h.cacheExpiry, a.Key)
 		return hostCallResultValue(nil), nil
 	case "env.shared_cache_get":
 		var a pbv1.CacheGetArgs
@@ -684,6 +873,11 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid CacheGetArgs"), nil
 		}
 		v, ok := h.sharedCache[a.Key]
+		if ok && h.sharedExpiry[a.Key] > 0 && h.now() >= h.sharedExpiry[a.Key] {
+			delete(h.sharedCache, a.Key)
+			delete(h.sharedExpiry, a.Key)
+			ok = false
+		}
 		if !ok {
 			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_FOUND, "cache key not found"), nil
 		}
@@ -694,6 +888,19 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid CacheSetArgs"), nil
 		}
 		h.sharedCache[a.Key] = a.Value
+		if a.TtlMs != nil {
+			h.sharedExpiry[a.Key] = h.now() + int64(*a.TtlMs)
+		} else {
+			delete(h.sharedExpiry, a.Key)
+		}
+		return hostCallResultValue(nil), nil
+	case "env.shared_cache_delete":
+		var a pbv1.CacheDeleteArgs
+		if err := proto.Unmarshal(args, &a); err != nil || a.Validate() != nil {
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid CacheDeleteArgs"), nil
+		}
+		delete(h.sharedCache, a.Key)
+		delete(h.sharedExpiry, a.Key)
 		return hostCallResultValue(nil), nil
 
 	case "env.state_get":
@@ -729,7 +936,82 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 		// An empty value STORES an empty value. The old helper deleted the key
 		// here, which is exactly why state has a separate delete command.
 		h.state[a.Key] = a.Value
+		h.stateSeq++
+		h.stateVersion[a.Key] = strconv.FormatUint(h.stateSeq, 10)
 		return hostCallResultValue(nil), nil
+	case "env.state_get_versioned":
+		var a pbv1.StateGetArgs
+		if err := proto.Unmarshal(args, &a); err != nil || a.Validate() != nil {
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid StateGetArgs"), nil
+		}
+		if !h.StateConfigured {
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED, "state unavailable"), nil
+		}
+		v, ok := h.state[a.Key]
+		if !ok {
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_FOUND, "state key not found"), nil
+		}
+		b, _ := proto.Marshal(&pbv1.StateValue{Value: v, Version: h.stateVersion[a.Key]})
+		return hostCallResultValue(b), nil
+	case "env.state_compare_and_set":
+		var a pbv1.StateCompareAndSetArgs
+		if err := proto.Unmarshal(args, &a); err != nil || a.Validate() != nil {
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid StateCompareAndSetArgs"), nil
+		}
+		if !h.StateConfigured {
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED, "state unavailable"), nil
+		}
+		current, exists := h.stateVersion[a.Key]
+		match := (a.ExpectedVersion == nil && !exists) || (a.ExpectedVersion != nil && exists && *a.ExpectedVersion == current)
+		if !match {
+			b, _ := proto.Marshal(&pbv1.StateMutationResult{Applied: false})
+			return hostCallResultValue(b), nil
+		}
+		h.state[a.Key] = a.Value
+		h.stateSeq++
+		ver := strconv.FormatUint(h.stateSeq, 10)
+		h.stateVersion[a.Key] = ver
+		b, _ := proto.Marshal(&pbv1.StateMutationResult{Applied: true, Version: &ver})
+		return hostCallResultValue(b), nil
+	case "env.state_compare_and_delete":
+		var a pbv1.StateCompareAndDeleteArgs
+		if err := proto.Unmarshal(args, &a); err != nil || a.Validate() != nil {
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid StateCompareAndDeleteArgs"), nil
+		}
+		if !h.StateConfigured {
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED, "state unavailable"), nil
+		}
+		if h.stateVersion[a.Key] != a.ExpectedVersion {
+			b, _ := proto.Marshal(&pbv1.StateMutationResult{Applied: false})
+			return hostCallResultValue(b), nil
+		}
+		delete(h.state, a.Key)
+		delete(h.stateVersion, a.Key)
+		b, _ := proto.Marshal(&pbv1.StateMutationResult{Applied: true})
+		return hostCallResultValue(b), nil
+	case "env.state_scan":
+		var a pbv1.StateScanArgs
+		if err := proto.Unmarshal(args, &a); err != nil || a.Validate() != nil {
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid StateScanArgs"), nil
+		}
+		if !h.StateConfigured {
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED, "state unavailable"), nil
+		}
+		entries := make([]*pbv1.StateEntry, 0)
+		for k, v := range h.state {
+			if strings.HasPrefix(k, a.Prefix) && (a.Cursor == "" || k > a.Cursor) {
+				ver := h.stateVersion[k]
+				entries = append(entries, &pbv1.StateEntry{Key: k, Value: &pbv1.StateValue{Value: v, Version: ver}})
+			}
+		}
+		sort.Slice(entries, func(i, j int) bool { return entries[i].Key < entries[j].Key })
+		next := ""
+		if a.Limit > 0 && uint32(len(entries)) > a.Limit {
+			next = entries[a.Limit-1].Key
+			entries = entries[:a.Limit]
+		}
+		b, _ := proto.Marshal(&pbv1.StateScanResult{Entries: entries, NextCursor: next})
+		return hostCallResultValue(b), nil
 
 	case "env.state_delete":
 		var a pbv1.StateDeleteArgs
@@ -804,6 +1086,9 @@ func CheckManifest(t testing.TB, dir string) {
 		Hooks []struct {
 			Name string `json:"name"`
 		} `json:"hooks"`
+		Permissions []struct {
+			Name string `json:"name"`
+		} `json:"permissions"`
 	}
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatalf("sdktest: parse manifest: %v", err)
@@ -828,6 +1113,11 @@ func CheckManifest(t testing.TB, dir string) {
 		if !declared[name] {
 			t.Errorf("a handler is registered for %q but plugin.json does not declare it — "+
 				"the host skips undeclared hooks, so this handler would never be called", name)
+		}
+	}
+	for _, permission := range m.Permissions {
+		if !sdk.IsPermission(permission.Name) {
+			t.Errorf("plugin.json declares unknown permission %q", permission.Name)
 		}
 	}
 }

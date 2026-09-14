@@ -378,27 +378,13 @@ func (x *HookInput) Validate() error {
 	if x == nil {
 		return fmt.Errorf("hook input is nil")
 	}
+	if x.ContractRevision != 1 {
+		return fmt.Errorf("unsupported contract revision %d", x.ContractRevision)
+	}
+	if err := validateClosed(x); err != nil {
+		return fmt.Errorf("hook input: %w", err)
+	}
 	if x.HookOf() == Hook_HOOK_UNSPECIFIED {
-		// A payload this build cannot name unmarshals with Payload nil and its
-		// bytes in unknown fields, the same way an unknown action does on
-		// HookResult.
-		//
-		// The check is narrower here, and deliberately so. HookResult is
-		// nothing BUT its oneof, so any unknown top-level field is an action
-		// and is refused unconditionally. HookInput also carries top-level
-		// scalars — abi_minor, request_id — so an unknown top-level field may
-		// instead be a scalar a later minor added. Those are additive and
-		// advisory by construction: a guest that ignores one behaves as it did
-		// before, which is what abi_minor exists to let it negotiate. Refusing
-		// them would make every additive host change a breaking one.
-		//
-		// So the two cases are distinguished by what is MISSING, not by what is
-		// unknown: no payload plus unknown bytes means the payload is the part
-		// this build cannot name, and there is no hook to dispatch to.
-		if len(x.ProtoReflect().GetUnknown()) != 0 {
-			return fmt.Errorf("hook input carries a payload this build does not " +
-				"recognise; it was produced by a newer ABI and cannot be dispatched")
-		}
 		return fmt.Errorf("hook input carries no payload, so there is no hook to dispatch")
 	}
 	if !x.payloadPresent() {
@@ -414,6 +400,16 @@ func (x *HookInput) Validate() error {
 	if ev, ok := x.Payload.(*HookInput_StreamEvent); ok {
 		if err := ev.StreamEvent.Validate(); err != nil {
 			return fmt.Errorf("hook input: %w", err)
+		}
+	}
+	switch p := x.Payload.(type) {
+	case *HookInput_ChatRequest:
+		if err := p.ChatRequest.ValidateReplacement(); err != nil {
+			return fmt.Errorf("chat request: %w", err)
+		}
+	case *HookInput_AfterResponse:
+		if err := p.AfterResponse.Response.Validate(); err != nil {
+			return fmt.Errorf("after response: %w", err)
 		}
 	}
 	return nil

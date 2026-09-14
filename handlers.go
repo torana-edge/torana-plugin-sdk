@@ -6,10 +6,12 @@ import (
 	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
-// Handler registrations and the context key for request_id. Shared by the
-// wasip1 trampoline and the non-WASM test build.
+// Handler registrations and invocation context shared by the wasip1 trampoline
+// and native test build. Dispatch accepts only the exact ABI-v1 contract
+// revision; unsupported revisions fail before a handler runs.
 
 type requestIDCtxKey struct{}
+type executionCtxKey struct{}
 
 // RequestID returns the host request id from ctx, or 0 when absent.
 func RequestID(ctx context.Context) uint64 {
@@ -19,6 +21,23 @@ func RequestID(ctx context.Context) uint64 {
 
 func withRequestID(ctx context.Context, id uint64) context.Context {
 	return context.WithValue(ctx, requestIDCtxKey{}, id)
+}
+
+// Execution returns the host-supplied snapshot for the current hook. It may
+// contain effective provider/model, optional conversation identity and
+// deadline, synthetic-response status, and hard memory/response/stream-buffer
+// limits. It never contains credentials or endpoint secrets. Treat the value
+// as immutable; nil means the host did not provide a snapshot.
+func Execution(ctx context.Context) *pbv1.ExecutionInfo {
+	value, _ := ctx.Value(executionCtxKey{}).(*pbv1.ExecutionInfo)
+	return value
+}
+
+func withExecution(ctx context.Context, info *pbv1.ExecutionInfo) context.Context {
+	if info == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, executionCtxKey{}, info)
 }
 
 var (
@@ -45,8 +64,8 @@ func OnAfterResponse(handler func(context.Context, *pbv1.ChatResponse, bool) (Re
 
 // OnStreamChunk registers the stream-chunk handler.
 // Prefer StreamHandler for tool-call assembly and multiple stream interests.
-// Errors from a raw stream handler trap; StreamHandler.Handle consumes its
-// own semantic-callback errors for fail-open re-emission.
+// Errors from a raw handler or StreamHandler callback trap so the host applies
+// failure_mode.
 func OnStreamChunk(handler func(context.Context, *pbv1.StreamEvent) (StreamResult, error)) {
 	claimHook(HookStreamChunk, handler)
 	streamChunkHandler = handler

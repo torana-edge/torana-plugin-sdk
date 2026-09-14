@@ -1,0 +1,20 @@
+[
+  {"name":"host_call_result_value","message_type":"torana.v1.HostCallResult","wire_hex":"0a026f6b","valid":true},
+  {"name":"host_call_result_duplicate_arms","message_type":"torana.v1.HostCallResult","wire_hex":"0a026f6b12020801","valid":false},
+  {"name":"hook_result_unknown_field","message_type":"torana.v1.HookResult","wire_hex":"a00601","valid":false},
+  {"name":"hook_input_duplicate_payload","message_type":"torana.v1.HookInput","wire_hex":"2a020a002a020a00","valid":false},
+  {"name":"state_mutation_applied","message_type":"torana.v1.StateMutationResult","wire_hex":"0801120131","valid":true},
+  {"name":"output_format_unknown_enum","message_type":"torana.v1.OutputFormat","wire_hex":"08ff01","valid":false},
+  {"name":"hook_input_http","message_type":"torana.v1.HookInput","wire_hex":"08013a00","valid":true},
+  {"name":"hook_input_tick","message_type":"torana.v1.HookInput","wire_hex":"08014200","valid":true},
+  {"name":"hook_result_suppress","message_type":"torana.v1.HookResult","wire_hex":"3200","valid":true},
+  {"name":"request_block_duplicate_oneof","message_type":"torana.v1.RequestBlock","wire_hex":"0a001200","valid":false},
+  {"name":"response_block_duplicate_oneof","message_type":"torana.v1.ResponseBlock","wire_hex":"0a001200","valid":false},
+  {"name":"stream_event_duplicate_oneof","message_type":"torana.v1.StreamEvent","wire_hex":"0a001200","valid":false},
+  {"name":"output_format_bad_schema_json","message_type":"torana.v1.OutputFormat","wire_hex":"1a0178","valid":false},
+  {"name":"hook_input_after_response_missing_wrapper","message_type":"torana.v1.HookInput","wire_hex":"2a00","valid":false},
+  {"name":"hook_result_unknown_nested_field","message_type":"torana.v1.HookResult","wire_hex":"0a02a206","valid":false},
+  {"name":"stream_tool_start_function_zero","message_type":"torana.v1.StreamEvent","wire_hex":"4a0822060a0163120166","valid":true},
+  {"name":"stream_tool_start_freeform_one","message_type":"torana.v1.StreamEvent","wire_hex":"4a0a22080a01631201662001","valid":true},
+  {"name":"stream_tool_start_unknown_two","message_type":"torana.v1.StreamEvent","wire_hex":"4a0a22080a01631201662002","valid":false}
+]

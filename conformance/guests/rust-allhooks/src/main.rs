@@ -3,25 +3,29 @@
 //! The rust-logger example advertises only before-request. This guest advertises
 //! every ABI-v1 hook so the host can compare Go and Rust export semantics.
 //!
-//! Every handler passes through. The hooks exist to be reached, not to do
-//! anything: what is under test is what the SDK does before calling them.
+//! Every ordinary handler invocation passes through. A reserved request model
+//! exercises the typed respond_request host call across the compiled WASI
+//! boundary.
 
 use torana_plugin_sdk::{
-    export_plugin_v1, pbv1, HOOK_AFTER_RESPONSE, HOOK_BEFORE_REQUEST,
-    HOOK_ON_HTTP_REQUEST, HOOK_ON_STREAM_CHUNK, HOOK_ON_TICK,
+    export_plugin_v1, pbv1, respond_text, Plugin, RequestResult, HOOK_AFTER_RESPONSE,
+    HOOK_BEFORE_REQUEST, HOOK_ON_HTTP_REQUEST, HOOK_ON_STREAM_CHUNK, HOOK_ON_TICK,
 };
-
-fn dispatch(_input: pbv1::HookInput) -> Result<Option<pbv1::HookResult>, String> {
-    Ok(None)
-}
-
-export_plugin_v1!(
-    HOOK_BEFORE_REQUEST
+struct AllHooks;
+impl Plugin for AllHooks {
+    const SUPPORTED_HOOKS: u32 = HOOK_BEFORE_REQUEST
         | HOOK_AFTER_RESPONSE
         | HOOK_ON_STREAM_CHUNK
         | HOOK_ON_HTTP_REQUEST
-        | HOOK_ON_TICK,
-    dispatch
-);
+        | HOOK_ON_TICK;
+
+    fn before_request(request: pbv1::ChatRequest) -> Result<RequestResult, String> {
+        if request.model == "__respond_request_conformance__" {
+            respond_text("compiled Rust response").map_err(|error| error.to_string())?;
+        }
+        Ok(RequestResult::pass())
+    }
+}
+export_plugin_v1!(AllHooks);
 
 fn main() {}

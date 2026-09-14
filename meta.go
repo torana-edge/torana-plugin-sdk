@@ -16,38 +16,28 @@ import (
 // separately-granted cross-plugin channel. For durable per-plugin storage use
 // State*.
 //
-// Reads return (value, *HostError, error); writes return (*HostError, error).
+// Reads return (value, found, error); writes return error. A missing key is
+// ("", false, nil). Permission denials, unavailable services, malformed
+// replies, and transport failures are errors. Classified refusals wrap
+// *HostCallRefusalError so callers can use errors.As and its stable Code.
 //
-// HostError is a classified host-side non-success: NOT_FOUND is ordinary
-// absence for reads, while other codes report a refusal — most often a missing
-// permission — or a host failure. error means the call itself could not be
-// made, or its reply was invalid.
-//
-// ABSENCE IS NOT EMPTINESS. A key that does not exist returns a HostError with
-// code NOT_FOUND; a key holding an empty string returns success with an empty
-// value. Use IsNotFound to branch.
+// ABSENCE IS NOT EMPTINESS. A key holding an empty string returns ("", true,
+// nil). Branch on found, not the value.
 
-// IsNotFound reports whether a HostError means the key does not exist, as
-// opposed to any other refusal such as a missing permission.
-//
-// Without this, distinguishing a miss from a denial means comparing enum
-// constants at every call site, and the easy mistake — treating every
-// HostError as a miss — silently swallows permission failures.
+// IsNotFound reports whether a raw HostError represents ordinary absence.
+// Most plugin code should use the found result returned by MetaGet, CacheGet,
+// SharedCacheGet, StateGet, or StateGetVersioned instead.
 func IsNotFound(herr *pbv1.HostError) bool {
 	return herr != nil && herr.Code == pbv1.ErrorCode_ERROR_CODE_NOT_FOUND
 }
 
 // MetaGet reads one of this plugin's request-scoped keys.
 //
-// A key that was never written returns a NOT_FOUND HostError. A key holding an
-// empty string returns "" with no HostError. Callers that treat absence as a
-// default should branch with IsNotFound rather than testing the value.
-func MetaGet(key string) (string, *pbv1.HostError, error) {
-	raw, herr, err := HostCall("env.meta_get", &pbv1.MetaGetArgs{Key: key})
-	if err != nil || herr != nil {
-		return "", herr, err
-	}
-	return string(raw), nil, nil
+// A key that was never written returns ("", false, nil). A key holding an
+// empty string returns ("", true, nil). Other host refusals return an error.
+func MetaGet(key string) (string, bool, error) {
+	raw, found, err := checkedHostCallValue("env.meta_get", &pbv1.MetaGetArgs{Key: key})
+	return string(raw), found, err
 }
 
 // MetaSet writes one of this plugin's request-scoped keys.
@@ -55,45 +45,56 @@ func MetaGet(key string) (string, *pbv1.HostError, error) {
 // An empty value stores an empty value; it is not a delete. After
 // MetaSet(k, ""), MetaGet(k) succeeds with an empty value rather than reporting
 // NOT_FOUND.
-func MetaSet(key, value string) (*pbv1.HostError, error) {
-	_, herr, err := HostCall("env.meta_set", &pbv1.MetaSetArgs{Key: key, Value: value})
-	return herr, err
+func MetaSet(key, value string) error {
+	return checkedHostCall("env.meta_set", &pbv1.MetaSetArgs{Key: key, Value: value})
 }
 
 // CacheGet reads a key from this plugin's private cross-request cache.
 //
-// A miss returns a NOT_FOUND HostError, not an empty value — the same
-// distinction as MetaGet, and the reason a cached empty string is usable at
-// all.
-func CacheGet(key string) (string, *pbv1.HostError, error) {
-	raw, herr, err := HostCall("env.cache_get", &pbv1.CacheGetArgs{Key: key})
-	if err != nil || herr != nil {
-		return "", herr, err
-	}
-	return string(raw), nil, nil
+// A miss returns ("", false, nil); a cached empty string returns ("", true,
+// nil). Other host refusals return an error.
+func CacheGet(key string) (string, bool, error) {
+	raw, found, err := checkedHostCallValue("env.cache_get", &pbv1.CacheGetArgs{Key: key})
+	return string(raw), found, err
 }
 
-// CacheSet writes a key to this plugin's private cross-request cache.
-func CacheSet(key, value string) (*pbv1.HostError, error) {
-	_, herr, err := HostCall("env.cache_set", &pbv1.CacheSetArgs{Key: key, Value: value})
-	return herr, err
+// CacheSet writes a key to this plugin's private cross-request cache without
+// an explicit TTL. An empty value is stored, not deleted.
+func CacheSet(key, value string) error {
+	return checkedHostCall("env.cache_set", &pbv1.CacheSetArgs{Key: key, Value: value})
+}
+
+// CacheSetTTL writes a private cache entry with a positive bounded TTL in milliseconds.
+func CacheSetTTL(key, value string, ttlMS uint64) error {
+	return checkedHostCall("env.cache_set", &pbv1.CacheSetArgs{Key: key, Value: value, TtlMs: &ttlMS})
+}
+
+// CacheDelete removes a private cache entry. Missing entries succeed.
+func CacheDelete(key string) error {
+	return checkedHostCall("env.cache_delete", &pbv1.CacheDeleteArgs{Key: key})
 }
 
 // SharedCacheGet reads a key from the explicit cross-plugin cache namespace.
 // Most plugins should use CacheGet. Shared cache capabilities are appropriate
 // only when two separately approved plugins intentionally exchange data under
 // a documented key contract.
-func SharedCacheGet(key string) (string, *pbv1.HostError, error) {
-	raw, herr, err := HostCall("env.shared_cache_get", &pbv1.CacheGetArgs{Key: key})
-	if err != nil || herr != nil {
-		return "", herr, err
-	}
-	return string(raw), nil, nil
+func SharedCacheGet(key string) (string, bool, error) {
+	raw, found, err := checkedHostCallValue("env.shared_cache_get", &pbv1.CacheGetArgs{Key: key})
+	return string(raw), found, err
 }
 
 // SharedCacheSet writes a key to the explicit cross-plugin cache namespace.
 // Possessing private env.cache_set never authorizes this operation.
-func SharedCacheSet(key, value string) (*pbv1.HostError, error) {
-	_, herr, err := HostCall("env.shared_cache_set", &pbv1.CacheSetArgs{Key: key, Value: value})
-	return herr, err
+func SharedCacheSet(key, value string) error {
+	return checkedHostCall("env.shared_cache_set", &pbv1.CacheSetArgs{Key: key, Value: value})
+}
+
+// SharedCacheSetTTL writes a shared entry with a positive bounded TTL in milliseconds.
+func SharedCacheSetTTL(key, value string, ttlMS uint64) error {
+	return checkedHostCall("env.shared_cache_set", &pbv1.CacheSetArgs{Key: key, Value: value, TtlMs: &ttlMS})
+}
+
+// SharedCacheDelete removes a shared entry. Missing entries succeed.
+func SharedCacheDelete(key string) error {
+	return checkedHostCall("env.shared_cache_delete", &pbv1.CacheDeleteArgs{Key: key})
 }

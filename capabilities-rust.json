@@ -1,0 +1,714 @@
+{
+  "hooks": [
+    "run_before_request",
+    "run_after_response",
+    "run_on_stream_chunk",
+    "run_on_http_request",
+    "run_on_tick"
+  ],
+  "hook_grants": {
+    "env.background_tick": "run_on_tick",
+    "env.serve_http": "run_on_http_request"
+  },
+  "metadata_grants": [
+    "env.request_headers"
+  ],
+  "write_permissions": [
+    "ir.cache_control.write",
+    "ir.messages.write.assistant",
+    "ir.messages.write.developer",
+    "ir.messages.write.other",
+    "ir.messages.write.system",
+    "ir.messages.write.tool",
+    "ir.messages.write.user",
+    "ir.model.write",
+    "ir.params.write",
+    "ir.stream.write",
+    "ir.tool_results.write",
+    "ir.tools.write"
+  ],
+  "commands": [
+    {
+      "command": "env.block_request",
+      "permission": "env.block_request",
+      "arguments": "BlockRequestArgs",
+      "result": "empty",
+      "hooks": [
+        "run_before_request"
+      ],
+      "helpers": [
+        "BlockRequest",
+        "MustBlockRequest"
+      ]
+    },
+    {
+      "command": "env.cache_delete",
+      "permission": "env.cache_set",
+      "arguments": "CacheDeleteArgs",
+      "result": "empty",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "CacheDelete"
+      ]
+    },
+    {
+      "command": "env.cache_get",
+      "permission": "env.cache_get",
+      "arguments": "CacheGetArgs",
+      "result": "utf8",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "CacheGet"
+      ]
+    },
+    {
+      "command": "env.cache_policy",
+      "permission": "env.cache_policy",
+      "arguments": "PromptCachePolicyGetArgs",
+      "result": "PromptCachePolicy",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "GetPromptCachePolicy"
+      ]
+    },
+    {
+      "command": "env.cache_set",
+      "permission": "env.cache_set",
+      "arguments": "CacheSetArgs",
+      "result": "empty",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "CacheSet",
+        "CacheSetTTL"
+      ]
+    },
+    {
+      "command": "env.credential_get",
+      "permission": "env.credential_get",
+      "arguments": "CredentialGetArgs",
+      "result": "bytes",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "GetCredential"
+      ]
+    },
+    {
+      "command": "env.emit_metric",
+      "permission": "env.emit_metric",
+      "arguments": "import",
+      "result": "empty",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "EmitMetric",
+        "Counter",
+        "Histogram",
+        "Gauge"
+      ]
+    },
+    {
+      "command": "env.file_append",
+      "permission": "env.file_append",
+      "arguments": "FileAppendArgs",
+      "result": "empty",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "AppendFile"
+      ]
+    },
+    {
+      "command": "env.file_delete",
+      "permission": "env.file_delete",
+      "arguments": "FileDeleteArgs",
+      "result": "empty",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "DeleteFile"
+      ]
+    },
+    {
+      "command": "env.file_list",
+      "permission": "env.file_list",
+      "arguments": "FileListArgs",
+      "result": "json-string-list",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "ListFiles"
+      ]
+    },
+    {
+      "command": "env.file_read",
+      "permission": "env.file_read",
+      "arguments": "FileReadArgs",
+      "result": "bytes",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "ReadFile"
+      ]
+    },
+    {
+      "command": "env.file_write",
+      "permission": "env.file_write",
+      "arguments": "FileWriteArgs",
+      "result": "empty",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "WriteFile"
+      ]
+    },
+    {
+      "command": "env.http_request",
+      "permission": "env.http_request",
+      "arguments": "OutboundHTTPRequestArgs",
+      "result": "OutboundHTTPResponse",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "HTTPRequest"
+      ]
+    },
+    {
+      "command": "env.log",
+      "permission": "env.log",
+      "arguments": "import",
+      "result": "empty",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "Log",
+        "Debug",
+        "Info"
+      ]
+    },
+    {
+      "command": "env.meta_append",
+      "permission": "env.meta_set",
+      "arguments": "MetaAppendArgs",
+      "result": "bytes",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "MetaAppend"
+      ]
+    },
+    {
+      "command": "env.meta_get",
+      "permission": "env.meta_get",
+      "arguments": "MetaGetArgs",
+      "result": "utf8",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "MetaGet"
+      ]
+    },
+    {
+      "command": "env.meta_set",
+      "permission": "env.meta_set",
+      "arguments": "MetaSetArgs",
+      "result": "empty",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "MetaSet"
+      ]
+    },
+    {
+      "command": "env.model_complete",
+      "permission": "env.model_complete",
+      "arguments": "ModelCompleteArgs",
+      "result": "ModelCompleteResult",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "ModelComplete"
+      ]
+    },
+    {
+      "command": "env.model_pricing",
+      "permission": "env.model_pricing",
+      "arguments": "ModelPricingGetArgs",
+      "result": "ModelPricing",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "GetModelPricing"
+      ]
+    },
+    {
+      "command": "env.now",
+      "permission": "env.now",
+      "arguments": "none",
+      "result": "unix-ms",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "Now"
+      ]
+    },
+    {
+      "command": "env.original_request",
+      "permission": "env.original_request",
+      "arguments": "none",
+      "result": "bytes",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk"
+      ],
+      "helpers": [
+        "OriginalRequest"
+      ]
+    },
+    {
+      "command": "env.original_response",
+      "permission": "env.original_response",
+      "arguments": "none",
+      "result": "bytes",
+      "hooks": [
+        "run_after_response",
+        "run_on_stream_chunk"
+      ],
+      "helpers": [
+        "OriginalResponse"
+      ]
+    },
+    {
+      "command": "env.plugin_config",
+      "permission": "env.plugin_config",
+      "arguments": "none",
+      "result": "json-object",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "PluginConfig"
+      ]
+    },
+    {
+      "command": "env.resource_info",
+      "permission": "env.resource_info",
+      "arguments": "ResourceInfoArgs",
+      "result": "ResourceInfo",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "GetResourceInfo"
+      ]
+    },
+    {
+      "command": "env.respond_request",
+      "permission": "env.respond_request",
+      "arguments": "RespondRequestArgs",
+      "result": "empty",
+      "hooks": [
+        "run_before_request"
+      ],
+      "helpers": [
+        "RespondRequest",
+        "RespondText",
+        "MustRespondRequest",
+        "MustRespondText"
+      ]
+    },
+    {
+      "command": "env.route_request",
+      "permission": "env.route_request",
+      "arguments": "RouteRequestArgs",
+      "result": "empty",
+      "hooks": [
+        "run_before_request"
+      ],
+      "helpers": [
+        "RouteRequest",
+        "MustRouteRequest"
+      ]
+    },
+    {
+      "command": "env.set_identity",
+      "permission": "env.set_identity",
+      "arguments": "SetIdentityArgs",
+      "result": "empty",
+      "hooks": [
+        "run_before_request"
+      ],
+      "helpers": [
+        "SetIdentity",
+        "MustSetIdentity"
+      ]
+    },
+    {
+      "command": "env.shared_cache_delete",
+      "permission": "env.shared_cache_set",
+      "arguments": "CacheDeleteArgs",
+      "result": "empty",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "SharedCacheDelete"
+      ]
+    },
+    {
+      "command": "env.shared_cache_get",
+      "permission": "env.shared_cache_get",
+      "arguments": "CacheGetArgs",
+      "result": "utf8",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "SharedCacheGet"
+      ]
+    },
+    {
+      "command": "env.shared_cache_set",
+      "permission": "env.shared_cache_set",
+      "arguments": "CacheSetArgs",
+      "result": "empty",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "SharedCacheSet",
+        "SharedCacheSetTTL"
+      ]
+    },
+    {
+      "command": "env.state_compare_and_delete",
+      "permission": "env.state_set",
+      "arguments": "StateCompareAndDeleteArgs",
+      "result": "StateMutationResult",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "StateCompareAndDelete"
+      ]
+    },
+    {
+      "command": "env.state_compare_and_set",
+      "permission": "env.state_set",
+      "arguments": "StateCompareAndSetArgs",
+      "result": "StateMutationResult",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "StateCompareAndSet"
+      ]
+    },
+    {
+      "command": "env.state_delete",
+      "permission": "env.state_set",
+      "arguments": "StateDeleteArgs",
+      "result": "empty",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "StateDelete"
+      ]
+    },
+    {
+      "command": "env.state_get",
+      "permission": "env.state_get",
+      "arguments": "StateGetArgs",
+      "result": "utf8",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "StateGet",
+        "StateGetJSON"
+      ]
+    },
+    {
+      "command": "env.state_get_versioned",
+      "permission": "env.state_get",
+      "arguments": "StateGetArgs",
+      "result": "StateValue",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "StateGetVersioned"
+      ]
+    },
+    {
+      "command": "env.state_keys",
+      "permission": "env.state_keys",
+      "arguments": "none",
+      "result": "json-string-list",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "StateKeys"
+      ]
+    },
+    {
+      "command": "env.state_scan",
+      "permission": "env.state_keys",
+      "arguments": "StateScanArgs",
+      "result": "StateScanResult",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "StateScan"
+      ]
+    },
+    {
+      "command": "env.state_set",
+      "permission": "env.state_set",
+      "arguments": "StateSetArgs",
+      "result": "empty",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "StateSet",
+        "StateSetJSON"
+      ]
+    },
+    {
+      "command": "torana_evaluate_compaction",
+      "permission": "env.host_call.torana_evaluate_compaction",
+      "arguments": "compaction-json",
+      "result": "compaction-json",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "EvaluateCompaction"
+      ]
+    },
+    {
+      "command": "torana_plugin_counter",
+      "permission": "env.host_call.torana_plugin_counter",
+      "arguments": "counter-json",
+      "result": "empty",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "RecordCounter"
+      ]
+    },
+    {
+      "command": "torana_record_savings",
+      "permission": "env.host_call.torana_record_savings",
+      "arguments": "savings-json",
+      "result": "empty",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "RecordSavings"
+      ]
+    },
+    {
+      "command": "torana_send_request",
+      "permission": "env.host_call.torana_send_request",
+      "arguments": "egress-json",
+      "result": "egress-json",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "SendRequest"
+      ]
+    },
+    {
+      "command": "verify_virtual_key",
+      "permission": "env.host_call.verify_virtual_key",
+      "arguments": "virtual-key-json",
+      "result": "identity-json",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "VerifyVirtualKey"
+      ]
+    }
+  ]
+}

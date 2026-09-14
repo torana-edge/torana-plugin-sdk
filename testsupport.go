@@ -13,8 +13,8 @@ import (
 // TestHost is the seam the sdktest package drives. Excluded from wasip1 builds.
 type TestHost struct {
 	HostCall func(cmd string, args []byte) ([]byte, error)
-	Log      func(msg string, level int32)
-	Metric   func(name string, metricType int32, value float64, labels map[string]string)
+	Log      func(msg string, level LogLevel)
+	Metric   func(name string, metricType MetricKind, value float64, labels map[string]string)
 }
 
 var (

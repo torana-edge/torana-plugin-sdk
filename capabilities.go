@@ -1,90 +1,109 @@
 package plugin_sdk
 
-// The v1 capability vocabulary.
-//
-// Which hook names and permission strings exist is an ABI concern, not a
-// host implementation detail: a plugin declares them in its manifest, and a
-// manifest is a contract against the ABI rather than against one particular
-// proxy build. Declaring them here gives every consumer one list to check
-// against — the host that enforces them, the tooling that validates manifests
-// before publishing, and plugin authors who want to verify their own manifest
-// without reading someone else's source.
-//
-// This list already drifted once, when a copy in the official plugin
-// repository's manifest validator rejected capabilities the host accepted
-// perfectly well. A published list is the fix.
-//
-// A host is free to expose fewer than this. It must not invent names outside
-// it, because a plugin requesting one has no way to know whether it will ever
-// be granted.
+import (
+	_ "embed"
+	"encoding/json"
+	"sort"
+)
 
-// Hooks a plugin may declare. See docs/PLUGIN_SEMANTICS.md for what each
-// one may and may not do.
-var Hooks = []string{
-	"run_after_response",
-	"run_before_request",
-	"run_on_http_request",
-	"run_on_stream_chunk",
-	"run_on_tick",
+// CommandSpec describes the one canonical route to a supported host operation.
+// Result names refer to protobuf messages unless they explicitly name a raw
+// representation. HostCallResult always frames the result or typed refusal.
+type CommandSpec struct {
+	Command     string   `json:"command"`
+	Arguments   string   `json:"arguments"`
+	Result      string   `json:"result"`
+	Permission  string   `json:"permission"`
+	Hooks       []string `json:"hooks"`
+	Helpers     []string `json:"helpers"`
+	Implemented bool     `json:"implemented"`
 }
 
-// Permissions is every capability a plugin may request, including the
-// ir.*.write grants in capabilities_write.go. Requesting one is never a grant:
-// an operator approves capabilities against an exact bundle digest.
-//
-// This is ONE list on purpose. Hosts build their allowlist from it, and an
-// earlier draft kept the write grants in a separate list with a union helper —
-// which meant a plugin could pass `torana plugin lint` (checking IsPermission)
-// and then be refused at load (checking the env-only list). Two lists that must
-// agree will eventually not.
-var Permissions = append([]string{
-	"env.background_tick",
-	"env.block_request",
-	"env.cache_get",
-	"env.cache_set",
-	"env.credential_get",
-	"env.emit_metric",
-	"env.file_append",
-	"env.file_delete",
-	"env.file_list",
-	"env.file_read",
-	"env.file_write",
-	"env.cache_policy",
-	"env.host_call.torana_db_query",
-	"env.host_call.torana_evaluate_compaction",
-	"env.host_call.torana_kms_decrypt",
-	"env.host_call.torana_plugin_counter",
-	"env.host_call.torana_record_savings",
-	"env.host_call.torana_send_request",
-	"env.host_call.verify_virtual_key",
-	"env.http_request",
-	"env.log",
-	"env.meta_get",
-	"env.meta_set",
-	"env.model_complete",
-	"env.model_pricing",
-	"env.now",
-	"env.original_request",
-	"env.original_response",
-	"env.plugin_config",
-	"env.request_headers",
-	"env.respond_request",
-	"env.route_request",
-	"env.serve_http",
-	"env.set_identity",
-	"env.shared_cache_get",
-	"env.shared_cache_set",
-	"env.state_get",
-	"env.state_keys",
-	"env.state_set",
-}, WritePermissions...)
+type capabilityCatalog struct {
+	Hooks            []string          `json:"hooks"`
+	HookGrants       map[string]string `json:"hook_grants"`
+	MetadataGrants   []string          `json:"metadata_grants"`
+	WritePermissions []string          `json:"write_permissions"`
+	Commands         []CommandSpec     `json:"commands"`
+}
 
-// IsHook reports whether name is a v1 hook.
-func IsHook(name string) bool { return contains(Hooks, name) }
+//go:embed capabilities.json
+var capabilityJSON []byte
+var catalog = readCapabilityCatalog()
 
-// IsPermission reports whether name is a capability a plugin may request.
+func readCapabilityCatalog() capabilityCatalog {
+	var c capabilityCatalog
+	if err := json.Unmarshal(capabilityJSON, &c); err != nil {
+		panic(err)
+	}
+	return c
+}
+
+// Hooks and Permissions derive from the same catalog used by host dispatch,
+// tooling and SDK reference generation. Requesting a permission never grants it.
+var Hooks = append([]string(nil), catalog.Hooks...)
+var Permissions = catalogPermissions()
+
+func catalogPermissions() []string {
+	set := map[string]bool{}
+	for _, c := range catalog.Commands {
+		if c.Implemented {
+			set[c.Permission] = true
+		}
+	}
+	for p := range catalog.HookGrants {
+		set[p] = true
+	}
+	for _, p := range catalog.MetadataGrants {
+		set[p] = true
+	}
+	for _, p := range catalog.WritePermissions {
+		set[p] = true
+	}
+	out := make([]string, 0, len(set))
+	for p := range set {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Commands returns a copy so callers cannot change the host authority catalog.
+func Commands() []CommandSpec {
+	out := append([]CommandSpec(nil), catalog.Commands...)
+	for i := range out {
+		out[i].Hooks = append([]string(nil), out[i].Hooks...)
+		out[i].Helpers = append([]string(nil), out[i].Helpers...)
+	}
+	return out
+}
+func Command(name string) (CommandSpec, bool) {
+	for _, c := range Commands() {
+		if c.Command == name && c.Implemented {
+			return c, true
+		}
+	}
+	return CommandSpec{}, false
+}
+func CommandPermission(name string) (string, bool) { c, ok := Command(name); return c.Permission, ok }
+func HelperPermissions() map[string]string {
+	out := map[string]string{}
+	for _, c := range catalog.Commands {
+		for _, h := range c.Helpers {
+			out[h] = c.Permission
+		}
+	}
+	return out
+}
+func HookGrants() map[string]string {
+	out := map[string]string{}
+	for p, h := range catalog.HookGrants {
+		out[p] = h
+	}
+	return out
+}
+func IsHook(name string) bool       { return contains(Hooks, name) }
 func IsPermission(name string) bool { return contains(Permissions, name) }
-
 func contains(list []string, name string) bool {
 	for _, v := range list {
 		if v == name {

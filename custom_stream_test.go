@@ -98,12 +98,23 @@ func TestStreamHandlerFreeformReplacementAndWrongFamilyFailOpen(t *testing.T) {
 					return tc.action, nil
 				})
 				var result StreamResult
+				var gotErr bool
 				for _, event := range freeformStream(1, "echo original", "signed") {
 					var err error
 					result, err = h.Handle(context.Background(), event)
+					if tc.name == "function replacement is wrong family" && err != nil {
+						gotErr = true
+						break
+					}
 					if err != nil {
 						t.Fatal(err)
 					}
+				}
+				if tc.name == "function replacement is wrong family" {
+					if !gotErr {
+						t.Fatal("wrong-family replacement must fail")
+					}
+					return
 				}
 				events := result.inner.GetEmitEvents().GetEvents()
 				if len(events) != 3 {

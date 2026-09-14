@@ -4,6 +4,11 @@ Rust bindings, safe memory plumbing, typed host-call results, and a single-hook
 dispatcher for Torana's WASM Plugin ABI v1. The crate requires Rust 1.85 or
 newer and `protoc`.
 
+Observability uses typed `LogLevel` and `MetricKind` values with the
+`debug`, `info`, `counter`, `histogram`, and `gauge` helpers. These map to the
+ABI v1 `env.log` and `env.emit_metric` imports and are best effort: the void
+imports cannot acknowledge delivery or report a missing permission.
+
 Add the crate and build for WASI Preview 1:
 
 ```toml
@@ -11,8 +16,13 @@ Add the crate and build for WASI Preview 1:
 crate-type = ["cdylib"]
 
 [dependencies]
-torana-plugin-sdk = "0.4"
+torana-plugin-sdk = { git = "https://github.com/torana-edge/torana-plugin-sdk", tag = "v0.5.0", version = "=0.5.0" }
 ```
+
+The tag and exact package version deliberately agree. This path works directly
+from the signed GitHub release even when crates.io publication is unavailable.
+After `torana-plugin-sdk` 0.5.0 is published to crates.io, registry consumers
+may use `torana-plugin-sdk = "=0.5.0"`.
 
 ```bash
 rustup target add wasm32-wasip1
@@ -49,3 +59,10 @@ or credentials from guest code.
 See the repository's
 [Rust authoring guide](https://github.com/torana-edge/torana-plugin-sdk/blob/main/docs/WRITING_A_PLUGIN.md#rust)
 for hooks, manifests, capabilities, and bundle installation.
+Rust authors implement the typed `Plugin` trait and use
+`export_plugin_v1!(PluginType)`. Result families are hook-specific, and helper
+errors remain classified rather than being converted to pass-through. Use
+`plugin_config::<T>()` for strict typed JSON configuration,
+`state_compare_and_set` for opaque versioned updates, and `StreamHandler` for
+host-backed tool-call assembly. `execution()` exposes only the current
+invocation snapshot; it never contains credentials or destinations.

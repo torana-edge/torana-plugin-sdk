@@ -22,8 +22,9 @@ waits to be called. See
 
 Use the Go package as `github.com/torana-edge/torana-plugin-sdk` and the
 protobuf API as `github.com/torana-edge/torana-plugin-sdk/pb/v1`. Go guests
-export the v1 surface (`run_hook`, `supported_hooks`). Declare
-`"abi_version": "v1"` in `plugin.json`.
+export the v1 surface (`abi_version`, `run_hook`, `supported_hooks`). Declare
+`"abi_version": "v1"` in `plugin.json`; generated guests export the exact
+contract value `(1 << 32) | 1` through `abi_version()`.
 
 The Rust crate in `rust/torana-plugin-sdk` exports the same ABI surface. Its
 logger and all-hooks guest run through the shared host conformance harness in
@@ -32,6 +33,9 @@ compile example.
 
 After changing the ABI, regenerate the checked-in Go bindings with
 `./scripts/generate-go.sh`, then run the conformance suite.
+
+Run `./scripts/check-doc-examples.sh` to compile the maintained Rust author
+example and execute the Go author recipes against the native host harness.
 
 Plugins have no ambient filesystem or sockets. Capability-scoped helpers expose
 operator-bound credentials, plugin-private logical files, exact-origin HTTP

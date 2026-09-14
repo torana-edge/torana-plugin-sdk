@@ -15,19 +15,24 @@ import (
 func TestPassThroughVersusServeHTTP(t *testing.T) {
 	path := os.Getenv("TORANA_GO_GUEST")
 	if path == "" {
+		if os.Getenv("TORANA_E2E") == "1" {
+			t.Fatal("TORANA_GO_GUEST is required in E2E mode")
+		}
 		t.Log("TORANA_GO_GUEST unset; exercised in CI")
 		return
 	}
 
 	tickPayload, err := proto.Marshal(&pbv1.HookInput{
-		RequestId: 1,
-		Payload:   &pbv1.HookInput_TickRequest{TickRequest: &pbv1.TickRequest{TickId: 1}},
+		ContractRevision: 1,
+		RequestId:        1,
+		Payload:          &pbv1.HookInput_TickRequest{TickRequest: &pbv1.TickRequest{TickId: 1}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	httpPayload, err := proto.Marshal(&pbv1.HookInput{
-		RequestId: 1,
+		ContractRevision: 1,
+		RequestId:        1,
 		Payload: &pbv1.HookInput_HttpRequest{HttpRequest: &pbv1.HttpRequest{
 			Method: "GET", Path: "/",
 		}},

@@ -14,20 +14,20 @@ func TestRequestMetadataIsScopedToExplicitRequest(t *testing.T) {
 	first := h.NewRequest()
 	second := h.NewRequest()
 	first.with(func() {
-		if herr, err := sdk.MetaSet("key", "first"); err != nil || herr != nil {
-			t.Fatalf("MetaSet: err=%v herr=%v", err, herr)
+		if err := sdk.MetaSet("key", "first"); err != nil {
+			t.Fatalf("MetaSet: err=%v", err)
 		}
 	})
 	first.with(func() {
-		got, herr, err := sdk.MetaGet("key")
-		if err != nil || herr != nil || got != "first" {
-			t.Fatalf("same request lost metadata: got=%q err=%v herr=%v", got, err, herr)
+		got, found, err := sdk.MetaGet("key")
+		if err != nil || !found || got != "first" {
+			t.Fatalf("same request lost metadata: got=%q found=%v err=%v", got, found, err)
 		}
 	})
 	second.with(func() {
-		_, herr, err := sdk.MetaGet("key")
-		if err != nil || herr == nil || !sdk.IsNotFound(herr) {
-			t.Fatalf("metadata leaked into a new request: err=%v herr=%v", err, herr)
+		_, found, err := sdk.MetaGet("key")
+		if err != nil || found {
+			t.Fatalf("metadata leaked into a new request: err=%v found=%v", err, found)
 		}
 	})
 }
@@ -51,8 +51,8 @@ func TestConcurrentRequestsRetainMetadataOwnership(t *testing.T) {
 		first.with(func() {
 			close(firstEntered)
 			<-releaseFirst
-			if herr, err := sdk.MetaSet("write", "first"); err != nil || herr != nil {
-				errCh <- fmt.Errorf("first MetaSet: err=%v herr=%v", err, herr)
+			if err := sdk.MetaSet("write", "first"); err != nil {
+				errCh <- fmt.Errorf("first MetaSet: err=%v", err)
 			}
 		})
 	}()
@@ -62,8 +62,8 @@ func TestConcurrentRequestsRetainMetadataOwnership(t *testing.T) {
 		close(secondAttempted)
 		second.with(func() {
 			close(secondEntered)
-			if herr, err := sdk.MetaSet("write", "second"); err != nil || herr != nil {
-				errCh <- fmt.Errorf("second MetaSet: err=%v herr=%v", err, herr)
+			if err := sdk.MetaSet("write", "second"); err != nil {
+				errCh <- fmt.Errorf("second MetaSet: err=%v", err)
 			}
 		})
 	}()
@@ -105,8 +105,8 @@ func TestRequestScopeRestoresHarnessAfterPanic(t *testing.T) {
 			}
 		}()
 		panicking.with(func() {
-			if herr, err := sdk.MetaSet("write", "before-panic"); err != nil || herr != nil {
-				t.Fatalf("MetaSet: err=%v herr=%v", err, herr)
+			if err := sdk.MetaSet("write", "before-panic"); err != nil {
+				t.Fatalf("MetaSet: err=%v", err)
 			}
 			panic("boom")
 		})
@@ -122,9 +122,9 @@ func TestRequestScopeRestoresHarnessAfterPanic(t *testing.T) {
 	next := h.NewRequest()
 	next.meta["seed"] = "next"
 	next.with(func() {
-		got, herr, err := sdk.MetaGet("seed")
-		if err != nil || herr != nil || got != "next" {
-			t.Fatalf("next request after panic: got=%q err=%v herr=%v", got, err, herr)
+		got, found, err := sdk.MetaGet("seed")
+		if err != nil || !found || got != "next" {
+			t.Fatalf("next request after panic: got=%q found=%v err=%v", got, found, err)
 		}
 	})
 }

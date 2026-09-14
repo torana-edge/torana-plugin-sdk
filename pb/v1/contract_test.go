@@ -16,21 +16,21 @@ import (
 func inputFor(h v1.Hook) *v1.HookInput {
 	switch h {
 	case v1.Hook_HOOK_BEFORE_REQUEST:
-		return &v1.HookInput{Payload: &v1.HookInput_ChatRequest{ChatRequest: &v1.ChatRequest{Model: "m"}}}
+		return &v1.HookInput{ContractRevision: 1, Payload: &v1.HookInput_ChatRequest{ChatRequest: &v1.ChatRequest{Model: "m", Messages: []*v1.Message{{Role: "user", Blocks: []*v1.RequestBlock{{Kind: &v1.RequestBlock_Text{Text: &v1.RequestTextBlock{Text: "hello"}}}}}}}}}
 	case v1.Hook_HOOK_AFTER_RESPONSE:
-		return &v1.HookInput{Payload: &v1.HookInput_AfterResponse{
+		return &v1.HookInput{ContractRevision: 1, Payload: &v1.HookInput_AfterResponse{
 			AfterResponse: &v1.AfterResponse{Response: &v1.ChatResponse{Model: "m"}, Mutable: true},
 		}}
 	case v1.Hook_HOOK_ON_STREAM_CHUNK:
 		// A real event: an empty StreamEvent carries no variant and is refused,
 		// which is the point of validating inputs at all.
-		return &v1.HookInput{Payload: &v1.HookInput_StreamEvent{
+		return &v1.HookInput{ContractRevision: 1, Payload: &v1.HookInput_StreamEvent{
 			StreamEvent: &v1.StreamEvent{Event: &v1.StreamEvent_TextDelta{TextDelta: "x"}},
 		}}
 	case v1.Hook_HOOK_ON_HTTP_REQUEST:
-		return &v1.HookInput{Payload: &v1.HookInput_HttpRequest{HttpRequest: &v1.HttpRequest{Method: "GET"}}}
+		return &v1.HookInput{ContractRevision: 1, Payload: &v1.HookInput_HttpRequest{HttpRequest: &v1.HttpRequest{Method: "GET"}}}
 	case v1.Hook_HOOK_ON_TICK:
-		return &v1.HookInput{Payload: &v1.HookInput_TickRequest{TickRequest: &v1.TickRequest{TickId: 1}}}
+		return &v1.HookInput{ContractRevision: 1, Payload: &v1.HookInput_TickRequest{TickRequest: &v1.TickRequest{TickId: 1}}}
 	}
 	return &v1.HookInput{}
 }
@@ -445,8 +445,8 @@ func TestHookInputEnvelopeShape(t *testing.T) {
 	if inDesc.Fields().ByName("request_id") == nil {
 		t.Fatal("HookInput must carry request_id")
 	}
-	if inDesc.Fields().ByName("abi_minor") == nil {
-		t.Fatal("HookInput must carry abi_minor")
+	if inDesc.Fields().ByName("contract_revision") == nil {
+		t.Fatal("HookInput must carry contract_revision")
 	}
 
 	payload := inDesc.Oneofs().ByName("payload")
@@ -777,7 +777,9 @@ func TestTypedNilWrappersAreRejectedNotPanics(t *testing.T) {
 // The two are distinguishable: an empty frame has no unknown fields.
 func TestUnknownActionIsRejectedNotIgnored(t *testing.T) {
 	// Field 99, length-delimited: a future action.
-	raw := protowire.AppendTag(nil, 99, protowire.BytesType)
+	raw := protowire.AppendTag(nil, 1, protowire.VarintType)
+	raw = protowire.AppendVarint(raw, 1)
+	raw = protowire.AppendTag(raw, 99, protowire.BytesType)
 	raw = protowire.AppendBytes(raw, nil)
 
 	var r v1.HookResult
@@ -808,7 +810,9 @@ func TestUnknownActionIsRejectedNotIgnored(t *testing.T) {
 // The same distinction on the way in: a payload this build cannot name must be
 // refused rather than read as "no payload".
 func TestUnknownInputPayloadIsRejected(t *testing.T) {
-	raw := protowire.AppendTag(nil, 99, protowire.BytesType)
+	raw := protowire.AppendTag(nil, 1, protowire.VarintType)
+	raw = protowire.AppendVarint(raw, 1)
+	raw = protowire.AppendTag(raw, 99, protowire.BytesType)
 	raw = protowire.AppendBytes(raw, nil)
 
 	var in v1.HookInput
@@ -821,8 +825,33 @@ func TestUnknownInputPayloadIsRejected(t *testing.T) {
 	}
 	// The message must say WHY, because "carries no payload" would send the
 	// reader looking for a host bug rather than a version mismatch.
-	if !strings.Contains(err.Error(), "does not recognise") {
+	if !strings.Contains(err.Error(), "unknown protobuf fields") {
 		t.Errorf("error does not identify this as a version mismatch: %v", err)
+	}
+}
+
+func TestHookInputValidatesRevisionAndNestedRequest(t *testing.T) {
+	valid := inputFor(v1.Hook_HOOK_BEFORE_REQUEST)
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("canonical input rejected: %v", err)
+	}
+	for name, mutate := range map[string]func(*v1.HookInput){
+		"wrong revision": func(in *v1.HookInput) { in.ContractRevision = 2 },
+		"zero blocks": func(in *v1.HookInput) {
+			in.GetChatRequest().Messages[0].Blocks = nil
+		},
+		"safety object": func(in *v1.HookInput) { in.GetChatRequest().SafetySettingsJson = []byte(`{"level":"high"}`) },
+		"nested unknown": func(in *v1.HookInput) {
+			in.GetChatRequest().Messages[0].ProtoReflect().SetUnknown([]byte{0x98, 0x06, 0x01})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			in := proto.Clone(valid).(*v1.HookInput)
+			mutate(in)
+			if err := in.Validate(); err == nil {
+				t.Fatal("malformed input accepted")
+			}
+		})
 	}
 }
 

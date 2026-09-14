@@ -36,11 +36,13 @@ When Torana invokes `run_before_request`, it passes serialized bytes of
 
 The Go plugin SDK handles all the underlying memory allocation, pointer packing, and Protobuf marshaling for you.
 
-**CRITICAL:** Do NOT attempt to read raw JSON or use `map[string]any`. You will lose the benefits of Protobuf unknown field preservation.
+JSON fields are opaque provider bytes. Rust helpers validate strict JSON shape,
+reject duplicate keys, and preserve the original bytes; do not decode and
+re-encode provider JSON when ordering or signatures matter.
 
 ### The Correct Unmarshaling Pattern
 
-Use the generated `pb/v1` types and the `sdk` handlers. The SDK automatically unmarshals the request and marshals the response, fully preserving unknown fields under the hood.
+Use the generated `pb/v1` types and the `sdk` handlers. The SDK validates the closed protobuf contract before unmarshalling the request and marshals validated responses. Unknown protobuf fields are refused; opaque provider JSON stays on the modeled provider-data surfaces.
 
 ```go
 package main
@@ -82,8 +84,9 @@ func init() {
 | `sdk.EmitEvents(ev…)` | substitute one or more events |
 
 Prefer `sdk.NewStreamHandler()` for tool-call assembly and text rewrites: it
-buffers via host metadata (`meta_append` / `meta_set`), never Go-object state,
-and re-emits the exact assembled original on callback errors (fail-open).
+buffers via the host-bounded request journal (`meta_append` / `meta_set`), never
+Go-object state. Assembler errors, callback errors, and invalid callback actions
+return an error to the host, which applies the plugin's `failure_mode`.
 
 ```go
 sdk.NewStreamHandler().
@@ -102,17 +105,17 @@ sdk.NewStreamHandler().
 ```
 
 Never coerce between these families: use `ReplaceToolArguments` for function
-calls and `ReplaceToolInput` for free-form calls. A mismatched action re-emits
-the original assembled call unchanged.
+calls and `ReplaceToolInput` for free-form calls. A mismatched action returns an
+error; it never silently passes the original call.
 
-Raw `OnStreamChunk` handlers that return a non-nil error trap so `failure_mode`
-applies. Once buffering begins, never forward only the current fragment — fail
-closed or re-emit the assembled original.
+Raw `OnStreamChunk` handlers and `StreamHandler` callbacks that return a
+non-nil error trap so `failure_mode` applies. Once buffering begins, never
+forward only the current fragment.
 
 **State scoping rules:**
 - `env.meta_set` / `env.meta_get` — plugin-private AND request-scoped. Other
   plugins and other requests can never see these keys. Setting an empty
-  value deletes the key.
+  value remains present; `MetaGet` returns `found=true` and an empty value.
 - `env.meta_append` (permission `env.meta_set`) — append/read tool-call argument
   fragments by block index.
 - `env.cache_set` / `env.cache_get` — private to one plugin across requests
@@ -148,9 +151,9 @@ means most of what a plugin normally relies on is simply absent.
 
 | Host call | Inside a request | Inside a tick |
 |---|---|---|
-| `env.meta_get` / `env.meta_set` | per-request scratch space | **empty** — there is no request to scope to |
-| `env.original_request` | the caller's pristine request | **empty** |
-| `env.original_response` | the raw upstream body | **empty** |
+| `env.meta_get` / `env.meta_set` | per-request scratch space | **classified refusal** — there is no request to scope to |
+| `env.original_request` | the caller's pristine request | **classified refusal** |
+| `env.original_response` | the raw upstream body | **classified refusal** |
 | `env.plugin_config` | your config | your config |
 | `env.cache_get` / `env.cache_set` | plugin-private, cross-request | plugin-private, cross-request |
 | `env.shared_cache_get` / `env.shared_cache_set` | shared, cross-request | shared, cross-request |

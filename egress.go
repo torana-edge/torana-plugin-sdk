@@ -133,14 +133,9 @@ func SendRequest(req *pbv1.ChatRequest, opts SendRequestOptions) (EgressResult, 
 		return EgressResult{}, err
 	}
 
-	res, herr, err := HostCallExtension("torana_send_request", payload)
+	res, err := HostCallExtension("torana_send_request", payload)
 	if err != nil {
 		return EgressResult{}, err
-	}
-	if herr != nil {
-		// The classification survives programmatically: the caller can branch
-		// on the code without matching prose.
-		return EgressResult{}, classifiedRefusal(herr)
 	}
 	if len(res) == 0 {
 		// send_request always returns the outcome envelope on success and a
@@ -246,9 +241,9 @@ func DecodeRequest(encoded string) (*pbv1.ChatRequest, error) {
 	if err != nil {
 		return nil, fmt.Errorf("torana: decode request: %w", err)
 	}
-	var req pbv1.ChatRequest
-	if err := proto.Unmarshal(raw, &req); err != nil {
+	req, err := pbv1.DecodeChatRequest(raw)
+	if err != nil {
 		return nil, fmt.Errorf("torana: decode request: %w", err)
 	}
-	return &req, nil
+	return req, nil
 }

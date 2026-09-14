@@ -17,20 +17,17 @@ import (
 
 func TestStateAbsenceIsNotEmptiness(t *testing.T) {
 	sdktest.New(t).Run(func() {
-		_, herr, err := sdk.StateGet("absent")
-		if err != nil {
-			t.Fatalf("transport error: %v", err)
-		}
-		if !sdk.IsNotFound(herr) {
-			t.Fatalf("a missing state key reported %v, want NOT_FOUND", herr)
+		_, found, err := sdk.StateGet("absent")
+		if err != nil || found {
+			t.Fatalf("a missing state key reported found=%v err=%v", found, err)
 		}
 
-		if herr, err := sdk.StateSet("empty", ""); err != nil || herr != nil {
-			t.Fatalf("set empty: err=%v herr=%v", err, herr)
+		if err := sdk.StateSet("empty", ""); err != nil {
+			t.Fatalf("set empty: err=%v", err)
 		}
-		v, herr, err := sdk.StateGet("empty")
-		if err != nil || herr != nil {
-			t.Fatalf("get empty: err=%v herr=%v", err, herr)
+		v, found, err := sdk.StateGet("empty")
+		if err != nil || !found {
+			t.Fatalf("get empty: err=%v found=%v", err, found)
 		}
 		if v != "" {
 			t.Fatalf("got %q, want empty", v)
@@ -43,16 +40,16 @@ func TestStateAbsenceIsNotEmptiness(t *testing.T) {
 // operations and must stay so.
 func TestStateSetEmptyDoesNotDelete(t *testing.T) {
 	sdktest.New(t).Run(func() {
-		if _, err := sdk.StateSet("k", ""); err != nil {
+		if err := sdk.StateSet("k", ""); err != nil {
 			t.Fatal(err)
 		}
-		if _, herr, _ := sdk.StateGet("k"); sdk.IsNotFound(herr) {
+		if _, found, _ := sdk.StateGet("k"); !found {
 			t.Fatal("StateSet(k, \"\") deleted the key; empty is a value, not a delete")
 		}
-		if _, err := sdk.StateDelete("k"); err != nil {
+		if err := sdk.StateDelete("k"); err != nil {
 			t.Fatal(err)
 		}
-		if _, herr, _ := sdk.StateGet("k"); !sdk.IsNotFound(herr) {
+		if _, found, _ := sdk.StateGet("k"); found {
 			t.Fatal("StateDelete did not remove the key")
 		}
 	})
@@ -62,8 +59,8 @@ func TestStateSetEmptyDoesNotDelete(t *testing.T) {
 // NOT_FOUND would make every cleanup path branch on something it ignores.
 func TestStateDeleteIsIdempotent(t *testing.T) {
 	sdktest.New(t).Run(func() {
-		if herr, err := sdk.StateDelete("never-existed"); err != nil || herr != nil {
-			t.Fatalf("deleting an absent key failed: err=%v herr=%v", err, herr)
+		if err := sdk.StateDelete("never-existed"); err != nil {
+			t.Fatalf("deleting an absent key failed: err=%v", err)
 		}
 	})
 }
@@ -75,29 +72,16 @@ func TestUnconfiguredStateIsDistinctFromAbsence(t *testing.T) {
 	h := sdktest.New(t)
 	h.StateConfigured = false
 	h.Run(func() {
-		_, herr, err := sdk.StateGet("k")
-		if err != nil {
-			t.Fatalf("transport error: %v", err)
-		}
-		if herr == nil || herr.Code != pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED {
-			t.Fatalf("got %v, want NOT_CONFIGURED", herr)
-		}
-		if sdk.IsNotFound(herr) {
-			t.Fatal("an unconfigured store was reported as a missing key")
+		_, _, err := sdk.StateGet("k")
+		if err == nil {
+			t.Fatal("an unconfigured store reported success")
 		}
 
 		// Assert BOTH channels. An earlier version of this test checked only
 		// err, so it passed when the write was refused — the exact
 		// false-success it claims to prevent.
-		setHerr, setErr := sdk.StateSet("k", "v")
-		if setErr != nil {
-			t.Fatalf("transport error: %v", setErr)
-		}
-		if setHerr == nil {
+		if setErr := sdk.StateSet("k", "v"); setErr == nil {
 			t.Fatal("a write to an unconfigured store reported success")
-		}
-		if setHerr.Code != pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED {
-			t.Fatalf("write refused with %v, want NOT_CONFIGURED", setHerr.Code)
 		}
 	})
 
@@ -105,7 +89,7 @@ func TestUnconfiguredStateIsDistinctFromAbsence(t *testing.T) {
 	// would make the refusal cosmetic.
 	h.StateConfigured = true
 	h.Run(func() {
-		if _, herr, _ := sdk.StateGet("k"); !sdk.IsNotFound(herr) {
+		if _, found, _ := sdk.StateGet("k"); found {
 			t.Fatal("a refused write mutated the store")
 		}
 	})
@@ -161,13 +145,13 @@ func TestStateGetJSONSurfacesRefusals(t *testing.T) {
 func TestStateKeysReadsFramedValues(t *testing.T) {
 	sdktest.New(t).Run(func() {
 		for _, k := range []string{"b", "a"} {
-			if _, err := sdk.StateSet(k, "v"); err != nil {
+			if err := sdk.StateSet(k, "v"); err != nil {
 				t.Fatal(err)
 			}
 		}
-		keys, herr, err := sdk.StateKeys()
-		if err != nil || herr != nil {
-			t.Fatalf("err=%v herr=%v", err, herr)
+		keys, err := sdk.StateKeys()
+		if err != nil {
+			t.Fatalf("err=%v", err)
 		}
 		if len(keys) != 2 || keys[0] != "a" || keys[1] != "b" {
 			t.Fatalf("keys = %v, want [a b] sorted", keys)
@@ -212,8 +196,8 @@ func TestPluginConfigReadsAFramedValue(t *testing.T) {
 	h := sdktest.New(t)
 	h.SetConfig(`{"mode":"strict"}`)
 	h.Run(func() {
-		if got := sdk.PluginConfig(); got != `{"mode":"strict"}` {
-			t.Fatalf("PluginConfig = %q", got)
+		if got, err := sdk.PluginConfig(); err != nil || got != `{"mode":"strict"}` {
+			t.Fatalf("PluginConfig = %q, err=%v", got, err)
 		}
 	})
 }
@@ -222,22 +206,53 @@ func TestPluginConfigReadsAFramedValue(t *testing.T) {
 // config. v1 returned the denial envelope, so a plugin parsed an object with
 // none of its fields and silently ran on defaults — the failure this fallback
 // has to be careful not to reintroduce in a new form.
-func TestPluginConfigRefusalFallsBackToEmptyObject(t *testing.T) {
+func TestPluginConfigRefusalIsObservable(t *testing.T) {
 	h := sdktest.New(t)
 	h.DenyPermission("env.plugin_config")
 	h.Run(func() {
-		if got := sdk.PluginConfig(); got != "{}" {
-			t.Fatalf("PluginConfig = %q, want {} — a refusal must not become the config", got)
+		if got, err := sdk.PluginConfig(); err == nil || got != "" {
+			t.Fatalf("PluginConfig = %q, err=%v; want refusal", got, err)
 		}
 	})
 }
 
+func TestPluginConfigRejectsInvalidJSONShapesAndDuplicates(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+		ok   bool
+	}{
+		{name: "valid nested", raw: `{"mode":"strict","limits":{"max":3}}`, ok: true},
+		{name: "duplicate top level", raw: `{"mode":"strict","mode":"loose"}`},
+		{name: "duplicate nested", raw: `{"limits":{"max":3,"max":4}}`},
+		{name: "escaped equal keys", raw: `{"mo\u0064e":"strict","mode":"loose"}`},
+		{name: "array", raw: `[]`},
+		{name: "null", raw: `null`},
+		{name: "trailing", raw: `{"mode":"strict"} {}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := sdktest.New(t)
+			h.SetConfig(tc.raw)
+			h.Run(func() {
+				got, err := sdk.PluginConfig()
+				if tc.ok {
+					if err != nil || got != tc.raw {
+						t.Fatalf("PluginConfig = %q, err=%v", got, err)
+					}
+				} else if err == nil || got != "" {
+					t.Fatalf("PluginConfig = %q, err=%v; want strict rejection", got, err)
+				}
+			})
+		})
+	}
+}
+
 func TestOriginalsAbsentReportNotOK(t *testing.T) {
 	sdktest.New(t).Run(func() {
-		if _, ok := sdk.OriginalRequest(); ok {
+		if _, ok, _ := sdk.OriginalRequest(); ok {
 			t.Fatal("an uncaptured original request reported ok")
 		}
-		if _, ok := sdk.OriginalResponse(); ok {
+		if _, ok, _ := sdk.OriginalResponse(); ok {
 			t.Fatal("an uncaptured original response reported ok")
 		}
 	})
@@ -254,14 +269,20 @@ func TestCapturedEmptyOriginalsArePresent(t *testing.T) {
 	h.SetOriginalRequest(&pbv1.ChatRequest{})
 	h.SetOriginalResponse(nil)
 	h.Run(func() {
-		req, ok := sdk.OriginalRequest()
+		req, ok, err := sdk.OriginalRequest()
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !ok {
 			t.Fatal("a captured all-default request reported absent")
 		}
 		if req == nil {
 			t.Fatal("ok=true with a nil request")
 		}
-		body, ok := sdk.OriginalResponse()
+		body, ok, err := sdk.OriginalResponse()
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !ok {
 			t.Fatal("a captured empty response body reported absent")
 		}
@@ -276,11 +297,11 @@ func TestNonEmptyOriginalsRoundTrip(t *testing.T) {
 	h.SetOriginalRequest(&pbv1.ChatRequest{Model: "claude-opus-5"})
 	h.SetOriginalResponse([]byte("pristine-upstream"))
 	h.Run(func() {
-		req, ok := sdk.OriginalRequest()
+		req, ok, _ := sdk.OriginalRequest()
 		if !ok || req.Model != "claude-opus-5" {
 			t.Fatalf("request round trip: ok=%v req=%+v", ok, req)
 		}
-		body, ok := sdk.OriginalResponse()
+		body, ok, _ := sdk.OriginalResponse()
 		if !ok || string(body) != "pristine-upstream" {
 			t.Fatalf("response round trip: ok=%v body=%q", ok, body)
 		}
@@ -295,8 +316,55 @@ func TestMalformedOriginalRequestReportsNotOK(t *testing.T) {
 		return sdktest.HostResultValue([]byte{0xff, 0xff, 0xff, 0xff}), nil
 	})
 	h.Run(func() {
-		if _, ok := sdk.OriginalRequest(); ok {
-			t.Fatal("a malformed original request decoded as ok")
+		if _, ok, err := sdk.OriginalRequest(); ok || err == nil || !strings.Contains(err.Error(), "decode original request") {
+			t.Fatalf("malformed original request: ok=%v err=%v", ok, err)
+		}
+	})
+}
+
+func TestOriginalsPreserveClassifiedRefusals(t *testing.T) {
+	for _, command := range []string{"env.original_request", "env.original_response"} {
+		t.Run(command, func(t *testing.T) {
+			h := sdktest.New(t)
+			h.StubHostCall(command, func(string) (string, error) {
+				return sdktest.HostResultError(pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "denied"), nil
+			})
+			h.Run(func() {
+				var err error
+				if command == "env.original_request" {
+					_, _, err = sdk.OriginalRequest()
+				} else {
+					_, _, err = sdk.OriginalResponse()
+				}
+				var refusal *sdk.HostCallRefusalError
+				if !errors.As(err, &refusal) || refusal.Code != pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
+					t.Fatalf("refusal = %v", err)
+				}
+			})
+		})
+	}
+}
+
+func TestOriginalRequestRejectsUnknownWireFields(t *testing.T) {
+	h := sdktest.New(t)
+	h.StubHostCall("env.original_request", func(string) (string, error) {
+		return sdktest.HostResultValue([]byte{0xa0, 0x06, 0x01}), nil
+	})
+	h.Run(func() {
+		if _, ok, err := sdk.OriginalRequest(); ok || err == nil || !strings.Contains(err.Error(), "unknown field") {
+			t.Fatalf("closed decode: ok=%v err=%v", ok, err)
+		}
+	})
+}
+
+func TestStateScanRequiresConfiguredStore(t *testing.T) {
+	h := sdktest.New(t)
+	h.StateConfigured = false
+	h.Run(func() {
+		_, err := sdk.StateScan("", "", 1)
+		var refusal *sdk.HostCallRefusalError
+		if !errors.As(err, &refusal) || refusal.Code != pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED {
+			t.Fatalf("StateScan refusal = %v", err)
 		}
 	})
 }
@@ -306,7 +374,7 @@ func TestMalformedOriginalRequestReportsNotOK(t *testing.T) {
 // bytes are not valid JSON, so the truthful answer is a decode error.
 func TestStateGetJSONOnAStoredEmptyValue(t *testing.T) {
 	sdktest.New(t).Run(func() {
-		if _, err := sdk.StateSet("raw-empty", ""); err != nil {
+		if err := sdk.StateSet("raw-empty", ""); err != nil {
 			t.Fatal(err)
 		}
 		var v map[string]any
@@ -344,10 +412,10 @@ func TestStateHelpersRejectAnEmptyKeyLocally(t *testing.T) {
 		if _, _, err := sdk.StateGet(""); err == nil {
 			t.Error("StateGet(\"\") was accepted")
 		}
-		if _, err := sdk.StateSet("", "v"); err == nil {
+		if err := sdk.StateSet("", "v"); err == nil {
 			t.Error("StateSet(\"\", …) was accepted")
 		}
-		if _, err := sdk.StateDelete(""); err == nil {
+		if err := sdk.StateDelete(""); err == nil {
 			t.Error("StateDelete(\"\") was accepted")
 		}
 	})
@@ -375,7 +443,7 @@ func TestStateDeleteUsesTheStateSetPermission(t *testing.T) {
 	}
 }
 
-func TestPluginConfigStrictRetainsFailureClasses(t *testing.T) {
+func TestPluginConfigRetainsFailureClasses(t *testing.T) {
 	for _, tc := range []struct {
 		name, reply string
 		transport   error
@@ -393,9 +461,9 @@ func TestPluginConfigStrictRetainsFailureClasses(t *testing.T) {
 			h := sdktest.New(t)
 			h.StubHostCall("env.plugin_config", func(string) (string, error) { return tc.reply, tc.transport })
 			h.Run(func() {
-				got, herr, err := sdk.PluginConfigStrict()
-				if got != tc.want || (err != nil) != tc.wantErr || herr.GetCode() != tc.wantCode {
-					t.Fatalf("got %q, %v, %v", got, herr, err)
+				got, err := sdk.PluginConfig()
+				if got != tc.want || (err != nil) != (tc.wantErr || tc.wantCode != 0) {
+					t.Fatalf("got %q, %v", got, err)
 				}
 				if tc.transport != nil && !errors.Is(err, tc.transport) {
 					t.Fatalf("transport identity lost: %v", err)

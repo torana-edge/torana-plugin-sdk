@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
@@ -21,7 +22,7 @@ type validator interface {
 // *HostError. Empty command, invalid args, empty/malformed replies, and
 // transport failures return a Go error — callers that must not fail open
 // (verdicts) panic on those.
-func HostCall(cmd string, args proto.Message) ([]byte, *pbv1.HostError, error) {
+func hostCallChecked(cmd string, args proto.Message) ([]byte, *pbv1.HostError, error) {
 	if cmd == "" {
 		return nil, nil, fmt.Errorf("torana: host-call command is required")
 	}
@@ -82,12 +83,23 @@ func HostCall(cmd string, args proto.Message) ([]byte, *pbv1.HostError, error) {
 // Extension commands are NOT open-ended today. sdk.Permissions is a closed
 // allowlist and hosts must not invent names; a third-party extension registry
 // would be a separate platform feature.
-func HostCallExtension(cmd string, args []byte) ([]byte, *pbv1.HostError, error) {
+func HostCall(cmd string, args proto.Message) ([]byte, error) {
+	value, herr, err := hostCallChecked(cmd, args)
+	if err != nil {
+		return nil, err
+	}
+	if herr != nil {
+		return nil, classifiedRefusal(herr)
+	}
+	return value, nil
+}
+
+func HostCallExtension(cmd string, args []byte) ([]byte, error) {
 	if cmd == "" {
-		return nil, nil, fmt.Errorf("torana: extension host-call command is required")
+		return nil, fmt.Errorf("torana: extension host-call command is required")
 	}
 	if strings.HasPrefix(cmd, "env.") {
-		return nil, nil, fmt.Errorf("torana: %q is a core host call, not an extension; "+
+		return nil, fmt.Errorf("torana: %q is a core host call, not an extension; "+
 			"use HostCall with its typed arguments — routing it here would bypass "+
 			"the typed contract for verdicts, metadata, cache and state", cmd)
 	}
@@ -97,12 +109,19 @@ func HostCallExtension(cmd string, args []byte) ([]byte, *pbv1.HostError, error)
 	// canonical form: the capability is env.host_call.<cmd>, so passing the
 	// permission string itself does not accidentally resolve.
 	if !IsPermission("env.host_call." + cmd) {
-		return nil, nil, fmt.Errorf("torana: %q is not a supported extension command; "+
+		return nil, fmt.Errorf("torana: %q is not a supported extension command; "+
 			"pass the canonical token (for example \"torana_plugin_counter\", not "+
 			"\"env.host_call.torana_plugin_counter\"). Supported extensions are a "+
 			"closed set in this SDK version", cmd)
 	}
-	return dispatchHostCall(cmd, args)
+	value, herr, err := dispatchHostCall(cmd, args)
+	if err != nil {
+		return nil, err
+	}
+	if herr != nil {
+		return nil, classifiedRefusal(herr)
+	}
+	return value, nil
 }
 
 // dispatchHostCall is the one place a host reply is decoded. HostCall and
@@ -118,12 +137,12 @@ func dispatchHostCall(cmd string, argBytes []byte) ([]byte, *pbv1.HostError, err
 		return nil, nil, fmt.Errorf("torana: host-call returned an empty reply; " +
 			"HostCallResult requires a result arm")
 	}
-	var res pbv1.HostCallResult
-	if err := proto.Unmarshal(raw, &res); err != nil {
-		return nil, nil, fmt.Errorf("torana: decode host-call result: %w", err)
-	}
-	if err := res.Validate(); err != nil {
+	if err := rejectDuplicateHostCallResultArms(raw); err != nil {
 		return nil, nil, fmt.Errorf("torana: host-call result: %w", err)
+	}
+	res, err := pbv1.DecodeHostCallResult(raw)
+	if err != nil {
+		return nil, nil, fmt.Errorf("torana: decode host-call result: %w", err)
 	}
 	switch r := res.Result.(type) {
 	case *pbv1.HostCallResult_Value:
@@ -135,13 +154,86 @@ func dispatchHostCall(cmd string, argBytes []byte) ([]byte, *pbv1.HostError, err
 	}
 }
 
-// mustHostCall is for fire-and-forget verdicts: classified host refusals are
-// discarded (the host logs them), but local/protocol failures trap the guest.
-func mustHostCall(cmd string, args proto.Message) {
-	_, _, err := HostCall(cmd, args)
+// checkedHostCall is the error-returning verdict path. It preserves typed
+// refusals while keeping local and protocol defects as ordinary errors.
+func checkedHostCall(cmd string, args proto.Message) error {
+	_, herr, err := hostCallChecked(cmd, args)
 	if err != nil {
-		panic("torana plugin: " + cmd + ": " + err.Error())
+		return err
 	}
+	if herr != nil {
+		return fmt.Errorf("torana: %s: %w", cmd, classifiedRefusal(herr))
+	}
+	return nil
+}
+
+func checkedHostCallValue(cmd string, args proto.Message) ([]byte, bool, error) {
+	value, herr, err := hostCallChecked(cmd, args)
+	if err != nil {
+		return nil, false, err
+	}
+	if herr != nil {
+		if herr.Code == pbv1.ErrorCode_ERROR_CODE_NOT_FOUND {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("torana: %s: %w", cmd, classifiedRefusal(herr))
+	}
+	return value, true, nil
+}
+
+// checkedHostCallRequired is for commands whose public contract has no
+// absence return. It preserves every refusal, including NOT_FOUND, rather than
+// silently turning an unexpected absence into an empty successful value.
+func checkedHostCallRequired(cmd string, args proto.Message) ([]byte, error) {
+	value, herr, err := hostCallChecked(cmd, args)
+	if err != nil {
+		return nil, err
+	}
+	if herr != nil {
+		return nil, fmt.Errorf("torana: %s: %w", cmd, classifiedRefusal(herr))
+	}
+	return value, nil
+}
+
+// mustHostCall is the explicitly named panic convenience for code that has no
+// useful recovery path. Checked public helpers use checkedHostCall instead.
+func mustHostCall(cmd string, args proto.Message) {
+	if err := checkedHostCall(cmd, args); err != nil {
+		panic("torana plugin: " + err.Error())
+	}
+}
+
+// rejectDuplicateHostCallResultArms checks the raw protobuf before unmarshal.
+// protobuf oneofs otherwise use last-arm-wins, which could turn a refusal
+// followed by success into an apparent successful call.
+func rejectDuplicateHostCallResultArms(raw []byte) error {
+	var value, failure bool
+	for len(raw) > 0 {
+		num, typ, n := protowire.ConsumeField(raw)
+		if n < 0 {
+			return protowire.ParseError(n)
+		}
+		raw = raw[n:]
+		if typ != protowire.BytesType {
+			continue
+		}
+		switch num {
+		case 1:
+			if value {
+				return fmt.Errorf("duplicate value result arm")
+			}
+			value = true
+		case 2:
+			if failure {
+				return fmt.Errorf("duplicate error result arm")
+			}
+			failure = true
+		}
+	}
+	if value && failure {
+		return fmt.Errorf("conflicting value and error result arms")
+	}
+	return nil
 }
 
 func hostCallRaw(cmd string, args []byte) ([]byte, error) {

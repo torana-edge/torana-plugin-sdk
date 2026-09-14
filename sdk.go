@@ -7,8 +7,6 @@ import (
 	"sync"
 	"unsafe"
 
-	"google.golang.org/protobuf/proto"
-
 	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 )
 
@@ -49,6 +47,9 @@ func WriteResult(data []byte) uint64 {
 	return uint64(p)<<32 | uint64(len(data))
 }
 
+//go:wasmexport abi_version
+func abi_version() uint64 { return ABIVersion }
+
 //go:wasmexport supported_hooks
 func supported_hooks() uint32 {
 	return uint32(registeredHookBitmap())
@@ -57,11 +58,11 @@ func supported_hooks() uint32 {
 //go:wasmexport run_hook
 func run_hook(ptr, size uint32) uint64 {
 	inputBytes := ReadBytes(ptr, size)
-	var in pbv1.HookInput
-	if err := proto.Unmarshal(inputBytes, &in); err != nil {
+	in, err := pbv1.DecodeHookInput(inputBytes)
+	if err != nil {
 		panic("torana sdk: decode run_hook: " + err.Error())
 	}
-	outBytes, err := DispatchHook(&in)
+	outBytes, err := DispatchHook(in)
 	if err != nil {
 		panic("torana sdk: run_hook: " + err.Error())
 	}
@@ -74,32 +75,21 @@ func run_hook(ptr, size uint32) uint64 {
 //go:wasmimport env log
 func hostLog(level int32, ptr uint32, length uint32)
 
-const (
-	LogLevelDebug = 0
-	LogLevelInfo  = 1
-)
-
-func Log(msg string, level int32) {
+func Log(msg string, level LogLevel) {
 	b := []byte(msg)
 	if len(b) == 0 {
 		return
 	}
 	ptr := alloc(uint32(len(b)))
 	copy(ReadBytes(ptr, uint32(len(b))), b)
-	hostLog(level, ptr, uint32(len(b)))
+	hostLog(int32(level), ptr, uint32(len(b)))
 	dealloc(ptr, uint32(len(b)))
 }
 
 //go:wasmimport env emit_metric
 func hostEmitMetric(metricType int32, ptr uint32, length uint32, value float64, labelsPtr uint32, labelsLen uint32)
 
-const (
-	MetricCounter   = 0
-	MetricHistogram = 1
-	MetricGauge     = 2
-)
-
-func EmitMetric(name string, metricType int32, value float64, labels map[string]string) {
+func EmitMetric(name string, metricType MetricKind, value float64, labels map[string]string) {
 	b := []byte(name)
 	if len(b) == 0 {
 		return
@@ -117,7 +107,7 @@ func EmitMetric(name string, metricType int32, value float64, labels map[string]
 			defer dealloc(lPtr, lLen)
 		}
 	}
-	hostEmitMetric(metricType, ptr, uint32(len(b)), value, lPtr, lLen)
+	hostEmitMetric(int32(metricType), ptr, uint32(len(b)), value, lPtr, lLen)
 }
 
 //go:wasmimport env host_call

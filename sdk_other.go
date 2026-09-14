@@ -12,24 +12,13 @@ func dealloc(ptr uint32, size uint32)   {}
 func ReadBytes(ptr, size uint32) []byte { return nil }
 func WriteResult(data []byte) uint64    { return 0 }
 
-const (
-	LogLevelDebug = 0
-	LogLevelInfo  = 1
-)
-
-const (
-	MetricCounter   = 0
-	MetricHistogram = 1
-	MetricGauge     = 2
-)
-
-func Log(msg string, level int32) {
+func Log(msg string, level LogLevel) {
 	if h := testHostOf(); h != nil && h.Log != nil {
 		h.Log(msg, level)
 	}
 }
 
-func EmitMetric(name string, metricType int32, value float64, labels map[string]string) {
+func EmitMetric(name string, metricType MetricKind, value float64, labels map[string]string) {
 	if h := testHostOf(); h != nil && h.Metric != nil {
 		h.Metric(name, metricType, value, labels)
 	}

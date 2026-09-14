@@ -23,7 +23,7 @@ func TestExtensionPathRejectsCoreCommands(t *testing.T) {
 			"env.meta_set", "env.meta_get", "env.cache_set", "env.state_set",
 			"env.block_request", "env.respond_request", "env.meta_append",
 		} {
-			_, _, err := sdk.HostCallExtension(cmd, []byte(`{}`))
+			_, err := sdk.HostCallExtension(cmd, []byte(`{}`))
 			if err == nil {
 				t.Errorf("HostCallExtension(%q) was accepted; it is a core command", cmd)
 				continue
@@ -37,7 +37,7 @@ func TestExtensionPathRejectsCoreCommands(t *testing.T) {
 
 func TestExtensionPathRejectsAnEmptyCommand(t *testing.T) {
 	sdktest.New(t).Run(func() {
-		if _, _, err := sdk.HostCallExtension("", []byte(`{}`)); err == nil {
+		if _, err := sdk.HostCallExtension("", []byte(`{}`)); err == nil {
 			t.Fatal("an empty extension command was accepted")
 		}
 	})
@@ -47,7 +47,7 @@ func TestExtensionPathRejectsAnEmptyCommand(t *testing.T) {
 func TestRejectedExtensionCallNeverCrossesTheBoundary(t *testing.T) {
 	h := sdktest.New(t)
 	h.Run(func() {
-		_, _, _ = sdk.HostCallExtension("env.meta_set", []byte(`{}`))
+		_, _ = sdk.HostCallExtension("env.meta_set", []byte(`{}`))
 	})
 	for _, c := range h.Calls() {
 		if c.Command == "env.meta_set" {
@@ -61,15 +61,9 @@ func TestRejectedExtensionCallNeverCrossesTheBoundary(t *testing.T) {
 // exercised by the harness rather than only in production.
 func TestUnstubbedExtensionCommandIsFramedNotConfigured(t *testing.T) {
 	sdktest.New(t).Run(func() {
-		v, herr, err := sdk.HostCallExtension("torana_plugin_counter", []byte(`{"counter":"c","delta":1}`))
-		if err != nil {
-			t.Fatalf("an unstubbed extension command failed to decode: %v", err)
-		}
-		if herr == nil {
+		v, err := sdk.HostCallExtension("torana_plugin_counter", []byte(`{"counter":"c","delta":1}`))
+		if err == nil {
 			t.Fatal("an unstubbed extension command reported success")
-		}
-		if herr.Code != pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED {
-			t.Fatalf("got %v, want NOT_CONFIGURED", herr.Code)
 		}
 		if len(v) != 0 {
 			t.Fatalf("a refused call returned a value: %q", v)
@@ -97,9 +91,9 @@ func TestStubbedExtensionCommandRoundTripsItsBody(t *testing.T) {
 	})
 	h.Run(func() {
 		payload, _ := json.Marshal(map[string]any{"counter": "tier_decisions", "delta": 3})
-		v, herr, err := sdk.HostCallExtension("torana_plugin_counter", payload)
-		if err != nil || herr != nil {
-			t.Fatalf("err=%v herr=%v", err, herr)
+		v, err := sdk.HostCallExtension("torana_plugin_counter", payload)
+		if err != nil {
+			t.Fatalf("err=%v", err)
 		}
 		if string(v) != `{"accepted":true}` {
 			t.Fatalf("value = %q, want the stubbed payload", v)
@@ -111,16 +105,16 @@ func TestStubbedExtensionCommandRoundTripsItsBody(t *testing.T) {
 func TestExtensionBodyNeedNotBeJSON(t *testing.T) {
 	h := sdktest.New(t)
 	raw := []byte{0x00, 0xff, 0x10, 0x42}
-	h.StubHostCall("torana_db_query", func(args string) (string, error) {
+	h.StubHostCall("torana_plugin_counter", func(args string) (string, error) {
 		if args != string(raw) {
 			t.Fatalf("binary body was altered: got %q, want %q", args, raw)
 		}
 		return sdktest.HostResultValue(raw), nil
 	})
 	h.Run(func() {
-		v, herr, err := sdk.HostCallExtension("torana_db_query", raw)
-		if err != nil || herr != nil {
-			t.Fatalf("err=%v herr=%v", err, herr)
+		v, err := sdk.HostCallExtension("torana_plugin_counter", raw)
+		if err != nil {
+			t.Fatalf("err=%v", err)
 		}
 		if string(v) != string(raw) {
 			t.Fatalf("binary value was altered: %q", v)
@@ -139,7 +133,7 @@ func TestCorePathRejectsExtensionCommands(t *testing.T) {
 		for _, cmd := range []string{
 			"torana_plugin_counter", "verify_virtual_key",
 		} {
-			_, _, err := sdk.HostCall(cmd, &pbv1.MetaGetArgs{Key: "k"})
+			_, err := sdk.HostCall(cmd, &pbv1.MetaGetArgs{Key: "k"})
 			if err == nil {
 				t.Errorf("HostCall(%q) was accepted; it is a host-feature command", cmd)
 				continue
@@ -168,7 +162,7 @@ func TestExtensionPathRejectsUnknownAndMalformedTokens(t *testing.T) {
 			"env.host_call.torana_plugin_counter", // the permission, not the token
 			"TORANA_PLUGIN_COUNTER",               // wrong case
 		} {
-			if _, _, err := sdk.HostCallExtension(cmd, []byte(`{}`)); err == nil {
+			if _, err := sdk.HostCallExtension(cmd, []byte(`{}`)); err == nil {
 				t.Errorf("HostCallExtension(%q) was accepted", cmd)
 			}
 		}

@@ -21,12 +21,12 @@ import (
 
 func TestMetaSetThenGetReturnsTheStoredValue(t *testing.T) {
 	sdktest.New(t).Run(func() {
-		if herr, err := sdk.MetaSet("k", "v"); err != nil || herr != nil {
-			t.Fatalf("MetaSet: err=%v herr=%v", err, herr)
+		if err := sdk.MetaSet("k", "v"); err != nil {
+			t.Fatalf("MetaSet: err=%v", err)
 		}
-		got, herr, err := sdk.MetaGet("k")
-		if err != nil || herr != nil {
-			t.Fatalf("MetaGet: err=%v herr=%v", err, herr)
+		got, found, err := sdk.MetaGet("k")
+		if err != nil || !found {
+			t.Fatalf("MetaGet: err=%v found=%v", err, found)
 		}
 		if got != "v" {
 			t.Fatalf("MetaGet = %q, want %q", got, "v")
@@ -36,12 +36,12 @@ func TestMetaSetThenGetReturnsTheStoredValue(t *testing.T) {
 
 func TestCacheSetThenGetReturnsTheStoredValue(t *testing.T) {
 	sdktest.New(t).Run(func() {
-		if herr, err := sdk.CacheSet("k", "v"); err != nil || herr != nil {
-			t.Fatalf("CacheSet: err=%v herr=%v", err, herr)
+		if err := sdk.CacheSet("k", "v"); err != nil {
+			t.Fatalf("CacheSet: err=%v", err)
 		}
-		got, herr, err := sdk.CacheGet("k")
-		if err != nil || herr != nil {
-			t.Fatalf("CacheGet: err=%v herr=%v", err, herr)
+		got, found, err := sdk.CacheGet("k")
+		if err != nil || !found {
+			t.Fatalf("CacheGet: err=%v found=%v", err, found)
 		}
 		if got != "v" {
 			t.Fatalf("CacheGet = %q, want %q", got, "v")
@@ -49,15 +49,46 @@ func TestCacheSetThenGetReturnsTheStoredValue(t *testing.T) {
 	})
 }
 
+func TestUntimedCacheOverwriteClearsPreviousExpiry(t *testing.T) {
+	for _, store := range []struct {
+		name   string
+		setTTL func(string, string, uint64) error
+		set    func(string, string) error
+		get    func(string) (string, bool, error)
+	}{
+		{"private", sdk.CacheSetTTL, sdk.CacheSet, sdk.CacheGet},
+		{"shared", sdk.SharedCacheSetTTL, sdk.SharedCacheSet, sdk.SharedCacheGet},
+	} {
+		t.Run(store.name, func(t *testing.T) {
+			h := sdktest.New(t).SetNow(100)
+			h.Run(func() {
+				if err := store.setTTL("k", "timed", 10); err != nil {
+					t.Fatal(err)
+				}
+				if err := store.set("k", "permanent"); err != nil {
+					t.Fatal(err)
+				}
+			})
+			h.SetNow(111)
+			h.Run(func() {
+				got, found, err := store.get("k")
+				if err != nil || !found || got != "permanent" {
+					t.Fatalf("overwrite = %q, found=%v err=%v", got, found, err)
+				}
+			})
+		})
+	}
+}
+
 func TestSharedCacheSetThenGetUsesExplicitCommands(t *testing.T) {
 	h := sdktest.New(t)
 	h.Run(func() {
-		if herr, err := sdk.SharedCacheSet("contract:key", "v"); err != nil || herr != nil {
-			t.Fatalf("SharedCacheSet: err=%v herr=%v", err, herr)
+		if err := sdk.SharedCacheSet("contract:key", "v"); err != nil {
+			t.Fatalf("SharedCacheSet: err=%v", err)
 		}
-		got, herr, err := sdk.SharedCacheGet("contract:key")
-		if err != nil || herr != nil || got != "v" {
-			t.Fatalf("SharedCacheGet = %q, herr=%v err=%v", got, herr, err)
+		got, found, err := sdk.SharedCacheGet("contract:key")
+		if err != nil || !found || got != "v" {
+			t.Fatalf("SharedCacheGet = %q, found=%v err=%v", got, found, err)
 		}
 	})
 	commands := []string{h.Calls()[0].Command, h.Calls()[1].Command}
@@ -73,8 +104,8 @@ func TestSharedCacheSetThenGetUsesExplicitCommands(t *testing.T) {
 func TestAbsenceIsNotEmptiness(t *testing.T) {
 	for _, store := range []struct {
 		name string
-		set  func(k, v string) (*pbv1.HostError, error)
-		get  func(k string) (string, *pbv1.HostError, error)
+		set  func(k, v string) error
+		get  func(k string) (string, bool, error)
 	}{
 		{"meta", sdk.MetaSet, sdk.MetaGet},
 		{"cache", sdk.CacheSet, sdk.CacheGet},
@@ -83,27 +114,24 @@ func TestAbsenceIsNotEmptiness(t *testing.T) {
 		t.Run(store.name, func(t *testing.T) {
 			sdktest.New(t).Run(func() {
 				// Never written.
-				_, herr, err := store.get("absent")
+				_, found, err := store.get("absent")
 				if err != nil {
-					t.Fatalf("get(absent): transport error %v", err)
+					t.Fatalf("get(absent): error %v", err)
 				}
-				if herr == nil {
+				if found {
 					t.Fatal("a missing key succeeded; it is indistinguishable from a stored empty value")
-				}
-				if !sdk.IsNotFound(herr) {
-					t.Fatalf("a missing key reported %v, want NOT_FOUND", herr.Code)
 				}
 
 				// Explicitly stored empty.
-				if herr, err := store.set("empty", ""); err != nil || herr != nil {
-					t.Fatalf("set(empty, \"\"): err=%v herr=%v", err, herr)
+				if err := store.set("empty", ""); err != nil {
+					t.Fatalf("set(empty, \"\"): err=%v", err)
 				}
-				got, herr, err := store.get("empty")
+				got, found, err := store.get("empty")
 				if err != nil {
 					t.Fatalf("get(empty): transport error %v", err)
 				}
-				if herr != nil {
-					t.Fatalf("a stored empty value reported %v; empty is a value, not a delete", herr.Code)
+				if !found {
+					t.Fatal("a stored empty value reported absence; empty is a value, not a delete")
 				}
 				if got != "" {
 					t.Fatalf("get(empty) = %q, want empty", got)
@@ -118,7 +146,7 @@ func TestAbsenceIsNotEmptiness(t *testing.T) {
 func TestInvalidKeyIsRejectedWithoutMutating(t *testing.T) {
 	h := sdktest.New(t)
 	h.Run(func() {
-		if _, err := sdk.MetaSet("", "v"); err == nil {
+		if err := sdk.MetaSet("", "v"); err == nil {
 			t.Fatal("MetaSet with an empty key was accepted")
 		}
 	})
@@ -133,19 +161,9 @@ func TestPermissionDenialIsDistinctFromNotFound(t *testing.T) {
 	h := sdktest.New(t)
 	h.DenyPermission("env.meta_get")
 	h.Run(func() {
-		_, herr, err := sdk.MetaGet("k")
-		if err != nil {
-			t.Fatalf("transport error: %v", err)
-		}
-		if herr == nil {
+		_, _, err := sdk.MetaGet("k")
+		if err == nil {
 			t.Fatal("a denied permission succeeded")
-		}
-		if sdk.IsNotFound(herr) {
-			t.Fatal("a permission denial was reported as NOT_FOUND; " +
-				"a plugin would treat a refused capability as an ordinary miss")
-		}
-		if herr.Code != pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
-			t.Fatalf("got %v, want PERMISSION_DENIED", herr.Code)
 		}
 	})
 }
@@ -155,10 +173,10 @@ func TestPermissionDenialIsDistinctFromNotFound(t *testing.T) {
 func TestCommandNamesAndArgumentsAreExact(t *testing.T) {
 	h := sdktest.New(t)
 	h.Run(func() {
-		if _, err := sdk.MetaSet("mk", "mv"); err != nil {
+		if err := sdk.MetaSet("mk", "mv"); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := sdk.CacheSet("ck", "cv"); err != nil {
+		if err := sdk.CacheSet("ck", "cv"); err != nil {
 			t.Fatal(err)
 		}
 		// The getters need distinct keys of their own. Asserting only the
@@ -221,13 +239,13 @@ func TestCommandNamesAndArgumentsAreExact(t *testing.T) {
 // a plugin's test pass while the real host kept them apart.
 func TestMetaAndCacheAreSeparateStores(t *testing.T) {
 	sdktest.New(t).Run(func() {
-		if _, err := sdk.MetaSet("same", "from-meta"); err != nil {
+		if err := sdk.MetaSet("same", "from-meta"); err != nil {
 			t.Fatal(err)
 		}
-		if _, herr, _ := sdk.CacheGet("same"); herr == nil {
+		if _, found, _ := sdk.CacheGet("same"); found {
 			t.Fatal("a meta write was visible through CacheGet")
 		}
-		if _, err := sdk.CacheSet("same", "from-cache"); err != nil {
+		if err := sdk.CacheSet("same", "from-cache"); err != nil {
 			t.Fatal(err)
 		}
 		got, _, _ := sdk.MetaGet("same")
@@ -239,18 +257,18 @@ func TestMetaAndCacheAreSeparateStores(t *testing.T) {
 
 func TestPluginAndSharedCacheAreSeparateStores(t *testing.T) {
 	sdktest.New(t).Run(func() {
-		if herr, err := sdk.CacheSet("same", "private"); err != nil || herr != nil {
-			t.Fatalf("CacheSet: err=%v herr=%v", err, herr)
+		if err := sdk.CacheSet("same", "private"); err != nil {
+			t.Fatalf("CacheSet: err=%v", err)
 		}
-		if _, herr, err := sdk.SharedCacheGet("same"); err != nil || herr == nil || !sdk.IsNotFound(herr) {
-			t.Fatalf("private cache leaked into shared cache: err=%v herr=%v", err, herr)
+		if _, found, err := sdk.SharedCacheGet("same"); err != nil || found {
+			t.Fatalf("private cache leaked into shared cache: err=%v found=%v", err, found)
 		}
-		if herr, err := sdk.SharedCacheSet("same", "shared"); err != nil || herr != nil {
-			t.Fatalf("SharedCacheSet: err=%v herr=%v", err, herr)
+		if err := sdk.SharedCacheSet("same", "shared"); err != nil {
+			t.Fatalf("SharedCacheSet: err=%v", err)
 		}
-		got, herr, err := sdk.CacheGet("same")
-		if err != nil || herr != nil || got != "private" {
-			t.Fatalf("shared cache overwrote private cache: got=%q err=%v herr=%v", got, err, herr)
+		got, found, err := sdk.CacheGet("same")
+		if err != nil || !found || got != "private" {
+			t.Fatalf("shared cache overwrote private cache: got=%q found=%v err=%v", got, found, err)
 		}
 	})
 }
@@ -265,12 +283,9 @@ func TestTransportFailureIsNotAMiss(t *testing.T) {
 		return "", errors.New("guest/host boundary failed")
 	})
 	h.Run(func() {
-		v, herr, err := sdk.MetaGet("k")
+		v, _, err := sdk.MetaGet("k")
 		if err == nil {
 			t.Fatal("a transport failure was not reported as an error")
-		}
-		if sdk.IsNotFound(herr) {
-			t.Fatal("a transport failure was classified as NOT_FOUND")
 		}
 		if v != "" {
 			t.Fatalf("a failed read returned a value: %q", v)
@@ -286,12 +301,9 @@ func TestMalformedReplyIsNotAValue(t *testing.T) {
 		return "\xff\xfe not a HostCallResult", nil
 	})
 	h.Run(func() {
-		v, herr, err := sdk.CacheGet("k")
+		v, _, err := sdk.CacheGet("k")
 		if err == nil {
 			t.Fatal("a malformed reply was accepted")
-		}
-		if sdk.IsNotFound(herr) {
-			t.Fatal("a malformed reply was classified as NOT_FOUND")
 		}
 		if v != "" {
 			t.Fatalf("a malformed reply produced a value: %q", v)
@@ -316,15 +328,15 @@ func TestSharedCacheIsSeedableAndReadable(t *testing.T) {
 	}
 
 	h.Run(func() {
-		got, herr, err := sdk.SharedCacheGet("intent:call_1")
-		if err != nil || herr != nil {
-			t.Fatalf("SharedCacheGet on a seeded key: err=%v herr=%v", err, herr)
+		got, found, err := sdk.SharedCacheGet("intent:call_1")
+		if err != nil || !found {
+			t.Fatalf("SharedCacheGet on a seeded key: err=%v found=%v", err, found)
 		}
 		if got != "find the bug" {
 			t.Fatalf("SharedCacheGet = %q, want %q", got, "find the bug")
 		}
-		if herr, err := sdk.SharedCacheSet("derived:call_1", got+"/derived"); err != nil || herr != nil {
-			t.Fatalf("SharedCacheSet: err=%v herr=%v", err, herr)
+		if err := sdk.SharedCacheSet("derived:call_1", got+"/derived"); err != nil {
+			t.Fatalf("SharedCacheSet: err=%v", err)
 		}
 	})
 

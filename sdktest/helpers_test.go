@@ -18,7 +18,7 @@ func TestTypedModelResourceStubsOwnFraming(t *testing.T) {
 		if args.Service != "judge" || len(args.Messages) != 1 {
 			t.Fatalf("args = %+v", args)
 		}
-		return &pbv1.ModelCompleteResult{Content: "yes"}, nil, nil
+		return &pbv1.ModelCompleteResult{Message: &pbv1.ResponseMessage{Blocks: []*pbv1.ResponseBlock{{Kind: &pbv1.ResponseBlock_Text{Text: &pbv1.ResponseTextBlock{Text: "yes"}}}}}}, nil, nil
 	})
 	h.StubModelPricing(func(args *pbv1.ModelPricingGetArgs) (*pbv1.ModelPricing, *pbv1.HostError, error) {
 		if args.Resource != "request" {
@@ -34,19 +34,45 @@ func TestTypedModelResourceStubsOwnFraming(t *testing.T) {
 		return &pbv1.PromptCachePolicy{Tiers: []*pbv1.PromptCacheTier{{TtlSeconds: 300, MarkerJson: []byte(`{}`)}}}, nil, nil
 	})
 	h.Run(func() {
-		result, refusal, err := sdk.ModelComplete(&pbv1.ModelCompleteArgs{Service: "judge", Messages: []*pbv1.ModelMessage{{Role: "user", Content: "question"}}})
-		if err != nil || refusal != nil || result.Content != "yes" {
-			t.Fatalf("completion = %+v, %+v, %v", result, refusal, err)
+		result, err := sdk.ModelComplete(&pbv1.ModelCompleteArgs{Service: "judge", Messages: []*pbv1.Message{{Role: "user", Blocks: []*pbv1.RequestBlock{{Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: "question"}}}}}}})
+		if err != nil || result.Message == nil || result.Message.Blocks[0].GetText().Text != "yes" {
+			t.Fatalf("completion = %+v, %v", result, err)
 		}
-		pricing, refusal, err := sdk.GetModelPricing("request")
-		if err != nil || refusal != nil || pricing.InputUsdPerMtok == nil || *pricing.InputUsdPerMtok != 0 {
-			t.Fatalf("pricing = %+v, %+v, %v", pricing, refusal, err)
+		pricing, err := sdk.GetModelPricing("request")
+		if err != nil || pricing.InputUsdPerMtok == nil || *pricing.InputUsdPerMtok != 0 {
+			t.Fatalf("pricing = %+v, %v", pricing, err)
 		}
-		policy, refusal, err := sdk.GetPromptCachePolicy("request-cache")
-		if err != nil || refusal != nil || len(policy.Tiers) != 1 || policy.Tiers[0].TtlSeconds != 300 {
-			t.Fatalf("cache policy = %+v, %+v, %v", policy, refusal, err)
+		policy, err := sdk.GetPromptCachePolicy("request-cache")
+		if err != nil || len(policy.Tiers) != 1 || policy.Tiers[0].TtlSeconds != 300 {
+			t.Fatalf("cache policy = %+v, %v", policy, err)
 		}
 	})
+}
+
+func TestMandatoryValueHelpersPreserveUnexpectedNotFound(t *testing.T) {
+	tests := []struct {
+		name, command string
+		call          func() error
+	}{
+		{"credential", "env.credential_get", func() error { _, err := sdk.GetCredential("api"); return err }},
+		{"file", "env.file_read", func() error { _, err := sdk.ReadFile("events.log"); return err }},
+		{"pricing", "env.model_pricing", func() error { _, err := sdk.GetModelPricing("target"); return err }},
+		{"cache policy", "env.cache_policy", func() error { _, err := sdk.GetPromptCachePolicy("target"); return err }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := sdktest.New(t)
+			h.StubHostCall(tc.command, func(string) (string, error) {
+				return sdktest.HostResultError(pbv1.ErrorCode_ERROR_CODE_NOT_FOUND, "unexpected absence"), nil
+			})
+			h.Run(func() {
+				var refusal *sdk.HostCallRefusalError
+				if err := tc.call(); !errors.As(err, &refusal) || refusal.Code != pbv1.ErrorCode_ERROR_CODE_NOT_FOUND {
+					t.Fatalf("error = %v", err)
+				}
+			})
+		})
+	}
 }
 
 // Egress refusals are classified: the code survives programmatically so a
