@@ -158,6 +158,81 @@ pub fn pass_http() -> Option<pbv1::HookResult> {
 pub fn pass_tick() -> Option<pbv1::HookResult> {
     None
 }
+pub struct RequestResult(Option<pbv1::HookResult>);
+pub struct ResponseResult(Option<pbv1::HookResult>);
+pub struct StreamResult(Option<pbv1::HookResult>);
+pub struct HttpResult(Option<pbv1::HookResult>);
+pub struct TickResult(Option<pbv1::HookResult>);
+impl RequestResult {
+    pub fn pass() -> Self {
+        Self(None)
+    }
+    pub fn replace(r: pbv1::ChatRequest) -> Result<Self, String> {
+        Ok(Self(Some(replace_request(r)?)))
+    }
+    pub fn into_hook_result(self) -> Option<pbv1::HookResult> { self.0 }
+}
+impl ResponseResult {
+    pub fn pass() -> Self {
+        Self(None)
+    }
+    pub fn replace(r: pbv1::ChatResponse) -> Result<Self, String> {
+        Ok(Self(Some(replace_response(r)?)))
+    }
+    pub fn into_hook_result(self) -> Option<pbv1::HookResult> { self.0 }
+}
+impl StreamResult {
+    pub fn pass() -> Self {
+        Self(None)
+    }
+    pub fn suppress() -> Self {
+        Self(Some(pbv1::HookResult {
+            action: Some(pbv1::hook_result::Action::Suppress(pbv1::Suppress {})),
+        }))
+    }
+    pub fn emit(e: Vec<pbv1::StreamEvent>) -> Result<Self, String> {
+        Ok(Self(Some(emit_events(e)?)))
+    }
+    pub fn into_hook_result(self) -> Option<pbv1::HookResult> { self.0 }
+}
+impl HttpResult {
+    pub fn pass() -> Self {
+        Self(None)
+    }
+    pub fn serve(r: pbv1::HttpResponse) -> Result<Self, String> {
+        Ok(Self(Some(serve_http(r)?)))
+    }
+    pub fn into_hook_result(self) -> Option<pbv1::HookResult> { self.0 }
+}
+impl TickResult {
+    pub fn pass() -> Self {
+        Self(None)
+    }
+    pub fn outcome(actions: i32, note: impl Into<String>) -> Result<Self, String> {
+        Ok(Self(Some(tick_outcome(actions, note)?)))
+    }
+    pub fn into_hook_result(self) -> Option<pbv1::HookResult> { self.0 }
+}
+
+pub trait Plugin {
+    const SUPPORTED_HOOKS: u32;
+    fn before_request(_: pbv1::ChatRequest) -> Result<RequestResult, String> {
+        Ok(RequestResult::pass())
+    }
+    fn after_response(_: pbv1::ChatResponse) -> Result<ResponseResult, String> {
+        Ok(ResponseResult::pass())
+    }
+    fn on_stream(_: pbv1::StreamEvent) -> Result<StreamResult, String> {
+        Ok(StreamResult::pass())
+    }
+    fn on_http(_: pbv1::HttpRequest) -> Result<HttpResult, String> {
+        Ok(HttpResult::pass())
+    }
+    fn on_tick(_: pbv1::TickRequest) -> Result<TickResult, String> {
+        Ok(TickResult::pass())
+    }
+}
+
 pub fn replace_request(request: pbv1::ChatRequest) -> Result<pbv1::HookResult, String> {
     validate_chat_request(&request)?;
     Ok(pbv1::HookResult {
