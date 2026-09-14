@@ -272,7 +272,17 @@ func (h *Harness) WithHooks(hooks []string) *Harness {
 func (h *Harness) hookAllowed(name string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.hooks == nil || h.hooks[name]
+	if h.hooks != nil && !h.hooks[name] {
+		return false
+	}
+	if h.permissions != nil {
+		for permission, hook := range sdk.HookGrants() {
+			if hook == name && !h.permissions[permission] {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // StubModelComplete installs a typed model-service double. The callback sees

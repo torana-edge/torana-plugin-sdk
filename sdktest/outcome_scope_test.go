@@ -105,3 +105,43 @@ func TestMalformedHostRepliesNeverCountAsAccepted(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeVerdictPriorityAndIdentityRollback(t *testing.T) {
+	sdktest.Reset()
+	defer sdktest.Reset()
+	h := sdktest.New(t)
+	sdk.OnBeforeRequest(func(context.Context, *pb.ChatRequest) (sdk.RequestResult, error) {
+		for _, status := range []int32{401, 403} {
+			if err := sdk.BlockRequest(status, "denied", "blocked"); err != nil {
+				return sdk.RequestResult{}, err
+			}
+		}
+		for _, text := range []string{"first", "second"} {
+			if err := sdk.RespondText(text); err != nil {
+				return sdk.RequestResult{}, err
+			}
+		}
+		for _, id := range []string{"first", "second"} {
+			if err := sdk.SetIdentity(id); err != nil {
+				return sdk.RequestResult{}, err
+			}
+		}
+		return sdk.PassRequest(), nil
+	})
+	r := h.NewRequest()
+	if result := r.BeforeRequest(&pb.ChatRequest{}); result.Err != nil {
+		t.Fatal(result.Err)
+	}
+	if len(r.AcceptedCalls()) != 6 || len(r.EffectiveBlockCalls()) != 1 || len(r.EffectiveRespondCalls()) != 1 || len(r.EffectiveIdentityCalls()) != 1 {
+		t.Fatalf("priority not applied: %+v", r.AcceptedCalls())
+	}
+	sdk.OnAfterResponse(func(context.Context, *pb.ChatResponse, bool) (sdk.ResponseResult, error) {
+		return sdk.ResponseResult{}, errors.New("later invocation failed")
+	})
+	if result := r.AfterResponse(&pb.ChatResponse{}, false); result.Err == nil {
+		t.Fatal("expected failure")
+	}
+	if len(r.EffectiveIdentityCalls())+len(r.EffectiveRespondCalls()) != 0 || len(r.EffectiveBlockCalls()) != 1 {
+		t.Fatalf("rollback priority: %+v", r.AcceptedCalls())
+	}
+}

@@ -54,12 +54,11 @@ func (r *Request) dispatch(in *pbv1.HookInput, hook string) (raw []byte, err err
 	r.with(func() {
 		previous := r.invocationHook
 		r.invocationHook = hook
-		start := len(r.accepted)
 		defer func() {
 			if failure := recover(); failure != nil {
 				err = fmt.Errorf("sdktest: handler panic: %v", failure)
 			}
-			r.finalize(start, err)
+			r.finalize(err)
 			r.invocationHook = previous
 		}()
 		raw, err = sdk.DispatchHook(in)
@@ -111,26 +110,59 @@ func (r *Request) EffectiveRouteCalls() []HostCallEntry {
 	return out
 }
 
-func (r *Request) finalize(start int, err error) {
+// EffectiveIdentityCalls returns the identity retained by the host.
+func (r *Request) EffectiveIdentityCalls() []HostCallEntry {
+	var out []HostCallEntry
+	for _, c := range r.AcceptedCalls() {
+		if c.Command == "env.set_identity" && c.Effective {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func (r *Request) finalize(err error) {
 	r.h.mu.Lock()
 	defer r.h.mu.Unlock()
-	if err == nil {
-		return
-	}
-	for i := start; i < len(r.accepted); i++ {
-		if r.accepted[i].Command == "env.respond_request" || r.accepted[i].Command == "env.route_request" {
-			r.accepted[i].Effective = false
-			index := r.accepted[i].index
-			r.h.calls[index].Effective = false
-			for j := range r.calls {
-				if r.calls[j].index == index {
-					r.calls[j].Effective = false
-				}
+	first := map[string]bool{}
+	last := map[string]int{}
+	for i := range r.accepted {
+		c := &r.accepted[i]
+		if !c.Effective {
+			continue
+		}
+		switch c.Command {
+		case "env.block_request", "env.respond_request":
+			if c.Command == "env.respond_request" && err != nil {
+				c.Effective = false
+				continue
 			}
-			for j := range r.h.accepted {
-				if r.h.accepted[j].index == index {
-					r.h.accepted[j].Effective = false
-				}
+			if first[c.Command] {
+				c.Effective = false
+			}
+			first[c.Command] = true
+		case "env.route_request", "env.set_identity":
+			if err != nil {
+				c.Effective = false
+				continue
+			}
+			if previous, ok := last[c.Command]; ok {
+				r.accepted[previous].Effective = false
+			}
+			last[c.Command] = i
+		}
+	}
+	for _, entry := range r.accepted {
+		index := entry.index
+		r.h.calls[index].Effective = entry.Effective
+		for j := range r.calls {
+			if r.calls[j].index == index {
+				r.calls[j].Effective = entry.Effective
+			}
+		}
+		for j := range r.h.accepted {
+			if r.h.accepted[j].index == index {
+				r.h.accepted[j].Effective = entry.Effective
 			}
 		}
 	}
