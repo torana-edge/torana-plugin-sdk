@@ -195,8 +195,19 @@ fn shared_wire_vectors_match_rust_validation() {
             .collect::<Vec<_>>();
         let actual = if ty == "torana.v1.HostCallResult" {
             torana_plugin_sdk::decode_host_call_result(&bytes).is_ok()
-        } else if name == "output_format_unknown_enum" {
-            false
+        } else if ty == "torana.v1.OutputFormat" {
+            match pbv1::OutputFormat::decode(bytes.as_slice()) {
+                Ok(f) => {
+                    matches!(f.mode, 0 | 1)
+                        && (f.schema_json.is_empty()
+                            || serde_json::from_slice::<serde_json::Value>(&f.schema_json)
+                                .map(|v| v.is_object())
+                                .unwrap_or(false))
+                }
+                Err(_) => false,
+            }
+        } else if ty == "torana.v1.HookInput" {
+            torana_plugin_sdk::__validate_wire_message(&bytes, ".torana.v1.HookInput").is_ok() && pbv1::HookInput::decode(bytes.as_slice()).map(|i| !matches!(i.payload, Some(pbv1::hook_input::Payload::AfterResponse(ref r)) if r.response.is_none())).unwrap_or(false)
         } else {
             torana_plugin_sdk::__validate_wire_message(&bytes, &format!(".{ty}")).is_ok()
         };
