@@ -14,6 +14,14 @@ pub mod pbv1 {
     include!(concat!(env!("OUT_DIR"), "/torana.v1.rs"));
 }
 
+/// Runtime ABI contract identifier. The high 32 bits are the ABI epoch and
+/// the low 32 bits are the contract revision within that epoch.
+pub const ABI_VERSION: u64 = (1u64 << 32) | 1;
+
+pub const fn abi_version() -> u64 {
+    ABI_VERSION
+}
+
 /// Error returned by an ABI-v1 host call.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HostCallError {
@@ -21,6 +29,81 @@ pub enum HostCallError {
     Refused(pbv1::HostError),
     /// The host returned a frame that violates the ABI-v1 result contract.
     Protocol(String),
+}
+
+/// A deterministic host implementation for native unit tests. Production
+/// guests use the WASI import path; tests can inject a command router without
+/// linking a WASM host.
+pub struct NativeHost<F> {
+    call: F,
+}
+
+impl<F> NativeHost<F>
+where
+    F: Fn(&str, &[u8]) -> Result<Vec<u8>, HostCallError>,
+{
+    pub fn new(call: F) -> Self { Self { call } }
+
+    pub fn call<M: prost::Message>(&self, command: &str, arguments: &M) -> Result<Vec<u8>, HostCallError> {
+        (self.call)(command, &arguments.encode_to_vec())
+    }
+
+    pub fn call_value<M: prost::Message, R: prost::Message + Default>(&self, command: &str, arguments: &M) -> Result<R, HostCallError> {
+        let bytes = self.call(command, arguments)?;
+        R::decode(bytes.as_slice()).map_err(|e| HostCallError::Protocol(format!("decode {command} result: {e}")))
+    }
+
+    pub fn meta_get(&self, key: &str) -> Result<Vec<u8>, HostCallError> {
+        self.call_result("env.meta_get", &pbv1::MetaGetArgs { key: key.into() })
+    }
+    pub fn meta_set(&self, key: &str, value: &str) -> Result<(), HostCallError> {
+        self.call_result("env.meta_set", &pbv1::MetaSetArgs { key: key.into(), value: value.into() }).map(|_| ())
+    }
+    pub fn cache_get(&self, key: &str) -> Result<Vec<u8>, HostCallError> {
+        self.call_result("env.cache_get", &pbv1::CacheGetArgs { key: key.into() })
+    }
+    pub fn cache_set(&self, key: &str, value: &str) -> Result<(), HostCallError> {
+        self.call_result("env.cache_set", &pbv1::CacheSetArgs { key: key.into(), value: value.into() }).map(|_| ())
+    }
+    pub fn state_get(&self, key: &str) -> Result<Vec<u8>, HostCallError> {
+        self.call_result("env.state_get", &pbv1::StateGetArgs { key: key.into() })
+    }
+    pub fn state_set(&self, key: &str, value: &str) -> Result<(), HostCallError> {
+        self.call_result("env.state_set", &pbv1::StateSetArgs { key: key.into(), value: value.into() }).map(|_| ())
+    }
+    pub fn state_delete(&self, key: &str) -> Result<(), HostCallError> {
+        self.call_result("env.state_delete", &pbv1::StateDeleteArgs { key: key.into() }).map(|_| ())
+    }
+    fn call_result<M: prost::Message>(&self, command: &str, args: &M) -> Result<Vec<u8>, HostCallError> {
+        let frame = self.call(command, args)?;
+        decode_host_call_result(&frame)
+    }
+}
+
+pub fn pass_request() -> Option<pbv1::HookResult> { None }
+pub fn pass_response() -> Option<pbv1::HookResult> { None }
+pub fn pass_event() -> Option<pbv1::HookResult> { None }
+pub fn pass_http() -> Option<pbv1::HookResult> { None }
+pub fn pass_tick() -> Option<pbv1::HookResult> { None }
+pub fn replace_request(request: pbv1::ChatRequest) -> Result<pbv1::HookResult, String> {
+    validate_chat_request(&request)?;
+    Ok(pbv1::HookResult { action: Some(pbv1::hook_result::Action::ReplaceRequest(request)) })
+}
+pub fn replace_response(response: pbv1::ChatResponse) -> Result<pbv1::HookResult, String> {
+    validate_response(&response)?;
+    Ok(pbv1::HookResult { action: Some(pbv1::hook_result::Action::ReplaceResponse(response)) })
+}
+pub fn emit_events(events: Vec<pbv1::StreamEvent>) -> Result<pbv1::HookResult, String> {
+    if events.is_empty() { return Err("torana sdk: emitted events cannot be empty".into()); }
+    Ok(pbv1::HookResult { action: Some(pbv1::hook_result::Action::EmitEvents(pbv1::StreamEvents { events })) })
+}
+pub fn serve_http(response: pbv1::HttpResponse) -> Result<pbv1::HookResult, String> {
+    validate_action(&pbv1::hook_result::Action::ServeHttp(response.clone()))?;
+    Ok(pbv1::HookResult { action: Some(pbv1::hook_result::Action::ServeHttp(response)) })
+}
+pub fn tick_outcome(actions: i32, note: impl Into<String>) -> Result<pbv1::HookResult, String> {
+    if actions < 0 { return Err("torana sdk: TickOutcome.actions cannot be negative".into()); }
+    Ok(pbv1::HookResult { action: Some(pbv1::hook_result::Action::TickOutcome(pbv1::TickOutcome { actions, note: note.into() })) })
 }
 
 impl core::fmt::Display for HostCallError {
@@ -59,6 +142,103 @@ pub fn hook_of(input: &pbv1::HookInput) -> Result<pbv1::Hook, String> {
     }
 }
 
+fn json_object(raw: &[u8], field: &str) -> Result<(), String> {
+    if raw.is_empty() { return Ok(()); }
+    let value: serde_json::Value = serde_json::from_slice(raw)
+        .map_err(|e| format!("torana sdk: {field} is invalid JSON: {e}"))?;
+    if !value.is_object() { return Err(format!("torana sdk: {field} must be a JSON object")); }
+    Ok(())
+}
+
+fn validate_chat_request(request: &pbv1::ChatRequest) -> Result<(), String> {
+    if request.model.is_empty() { return Err("torana sdk: ChatRequest.model is required".into()); }
+    if request.max_tokens.is_some_and(|v| v <= 0) || request.temperature.is_some_and(|v| !v.is_finite()) || request.top_p.is_some_and(|v| !v.is_finite()) {
+        return Err("torana sdk: ChatRequest numeric fields are invalid".into());
+    }
+    for (i, message) in request.messages.iter().enumerate() {
+        if message.role.is_empty() { return Err(format!("torana sdk: message {i} role is required")); }
+        for block in &message.blocks {
+            if block.kind.is_none() { return Err(format!("torana sdk: message {i} contains an empty block")); }
+        }
+    }
+    json_object(&request.provider_extensions_json, "provider_extensions_json")?;
+    json_object(&request.safety_settings_json, "safety_settings_json")?;
+    Ok(())
+}
+
+fn validate_response(response: &pbv1::ChatResponse) -> Result<(), String> {
+    let Some(message) = response.message.as_ref() else { return Err("torana sdk: ChatResponse.message is required".into()); };
+    if message.blocks.iter().any(|b| b.kind.is_none()) { return Err("torana sdk: response contains an empty block".into()); }
+    json_object(&response.provider_extensions_json, "provider_extensions_json")
+}
+
+fn validate_input(input: &pbv1::HookInput, raw: &[u8]) -> Result<(), String> {
+    validate_wire_fields(raw, true)?;
+    match input.payload.as_ref() {
+        Some(pbv1::hook_input::Payload::ChatRequest(r)) => validate_chat_request(r),
+        Some(pbv1::hook_input::Payload::AfterResponse(r)) => {
+            let response = r.response.as_ref().ok_or("torana sdk: AfterResponse.response is required")?;
+            validate_response(response)
+        }
+        Some(pbv1::hook_input::Payload::HttpRequest(r)) => json_object(&r.headers_json, "HttpRequest.headers_json"),
+        Some(pbv1::hook_input::Payload::StreamEvent(_)) | Some(pbv1::hook_input::Payload::TickRequest(_)) => Ok(()),
+        None => Err("torana sdk: HookInput requires a payload".into()),
+    }
+}
+
+fn validate_action(action: &pbv1::hook_result::Action) -> Result<(), String> {
+    match action {
+        pbv1::hook_result::Action::ServeHttp(r) => {
+            if !(200..=599).contains(&r.status) { return Err("torana sdk: HttpResponse.status must be 200..=599".into()); }
+            if matches!(r.status, 204 | 205 | 304) && !r.body.is_empty() { return Err("torana sdk: status forbids a response body".into()); }
+            json_object(&r.headers_json, "HttpResponse.headers_json")
+        }
+        pbv1::hook_result::Action::TickOutcome(r) if r.actions < 0 => Err("torana sdk: TickOutcome.actions cannot be negative".into()),
+        pbv1::hook_result::Action::EmitEvents(r) if r.events.is_empty() => Err("torana sdk: emitted events cannot be empty".into()),
+        _ => Ok(())
+    }
+}
+
+// Prost intentionally discards unknown fields. Scan the envelope before
+// decoding so additive fields cannot be silently lost by a replacement.
+fn validate_wire_fields(mut bytes: &[u8], input: bool) -> Result<(), String> {
+    let allowed = if input { &[1, 2, 4, 5, 6, 7, 8][..] } else { &[][..] };
+    let mut oneof_count = 0;
+    while !bytes.is_empty() {
+        let (key, n) = read_varint_raw(bytes)?; bytes = &bytes[n..];
+        let field = key >> 3; let wire = key & 7;
+        if !allowed.contains(&field) { return Err(format!("torana sdk: unknown HookInput field {field}")); }
+        if input && (4..=8).contains(&field) { oneof_count += 1; }
+        let consumed = skip_wire(bytes, wire)?;
+        if input && wire == 2 && matches!(field, 4 | 5) {
+            let (len, prefix) = read_varint_raw(bytes)?;
+            let len = usize::try_from(len).map_err(|_| "torana sdk: length overflow")?;
+            let end = prefix.checked_add(len).ok_or("torana sdk: length overflow")?;
+            if end > bytes.len() { return Err("torana sdk: truncated nested message".into()); }
+            let allowed_nested = if field == 4 { &[1,2,3,4,5,6,7,8,9,10,11][..] } else { &[1,2][..] };
+            validate_nested_fields(&bytes[prefix..end], allowed_nested)?;
+        }
+        bytes = &bytes[consumed..];
+    }
+    if input && oneof_count != 1 { return Err("torana sdk: HookInput payload must contain exactly one arm".into()); }
+    Ok(())
+}
+fn validate_nested_fields(mut bytes: &[u8], allowed: &[u64]) -> Result<(), String> {
+    while !bytes.is_empty() {
+        let (key,n)=read_varint_raw(bytes)?; bytes=&bytes[n..];
+        if !allowed.contains(&(key>>3)) { return Err(format!("torana sdk: unknown nested field {}", key>>3)); }
+        let n=skip_wire(bytes,key&7)?; bytes=&bytes[n..];
+    }
+    Ok(())
+}
+fn read_varint_raw(bytes: &[u8]) -> Result<(u64, usize), String> {
+    for i in 0..10 { let b = *bytes.get(i).ok_or("torana sdk: truncated protobuf")?; if i == 9 && b > 1 { break; } if b & 0x80 == 0 { let mut v=0; for (j,x) in bytes[..=i].iter().enumerate() { v |= u64::from(x&0x7f) << (j*7); } return Ok((v,i+1)); } }
+    Err("torana sdk: invalid protobuf varint".into())
+}
+fn skip_wire(bytes: &[u8], wire: u64) -> Result<usize, String> {
+    match wire { 0 => Ok(read_varint_raw(bytes)?.1), 1 => if bytes.len()>=8 {Ok(8)} else {Err("torana sdk: truncated fixed64".into())}, 2 => { let (n,m)=read_varint_raw(bytes)?; let n=usize::try_from(n).map_err(|_| "torana sdk: length overflow")?; if bytes.len()-m<n {Err("torana sdk: truncated bytes".into())} else {Ok(m+n)} }, 5 => if bytes.len()>=4 {Ok(4)} else {Err("torana sdk: truncated fixed32".into())}, _ => Err("torana sdk: unsupported protobuf wire type".into()) }
+}
+
 fn validate_hook_result(hook: pbv1::Hook, result: &pbv1::HookResult) -> Result<(), String> {
     use pbv1::hook_result::Action;
     let valid = matches!(
@@ -87,7 +267,7 @@ fn validate_hook_result(hook: pbv1::Hook, result: &pbv1::HookResult) -> Result<(
 /// WASM; [`export_plugin_v1!`] only supplies the two required exports.
 #[doc(hidden)]
 pub fn __dispatch_v1<E: core::fmt::Display>(
-    input: &[u8],
+    input_bytes: &[u8],
     hooks: u32,
     handler: fn(pbv1::HookInput) -> Result<Option<pbv1::HookResult>, E>,
 ) -> Result<Vec<u8>, String> {
@@ -98,8 +278,9 @@ pub fn __dispatch_v1<E: core::fmt::Display>(
             "torana sdk: supported hook bitmap is empty or contains unknown bits".to_owned(),
         );
     }
-    let input = pbv1::HookInput::decode(input)
+    let input = pbv1::HookInput::decode(input_bytes)
         .map_err(|err| format!("torana sdk: decode run_hook: {err}"))?;
+    validate_input(&input, input_bytes)?;
     let hook = hook_of(&input)?;
     if hooks & (1 << hook as u32) == 0 {
         return Err(format!(
@@ -111,6 +292,7 @@ pub fn __dispatch_v1<E: core::fmt::Display>(
         return Ok(Vec::new());
     };
     validate_hook_result(hook, &result)?;
+    if let Some(action) = result.action.as_ref() { validate_action(action)?; }
     let mut output = Vec::new();
     result
         .encode(&mut output)
@@ -315,7 +497,7 @@ pub fn emit_metric(name: &str, kind: i32, value: f64, labels: &serde_json::Value
     }
 }
 
-fn decode_host_call_result(bytes: &[u8]) -> Result<Vec<u8>, HostCallError> {
+pub fn decode_host_call_result(bytes: &[u8]) -> Result<Vec<u8>, HostCallError> {
     use pbv1::host_call_result::Result as ResultArm;
     use prost::Message;
 
@@ -340,6 +522,7 @@ fn decode_host_call_result(bytes: &[u8]) -> Result<Vec<u8>, HostCallError> {
 }
 
 fn validate_host_call_result_wire(mut bytes: &[u8]) -> Result<(), HostCallError> {
+    let mut arms = 0u8;
     while !bytes.is_empty() {
         let (key, key_len) = read_varint(bytes)?;
         bytes = &bytes[key_len..];
@@ -350,6 +533,7 @@ fn validate_host_call_result_wire(mut bytes: &[u8]) -> Result<(), HostCallError>
                 "HostCallResult carries an unknown or malformed result arm".to_owned(),
             ));
         }
+        arms = arms.saturating_add(1);
         let (length, length_len) = read_varint(bytes)?;
         bytes = &bytes[length_len..];
         let length = usize::try_from(length).map_err(|_| {
@@ -361,6 +545,11 @@ fn validate_host_call_result_wire(mut bytes: &[u8]) -> Result<(), HostCallError>
             ));
         }
         bytes = &bytes[length..];
+    }
+    if arms != 1 {
+        return Err(HostCallError::Protocol(
+            "HostCallResult must carry exactly one result arm".to_owned(),
+        ));
     }
     Ok(())
 }
