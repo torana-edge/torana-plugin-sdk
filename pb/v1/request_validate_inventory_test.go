@@ -58,6 +58,7 @@ func TestReplacementFieldInventoryExact(t *testing.T) {
 		&ToolResultCacheBreakpoint{},
 		&ToolCall{},
 		&ToolDef{},
+		&OutputFormat{},
 	}
 	descriptors := map[string]protoreflect.MessageDescriptor{}
 	for _, inst := range instances {
@@ -118,6 +119,14 @@ func checkRuleMatchesDescriptor(t *testing.T, fd protoreflect.FieldDescriptor, r
 	case rule == "oneof-message-member":
 		if fd.IsList() || fd.Kind() != protoreflect.MessageKind {
 			t.Fatalf("field %s: rule %s requires a singular message field (oneof member)", full, rule)
+		}
+	case rule == "message-optional":
+		if fd.IsList() || fd.Kind() != protoreflect.MessageKind {
+			t.Fatalf("field %s: rule %s requires a singular message field", full, rule)
+		}
+	case rule == "enum-output-format":
+		if fd.IsList() || fd.Kind() != protoreflect.EnumKind {
+			t.Fatalf("field %s: rule %s requires enum", full, rule)
 		}
 	case rule == "repeated-message-nonnil":
 		if !fd.IsList() || fd.Kind() != protoreflect.MessageKind {

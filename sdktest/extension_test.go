@@ -111,16 +111,16 @@ func TestStubbedExtensionCommandRoundTripsItsBody(t *testing.T) {
 func TestExtensionBodyNeedNotBeJSON(t *testing.T) {
 	h := sdktest.New(t)
 	raw := []byte{0x00, 0xff, 0x10, 0x42}
-	h.StubHostCall("torana_db_query", func(args string) (string, error) {
+	h.StubHostCall("torana_plugin_counter", func(args string) (string, error) {
 		if args != string(raw) {
 			t.Fatalf("binary body was altered: got %q, want %q", args, raw)
 		}
 		return sdktest.HostResultValue(raw), nil
 	})
 	h.Run(func() {
-		v, herr, err := sdk.HostCallExtension("torana_db_query", raw)
-		if err != nil || herr != nil {
-			t.Fatalf("err=%v herr=%v", err, herr)
+		v, _, err := sdk.HostCallExtension("torana_plugin_counter", raw)
+		if err != nil {
+			t.Fatalf("err=%v", err)
 		}
 		if string(v) != string(raw) {
 			t.Fatalf("binary value was altered: %q", v)

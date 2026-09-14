@@ -49,7 +49,7 @@ func TestPlatformHelpersUseTypedCommands(t *testing.T) {
 			if err := proto.Unmarshal(raw, &args); err != nil || args.Service != "summarizer" || len(args.Messages) != 1 {
 				t.Fatalf("model complete service/messages = %q/%d, %v", args.Service, len(args.Messages), err)
 			}
-			value, err := proto.Marshal(&pbv1.ModelCompleteResult{Content: "summary", ReportedModel: "small-1"})
+			value, err := proto.Marshal(&pbv1.ModelCompleteResult{Message: &pbv1.ResponseMessage{Blocks: []*pbv1.ResponseBlock{{Kind: &pbv1.ResponseBlock_Text{Text: &pbv1.ResponseTextBlock{Text: "summary"}}}}}, ReportedModel: "small-1"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -88,39 +88,39 @@ func TestPlatformHelpersUseTypedCommands(t *testing.T) {
 		}
 	}}
 	WithTestHost(h, func() {
-		if value, herr, err := GetCredential("github"); err != nil || herr != nil || string(value) != "secret" {
-			t.Fatalf("GetCredential = %q, %v, %v", value, herr, err)
+		if value, err := GetCredential("github"); err != nil || string(value) != "secret" {
+			t.Fatalf("GetCredential = %q, %v", value, err)
 		}
-		if herr, err := AppendFile("usage.jsonl", []byte("{}\n")); err != nil || herr != nil {
-			t.Fatalf("AppendFile = %v, %v", herr, err)
+		if err := AppendFile("usage.jsonl", []byte("{}\n")); err != nil {
+			t.Fatalf("AppendFile = %v", err)
 		}
-		if value, herr, err := ReadFile("usage.jsonl"); err != nil || herr != nil || string(value) != "line\n" {
-			t.Fatalf("ReadFile = %q, %v, %v", value, herr, err)
+		if value, err := ReadFile("usage.jsonl"); err != nil || string(value) != "line\n" {
+			t.Fatalf("ReadFile = %q, %v", value, err)
 		}
-		if herr, err := WriteFile("state.json", []byte("{}")); err != nil || herr != nil {
-			t.Fatalf("WriteFile = %v, %v", herr, err)
+		if err := WriteFile("state.json", []byte("{}")); err != nil {
+			t.Fatalf("WriteFile = %v", err)
 		}
 		if paths, herr, err := ListFiles(""); err != nil || herr != nil || !reflect.DeepEqual(paths, []string{"usage.jsonl"}) {
 			t.Fatalf("ListFiles = %v, %v, %v", paths, herr, err)
 		}
-		if herr, err := DeleteFile("state.json"); err != nil || herr != nil {
-			t.Fatalf("DeleteFile = %v, %v", herr, err)
+		if err := DeleteFile("state.json"); err != nil {
+			t.Fatalf("DeleteFile = %v", err)
 		}
-		response, herr, err := HTTPRequest(&pbv1.OutboundHTTPRequestArgs{Endpoint: "github", Method: "GET", Path: "/user"})
-		if err != nil || herr != nil || response.Status != 200 || string(response.Body) != "ok" {
-			t.Fatalf("HTTPRequest = %#v, %v, %v", response, herr, err)
+		response, err := HTTPRequest(&pbv1.OutboundHTTPRequestArgs{Endpoint: "github", Method: "GET", Path: "/user"})
+		if err != nil || response.Status != 200 || string(response.Body) != "ok" {
+			t.Fatalf("HTTPRequest = %#v, %v", response, err)
 		}
-		completion, herr, err := ModelComplete(&pbv1.ModelCompleteArgs{Service: "summarizer", Messages: []*pbv1.ModelMessage{{Role: "user", Content: "long text"}}})
-		if err != nil || herr != nil || completion.Content != "summary" || completion.ReportedModel != "small-1" {
-			t.Fatalf("ModelComplete = %#v, %v, %v", completion, herr, err)
+		completion, err := ModelComplete(&pbv1.ModelCompleteArgs{Service: "summarizer", Messages: []*pbv1.Message{{Role: "user", Blocks: []*pbv1.RequestBlock{{Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: "long text"}}}}}}})
+		if err != nil || completion.Message == nil || completion.Message.Blocks[0].GetText().Text != "summary" || completion.ReportedModel != "small-1" {
+			t.Fatalf("ModelComplete = %#v, %v", completion, err)
 		}
-		pricing, herr, err := GetModelPricing("request-model")
-		if err != nil || herr != nil || pricing.InputUsdPerMtok == nil || *pricing.InputUsdPerMtok != 0 {
-			t.Fatalf("GetModelPricing = %#v, %v, %v", pricing, herr, err)
+		pricing, err := GetModelPricing("request-model")
+		if err != nil || pricing.InputUsdPerMtok == nil || *pricing.InputUsdPerMtok != 0 {
+			t.Fatalf("GetModelPricing = %#v, %v", pricing, err)
 		}
-		policy, herr, err := GetPromptCachePolicy("request-cache")
-		if err != nil || herr != nil || !policy.RefreshOnRead || len(policy.Tiers) != 2 {
-			t.Fatalf("GetPromptCachePolicy = %#v, %v, %v", policy, herr, err)
+		policy, err := GetPromptCachePolicy("request-cache")
+		if err != nil || !policy.RefreshOnRead || len(policy.Tiers) != 2 {
+			t.Fatalf("GetPromptCachePolicy = %#v, %v", policy, err)
 		}
 		if tier, ok := LongestPromptCacheTier(policy); !ok || tier.TtlSeconds != 3600 {
 			t.Fatalf("LongestPromptCacheTier = %#v, %v", tier, ok)
@@ -144,22 +144,22 @@ func TestPlatformHelpersRejectInvalidArgumentsBeforeHost(t *testing.T) {
 		calls++
 		return nil, nil
 	}}, func() {
-		if _, _, err := GetCredential("../secret"); err == nil {
+		if _, err := GetCredential("../secret"); err == nil {
 			t.Fatal("invalid credential slot accepted")
 		}
-		if _, err := AppendFile("../escape", nil); err == nil {
+		if err := AppendFile("../escape", nil); err == nil {
 			t.Fatal("traversal path accepted")
 		}
-		if _, _, err := HTTPRequest(&pbv1.OutboundHTTPRequestArgs{Endpoint: "api", Method: "GET", Path: "https://evil.example/"}); err == nil {
+		if _, err := HTTPRequest(&pbv1.OutboundHTTPRequestArgs{Endpoint: "api", Method: "GET", Path: "https://evil.example/"}); err == nil {
 			t.Fatal("absolute URL accepted")
 		}
-		if _, _, err := ModelComplete(&pbv1.ModelCompleteArgs{Service: "summarizer"}); err == nil {
+		if _, err := ModelComplete(&pbv1.ModelCompleteArgs{Service: "summarizer"}); err == nil {
 			t.Fatal("empty model prompt accepted")
 		}
-		if _, _, err := GetModelPricing("../price"); err == nil {
+		if _, err := GetModelPricing("../price"); err == nil {
 			t.Fatal("invalid pricing resource accepted")
 		}
-		if _, _, err := GetPromptCachePolicy("../cache"); err == nil {
+		if _, err := GetPromptCachePolicy("../cache"); err == nil {
 			t.Fatal("invalid prompt-cache policy resource accepted")
 		}
 	})
@@ -191,7 +191,7 @@ func TestModelResourceHelpersRejectMalformedHostValues(t *testing.T) {
 			name: "negative usage", command: "env.model_complete",
 			value: &pbv1.ModelCompleteResult{Usage: &pbv1.Usage{InputTokens: -1}},
 			invoke: func() error {
-				_, _, err := ModelComplete(&pbv1.ModelCompleteArgs{Service: "scanner", Messages: []*pbv1.ModelMessage{{Role: "user"}}})
+				_, err := ModelComplete(&pbv1.ModelCompleteArgs{Service: "scanner", Messages: []*pbv1.Message{{Role: "user", Blocks: []*pbv1.RequestBlock{{Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: "x"}}}}}}})
 				return err
 			},
 		},
@@ -199,7 +199,7 @@ func TestModelResourceHelpersRejectMalformedHostValues(t *testing.T) {
 			name: "negative pricing", command: "env.model_pricing",
 			value: &pbv1.ModelPricing{OutputUsdPerMtok: &negative},
 			invoke: func() error {
-				_, _, err := GetModelPricing("request-model")
+				_, err := GetModelPricing("request-model")
 				return err
 			},
 		},
@@ -209,7 +209,7 @@ func TestModelResourceHelpersRejectMalformedHostValues(t *testing.T) {
 				TtlSeconds: 300, MarkerJson: []byte(`[]`),
 			}}},
 			invoke: func() error {
-				_, _, err := GetPromptCachePolicy("request-cache")
+				_, err := GetPromptCachePolicy("request-cache")
 				return err
 			},
 		},

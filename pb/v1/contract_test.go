@@ -445,8 +445,8 @@ func TestHookInputEnvelopeShape(t *testing.T) {
 	if inDesc.Fields().ByName("request_id") == nil {
 		t.Fatal("HookInput must carry request_id")
 	}
-	if inDesc.Fields().ByName("abi_minor") == nil {
-		t.Fatal("HookInput must carry abi_minor")
+	if inDesc.Fields().ByName("contract_revision") == nil {
+		t.Fatal("HookInput must carry contract_revision")
 	}
 
 	payload := inDesc.Oneofs().ByName("payload")

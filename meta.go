@@ -52,9 +52,7 @@ func MetaGet(key string) (string, bool, error) {
 // An empty value stores an empty value; it is not a delete. After
 // MetaSet(k, ""), MetaGet(k) succeeds with an empty value rather than reporting
 // NOT_FOUND.
-func MetaSet(key, value string) (*pbv1.HostError, error) {
-	_, herr, err := HostCall("env.meta_set", &pbv1.MetaSetArgs{Key: key, Value: value})
-	return herr, err
+func MetaSet(key, value string) error { return checkedHostCall("env.meta_set", &pbv1.MetaSetArgs{Key: key, Value: value})
 }
 
 // CacheGet reads a key from this plugin's private cross-request cache.
@@ -68,9 +66,7 @@ func CacheGet(key string) (string, bool, error) {
 }
 
 // CacheSet writes a key to this plugin's private cross-request cache.
-func CacheSet(key, value string) (*pbv1.HostError, error) {
-	_, herr, err := HostCall("env.cache_set", &pbv1.CacheSetArgs{Key: key, Value: value})
-	return herr, err
+func CacheSet(key, value string) error { return checkedHostCall("env.cache_set", &pbv1.CacheSetArgs{Key: key, Value: value})
 }
 
 // SharedCacheGet reads a key from the explicit cross-plugin cache namespace.
@@ -84,7 +80,5 @@ func SharedCacheGet(key string) (string, bool, error) {
 
 // SharedCacheSet writes a key to the explicit cross-plugin cache namespace.
 // Possessing private env.cache_set never authorizes this operation.
-func SharedCacheSet(key, value string) (*pbv1.HostError, error) {
-	_, herr, err := HostCall("env.shared_cache_set", &pbv1.CacheSetArgs{Key: key, Value: value})
-	return herr, err
+func SharedCacheSet(key, value string) error { return checkedHostCall("env.shared_cache_set", &pbv1.CacheSetArgs{Key: key, Value: value})
 }

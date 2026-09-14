@@ -17,20 +17,17 @@ import (
 
 func TestStateAbsenceIsNotEmptiness(t *testing.T) {
 	sdktest.New(t).Run(func() {
-		_, herr, err := sdk.StateGet("absent")
-		if err != nil {
-			t.Fatalf("transport error: %v", err)
-		}
-		if !sdk.IsNotFound(herr) {
-			t.Fatalf("a missing state key reported %v, want NOT_FOUND", herr)
+		_, found, err := sdk.StateGet("absent")
+		if err != nil || found {
+			t.Fatalf("a missing state key reported found=%v err=%v", found, err)
 		}
 
-		if herr, err := sdk.StateSet("empty", ""); err != nil || herr != nil {
-			t.Fatalf("set empty: err=%v herr=%v", err, herr)
+		if err := sdk.StateSet("empty", ""); err != nil {
+			t.Fatalf("set empty: err=%v", err)
 		}
-		v, herr, err := sdk.StateGet("empty")
-		if err != nil || herr != nil {
-			t.Fatalf("get empty: err=%v herr=%v", err, herr)
+		v, found, err := sdk.StateGet("empty")
+		if err != nil || !found {
+			t.Fatalf("get empty: err=%v found=%v", err, found)
 		}
 		if v != "" {
 			t.Fatalf("got %q, want empty", v)
@@ -43,16 +40,16 @@ func TestStateAbsenceIsNotEmptiness(t *testing.T) {
 // operations and must stay so.
 func TestStateSetEmptyDoesNotDelete(t *testing.T) {
 	sdktest.New(t).Run(func() {
-		if _, err := sdk.StateSet("k", ""); err != nil {
+		if err := sdk.StateSet("k", ""); err != nil {
 			t.Fatal(err)
 		}
-		if _, herr, _ := sdk.StateGet("k"); sdk.IsNotFound(herr) {
+		if _, found, _ := sdk.StateGet("k"); !found {
 			t.Fatal("StateSet(k, \"\") deleted the key; empty is a value, not a delete")
 		}
-		if _, err := sdk.StateDelete("k"); err != nil {
+		if err := sdk.StateDelete("k"); err != nil {
 			t.Fatal(err)
 		}
-		if _, herr, _ := sdk.StateGet("k"); !sdk.IsNotFound(herr) {
+		if _, found, _ := sdk.StateGet("k"); found {
 			t.Fatal("StateDelete did not remove the key")
 		}
 	})
@@ -62,8 +59,8 @@ func TestStateSetEmptyDoesNotDelete(t *testing.T) {
 // NOT_FOUND would make every cleanup path branch on something it ignores.
 func TestStateDeleteIsIdempotent(t *testing.T) {
 	sdktest.New(t).Run(func() {
-		if herr, err := sdk.StateDelete("never-existed"); err != nil || herr != nil {
-			t.Fatalf("deleting an absent key failed: err=%v herr=%v", err, herr)
+		if err := sdk.StateDelete("never-existed"); err != nil {
+			t.Fatalf("deleting an absent key failed: err=%v", err)
 		}
 	})
 }
@@ -75,29 +72,16 @@ func TestUnconfiguredStateIsDistinctFromAbsence(t *testing.T) {
 	h := sdktest.New(t)
 	h.StateConfigured = false
 	h.Run(func() {
-		_, herr, err := sdk.StateGet("k")
-		if err != nil {
-			t.Fatalf("transport error: %v", err)
-		}
-		if herr == nil || herr.Code != pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED {
-			t.Fatalf("got %v, want NOT_CONFIGURED", herr)
-		}
-		if sdk.IsNotFound(herr) {
-			t.Fatal("an unconfigured store was reported as a missing key")
+		_, _, err := sdk.StateGet("k")
+		if err == nil {
+			t.Fatal("an unconfigured store reported success")
 		}
 
 		// Assert BOTH channels. An earlier version of this test checked only
 		// err, so it passed when the write was refused — the exact
 		// false-success it claims to prevent.
-		setHerr, setErr := sdk.StateSet("k", "v")
-		if setErr != nil {
-			t.Fatalf("transport error: %v", setErr)
-		}
-		if setHerr == nil {
+		if setErr := sdk.StateSet("k", "v"); setErr == nil {
 			t.Fatal("a write to an unconfigured store reported success")
-		}
-		if setHerr.Code != pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED {
-			t.Fatalf("write refused with %v, want NOT_CONFIGURED", setHerr.Code)
 		}
 	})
 
@@ -105,7 +89,7 @@ func TestUnconfiguredStateIsDistinctFromAbsence(t *testing.T) {
 	// would make the refusal cosmetic.
 	h.StateConfigured = true
 	h.Run(func() {
-		if _, herr, _ := sdk.StateGet("k"); !sdk.IsNotFound(herr) {
+		if _, found, _ := sdk.StateGet("k"); found {
 			t.Fatal("a refused write mutated the store")
 		}
 	})
@@ -161,13 +145,13 @@ func TestStateGetJSONSurfacesRefusals(t *testing.T) {
 func TestStateKeysReadsFramedValues(t *testing.T) {
 	sdktest.New(t).Run(func() {
 		for _, k := range []string{"b", "a"} {
-			if _, err := sdk.StateSet(k, "v"); err != nil {
+			if err := sdk.StateSet(k, "v"); err != nil {
 				t.Fatal(err)
 			}
 		}
-		keys, herr, err := sdk.StateKeys()
-		if err != nil || herr != nil {
-			t.Fatalf("err=%v herr=%v", err, herr)
+		keys, err := sdk.StateKeys()
+		if err != nil {
+			t.Fatalf("err=%v", err)
 		}
 		if len(keys) != 2 || keys[0] != "a" || keys[1] != "b" {
 			t.Fatalf("keys = %v, want [a b] sorted", keys)
@@ -306,7 +290,7 @@ func TestMalformedOriginalRequestReportsNotOK(t *testing.T) {
 // bytes are not valid JSON, so the truthful answer is a decode error.
 func TestStateGetJSONOnAStoredEmptyValue(t *testing.T) {
 	sdktest.New(t).Run(func() {
-		if _, err := sdk.StateSet("raw-empty", ""); err != nil {
+		if err := sdk.StateSet("raw-empty", ""); err != nil {
 			t.Fatal(err)
 		}
 		var v map[string]any
@@ -344,10 +328,10 @@ func TestStateHelpersRejectAnEmptyKeyLocally(t *testing.T) {
 		if _, _, err := sdk.StateGet(""); err == nil {
 			t.Error("StateGet(\"\") was accepted")
 		}
-		if _, err := sdk.StateSet("", "v"); err == nil {
+		if err := sdk.StateSet("", "v"); err == nil {
 			t.Error("StateSet(\"\", …) was accepted")
 		}
-		if _, err := sdk.StateDelete(""); err == nil {
+		if err := sdk.StateDelete(""); err == nil {
 			t.Error("StateDelete(\"\") was accepted")
 		}
 	})

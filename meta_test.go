@@ -79,19 +79,19 @@ func TestHelpersRejectAnEmptyKeyWithoutCallingTheHost(t *testing.T) {
 	if _, _, err := MetaGet(""); err == nil {
 		t.Error("MetaGet(\"\") was accepted")
 	}
-	if _, err := MetaSet("", "v"); err == nil {
+	if err := MetaSet("", "v"); err == nil {
 		t.Error("MetaSet(\"\", …) was accepted")
 	}
 	if _, _, err := CacheGet(""); err == nil {
 		t.Error("CacheGet(\"\") was accepted")
 	}
-	if _, err := CacheSet("", "v"); err == nil {
+	if err := CacheSet("", "v"); err == nil {
 		t.Error("CacheSet(\"\", …) was accepted")
 	}
 	if _, _, err := SharedCacheGet(""); err == nil {
 		t.Error("SharedCacheGet(\"\") was accepted")
 	}
-	if _, err := SharedCacheSet("", "v"); err == nil {
+	if err := SharedCacheSet("", "v"); err == nil {
 		t.Error("SharedCacheSet(\"\", …) was accepted")
 	}
 }

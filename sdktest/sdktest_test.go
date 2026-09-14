@@ -111,60 +111,53 @@ func TestInvalidBlockPanics(t *testing.T) {
 	sdktest.Reset()
 	t.Cleanup(sdktest.Reset)
 
+	var gotErr error
 	sdk.OnBeforeRequest(func(context.Context, *pbv1.ChatRequest) (sdk.RequestResult, error) {
-		sdk.BlockRequest(200, "bad", "must not succeed")
+		gotErr = sdk.BlockRequest(200, "bad", "must not succeed")
 		return sdk.PassRequest(), nil
 	})
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("invalid block must panic")
-		}
-		if msg, ok := r.(string); !ok || !strings.Contains(msg, "block_request") {
-			t.Fatalf("panic %v", r)
-		}
-	}()
 	sdktest.New(t).BeforeRequest(&pbv1.ChatRequest{})
+	if gotErr == nil {
+		t.Fatal("invalid block must return an error")
+	}
 }
 
 func TestEmptyBlockReplyPanics(t *testing.T) {
 	sdktest.Reset()
 	t.Cleanup(sdktest.Reset)
 
+	var gotErr error
 	sdk.OnBeforeRequest(func(context.Context, *pbv1.ChatRequest) (sdk.RequestResult, error) {
-		sdk.BlockRequest(403, "denied", "no")
+		gotErr = sdk.BlockRequest(403, "denied", "no")
 		return sdk.PassRequest(), nil
 	})
 	h := sdktest.New(t)
 	h.StubHostCall("env.block_request", func(string) (string, error) {
 		return "", nil
 	})
-	defer func() {
-		if recover() == nil {
-			t.Fatal("empty host reply must panic")
-		}
-	}()
 	h.BeforeRequest(&pbv1.ChatRequest{})
+	if gotErr == nil {
+		t.Fatal("empty host reply must return an error")
+	}
 }
 
 func TestMalformedBlockReplyPanics(t *testing.T) {
 	sdktest.Reset()
 	t.Cleanup(sdktest.Reset)
 
+	var gotErr error
 	sdk.OnBeforeRequest(func(context.Context, *pbv1.ChatRequest) (sdk.RequestResult, error) {
-		sdk.BlockRequest(403, "denied", "no")
+		gotErr = sdk.BlockRequest(403, "denied", "no")
 		return sdk.PassRequest(), nil
 	})
 	h := sdktest.New(t)
 	h.StubHostCall("env.block_request", func(string) (string, error) {
 		return "not-a-protobuf", nil
 	})
-	defer func() {
-		if recover() == nil {
-			t.Fatal("malformed host reply must panic")
-		}
-	}()
 	h.BeforeRequest(&pbv1.ChatRequest{})
+	if gotErr == nil {
+		t.Fatal("malformed host reply must return an error")
+	}
 }
 
 func TestTypedPermissionDeniedIsQuiet(t *testing.T) {
@@ -207,12 +200,12 @@ func TestStateRoundTripsThroughTheFramedPath(t *testing.T) {
 	t.Cleanup(sdktest.Reset)
 
 	sdk.OnBeforeRequest(func(context.Context, *pbv1.ChatRequest) (sdk.RequestResult, error) {
-		if herr, err := sdk.StateSet("k", "v"); err != nil || herr != nil {
-			t.Errorf("state set: err=%v herr=%v", err, herr)
+		if err := sdk.StateSet("k", "v"); err != nil {
+			t.Errorf("state set: err=%v", err)
 		}
-		v, herr, err := sdk.StateGet("k")
-		if err != nil || herr != nil {
-			t.Errorf("state get: err=%v herr=%v", err, herr)
+		v, found, err := sdk.StateGet("k")
+		if err != nil || !found {
+			t.Errorf("state get: err=%v found=%v", err, found)
 		}
 		if v != "v" {
 			t.Errorf("state get %q", v)
@@ -304,11 +297,8 @@ func TestStreamHandlerPassSuppressFailOpen(t *testing.T) {
 				return sdk.ToolCallAction{}, context.Canceled
 			},
 			check: func(t *testing.T, r sdktest.StreamResult) {
-				if r.Err != nil || len(r.Events) != 3 {
+				if r.Err == nil {
 					t.Fatalf("%+v", r)
-				}
-				if r.Events[1].GetToolCallDelta().GetArgumentsDelta() != `{"x":1}` {
-					t.Fatalf("fail-open must re-emit original args")
 				}
 			},
 		},
@@ -462,12 +452,12 @@ func TestSignedToolCallContract(t *testing.T) {
 			args: `{"x":1}`,
 		},
 		{
-			name: "fail-open-keeps-signature",
+			name: "callback-error-fails-closed",
 			act: func(sdk.ToolCall) (sdk.ToolCallAction, error) {
 				return sdk.ToolCallAction{}, context.Canceled
 			},
-			sig:  "provider-sig",
-			args: `{"x":1}`,
+			sig:  "",
+			args: "",
 		},
 		{
 			name: "replace-clears-signature",
@@ -500,6 +490,12 @@ func TestSignedToolCallContract(t *testing.T) {
 			request.StreamChunk(start)
 			request.StreamChunk(toolDelta(0, `{"x":1}`))
 			r := request.StreamChunk(toolStop(0))
+			if tc.name == "callback-error-fails-closed" {
+				if r.Err == nil {
+					t.Fatal("callback error must propagate")
+				}
+				return
+			}
 			if r.Err != nil {
 				t.Fatal(r.Err)
 			}

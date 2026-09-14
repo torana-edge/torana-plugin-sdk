@@ -52,17 +52,32 @@ var ErrStateUnavailable = errors.New("torana: durable plugin state is not availa
 // empty string returns "" with no HostError. Branch with IsNotFound rather than
 // testing the value — the same rule as MetaGet and CacheGet.
 func StateGet(key string) (string, bool, error) {
-	raw, found, err := checkedHostCallValue("env.state_get", &pbv1.StateGetArgs{Key: key})
-	return string(raw), found, err
+	raw, herr, err := HostCall("env.state_get", &pbv1.StateGetArgs{Key: key})
+	if err != nil {
+		return "", false, err
+	}
+	if herr != nil {
+		if IsNotFound(herr) {
+			return "", false, nil
+		}
+		return "", false, stateError(key, herr)
+	}
+	return string(raw), true, nil
 }
 
 // StateSet writes one of this plugin's durable keys.
 //
 // An empty value stores an empty value. It does not delete; use StateDelete to
 // release a key.
-func StateSet(key, value string) (*pbv1.HostError, error) {
+func StateSet(key, value string) error {
 	_, herr, err := HostCall("env.state_set", &pbv1.StateSetArgs{Key: key, Value: value})
-	return herr, err
+	if err != nil {
+		return err
+	}
+	if herr != nil {
+		return stateError(key, herr)
+	}
+	return nil
 }
 
 // StateDelete releases one durable key.
@@ -78,26 +93,32 @@ func StateSet(key, value string) (*pbv1.HostError, error) {
 // The host maps the command to pbv1.StateDeletePermission; deriving the
 // permission from the command string would look for a capability that does not
 // exist.
-func StateDelete(key string) (*pbv1.HostError, error) {
+func StateDelete(key string) error {
 	_, herr, err := HostCall(pbv1.StateDeleteCommand, &pbv1.StateDeleteArgs{Key: key})
-	return herr, err
+	if err != nil {
+		return err
+	}
+	if herr != nil {
+		return stateError(key, herr)
+	}
+	return nil
 }
 
 // StateKeys lists this plugin's durable keys, sorted. Useful when a plugin
 // stores one key per conversation and must enumerate them on a tick.
-func StateKeys() ([]string, *pbv1.HostError, error) {
-	raw, herr, err := HostCall("env.state_keys", nil)
-	if err != nil || herr != nil {
-		return nil, herr, err
+func StateKeys() ([]string, error) {
+	raw, _, err := checkedHostCallValue("env.state_keys", nil)
+	if err != nil {
+		return nil, err
 	}
 	if len(raw) == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 	var keys []string
 	if err := json.Unmarshal(raw, &keys); err != nil {
-		return nil, nil, fmt.Errorf("torana: decode state keys: %w", err)
+		return nil, fmt.Errorf("torana: decode state keys: %w", err)
 	}
-	return keys, nil, nil
+	return keys, nil
 }
 
 // StateGetJSON reads a key and decodes it into v.
@@ -159,11 +180,7 @@ func StateSetJSON(key string, v any) error {
 	if err != nil {
 		return fmt.Errorf("torana: encode state %q: %w", key, err)
 	}
-	herr, err := StateSet(key, string(b))
-	if err != nil {
-		return err
-	}
-	return stateError(key, herr)
+	return StateSet(key, string(b))
 }
 
 // StateGetVersioned reads a value together with its opaque concurrency version.

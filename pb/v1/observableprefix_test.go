@@ -121,6 +121,7 @@ func checkObservablePrefixInventory(included, excluded map[string]func(*ChatRequ
 func TestObservablePrefixTopLevelInventory(t *testing.T) {
 	// included: a valid mutation of the field must change the prefix
 	included := map[string]func(*ChatRequest){
+		"output_format":            func(r *ChatRequest) { r.OutputFormat = &OutputFormat{Mode: OutputFormat_JSON_OBJECT} },
 		"model":                    func(r *ChatRequest) { r.Model = "m2" },
 		"tools":                    func(r *ChatRequest) { r.Tools[0].Description = "d2" },
 		"messages":                 func(r *ChatRequest) { r.Messages[0].Blocks[0].GetText().Text = "changed" },
