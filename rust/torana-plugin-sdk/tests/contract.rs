@@ -51,7 +51,12 @@ fn hook_input_requires_revision_and_valid_stream_event() {
     let mut wrong_revision = valid.clone();
     wrong_revision[0] = 0x08;
     wrong_revision[1] = 2;
-    assert!(__dispatch_v1(&wrong_revision, torana_plugin_sdk::HOOK_ON_STREAM_CHUNK, pass).is_err());
+    assert!(__dispatch_v1(
+        &wrong_revision,
+        torana_plugin_sdk::HOOK_ON_STREAM_CHUNK,
+        pass
+    )
+    .is_err());
 
     let empty_event = pbv1::HookInput {
         contract_revision: 1,
@@ -122,7 +127,7 @@ fn message_requires_at_least_one_block() {
 #[test]
 fn deep_unknown_fields_are_rejected_before_decode() {
     // HookInput -> ChatRequest -> Message -> RequestBlock, unknown field 100.
-    let block = vec![0xa2, 0x06, 0x01, b'x'];
+    let block = [0xa2, 0x06, 0x01, b'x'];
     let message = vec![
         0x12,
         1,
@@ -189,7 +194,7 @@ fn typed_plugin_dispatch_invokes_family_callback() {
         fn before_request(
             r: pbv1::ChatRequest,
         ) -> Result<torana_plugin_sdk::RequestResult, String> {
-            Ok(torana_plugin_sdk::RequestResult::replace(r)?)
+            torana_plugin_sdk::RequestResult::replace(r)
         }
     }
     let input = pbv1::HookInput {
@@ -336,7 +341,7 @@ fn stream_handler_preserves_or_clears_signature_and_supports_freeform() {
     use std::sync::{Arc, Mutex};
     let buffers = Arc::new(Mutex::new(std::collections::HashMap::<i32, Vec<u8>>::new()));
     let state = buffers.clone();
-    let _guard = torana_plugin_sdk::install_native_host(move |cmd, args| {
+    let _guard = torana_plugin_sdk::install_native_host(move |_cmd, args| {
         let a = pbv1::MetaAppendArgs::decode(args).unwrap();
         let mut m = state.lock().unwrap();
         let v = m.entry(a.block_index).or_default();

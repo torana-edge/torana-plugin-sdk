@@ -7,9 +7,12 @@
 use core::alloc::Layout;
 use core::{ptr, slice};
 use prost::Message;
+mod capability_contract;
 
 #[cfg(not(target_arch = "wasm32"))]
-thread_local! { static NATIVE_HOST: std::cell::RefCell<Option<Box<dyn Fn(&str, &[u8]) -> Result<Vec<u8>, HostCallError>>>> = const { std::cell::RefCell::new(None) }; }
+type NativeTransport = dyn Fn(&str, &[u8]) -> Result<Vec<u8>, HostCallError>;
+#[cfg(not(target_arch = "wasm32"))]
+thread_local! { static NATIVE_HOST: std::cell::RefCell<Option<Box<NativeTransport>>> = const { std::cell::RefCell::new(None) }; }
 thread_local! { static EXECUTION_CTX: std::cell::RefCell<Option<(u64, Option<pbv1::ExecutionInfo>)>> = const { std::cell::RefCell::new(None) }; }
 
 #[doc(hidden)]
@@ -230,7 +233,6 @@ pub fn replace_tool_result_text(
     };
     let mut found = None;
     for (i, c) in tr.content.iter().enumerate() {
-        let c = c;
         match c.kind.as_ref() {
             Some(pbv1::tool_result_content_block::Kind::Text(_)) if found.is_none() => {
                 found = Some(i)
@@ -733,7 +735,7 @@ pub fn __validate_wire_message(mut bytes: &[u8], name: &str) -> Result<(), Strin
         {
             return Err(format!("torana sdk: duplicate field {number} in {name}"));
         }
-        let expected = match field.r#type.and_then(Type::from_i32) {
+        let expected = match field.r#type.and_then(|value| Type::try_from(value).ok()) {
             Some(Type::Double) | Some(Type::Fixed64) | Some(Type::Sfixed64) => 1,
             Some(Type::Float) | Some(Type::Fixed32) | Some(Type::Sfixed32) => 5,
             Some(Type::Int32) | Some(Type::Sint32) | Some(Type::Int64) | Some(Type::Sint64)
@@ -1250,10 +1252,21 @@ pub fn host_call<M: prost::Message>(
     arguments: &M,
 ) -> Result<Vec<u8>, HostCallError> {
     let arguments = arguments.encode_to_vec();
+    let contract = capability_contract::command(command)
+        .ok_or_else(|| HostCallError::Protocol(format!("unknown host command {command}")))?;
+    if contract.arguments == "import" || contract.arguments.ends_with("-json") {
+        return Err(HostCallError::Protocol(format!(
+            "{command} is not a protobuf host-call command"
+        )));
+    }
     validate_host_arguments(command, &arguments)?;
+    call_encoded(command, &arguments)
+}
+
+fn call_encoded(command: &str, arguments: &[u8]) -> Result<Vec<u8>, HostCallError> {
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(result) =
-        NATIVE_HOST.with(|slot| slot.borrow().as_ref().map(|f| f(command, &arguments)))
+        NATIVE_HOST.with(|slot| slot.borrow().as_ref().map(|f| f(command, arguments)))
     {
         return result.and_then(|frame| decode_host_call_result(&frame));
     }
@@ -1284,6 +1297,38 @@ pub fn host_call<M: prost::Message>(
         dealloc(ptr, len);
         decode_host_call_result(&bytes)
     }
+}
+
+/// Calls one catalogued JSON extension through the same ABI transport as typed
+/// protobuf helpers. Both arguments and JSON results use strict object shape.
+pub fn extension_call(command: &str, arguments: &[u8]) -> Result<serde_json::Value, HostCallError> {
+    let contract = capability_contract::command(command)
+        .ok_or_else(|| HostCallError::Protocol(format!("unknown host command {command}")))?;
+    if !contract.arguments.ends_with("-json") {
+        return Err(HostCallError::Protocol(format!(
+            "{command} is not a JSON extension"
+        )));
+    }
+    let input = strict_json(arguments).map_err(|e| {
+        HostCallError::Protocol(format!("{command} arguments are invalid JSON: {e}"))
+    })?;
+    if !input.is_object() {
+        return Err(HostCallError::Protocol(format!(
+            "{command} arguments must be a JSON object"
+        )));
+    }
+    let value = call_encoded(command, arguments)?;
+    if contract.result == "empty" && value.is_empty() {
+        return Ok(serde_json::Value::Null);
+    }
+    let output = strict_json(&value)
+        .map_err(|e| HostCallError::Protocol(format!("{command} result is invalid JSON: {e}")))?;
+    if !output.is_object() {
+        return Err(HostCallError::Protocol(format!(
+            "{command} result must be a JSON object"
+        )));
+    }
+    Ok(output)
 }
 
 fn validate_host_arguments(command: &str, bytes: &[u8]) -> Result<(), HostCallError> {
@@ -1379,15 +1424,15 @@ fn validate_host_arguments(command: &str, bytes: &[u8]) -> Result<(), HostCallEr
                 return Err(bad("request violates the HTTP contract"));
             }
         }
-        "env.model_pricing" => {
-            if !valid_resource_name(&decode!(pbv1::ModelPricingGetArgs).resource) {
-                return Err(bad("resource is invalid"));
-            }
+        "env.model_pricing"
+            if !valid_resource_name(&decode!(pbv1::ModelPricingGetArgs).resource) =>
+        {
+            return Err(bad("resource is invalid"));
         }
-        "env.cache_policy" => {
-            if !valid_resource_name(&decode!(pbv1::PromptCachePolicyGetArgs).resource) {
-                return Err(bad("resource is invalid"));
-            }
+        "env.cache_policy"
+            if !valid_resource_name(&decode!(pbv1::PromptCachePolicyGetArgs).resource) =>
+        {
+            return Err(bad("resource is invalid"));
         }
         _ => {}
     }
@@ -1742,6 +1787,11 @@ pub struct StreamFeed {
     pub complete: Option<AssembledToolCall>,
 }
 pub struct StreamAssembler;
+impl Default for StreamAssembler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl StreamAssembler {
     pub fn new() -> Self {
         Self
@@ -2496,6 +2546,26 @@ mod tests {
         assert!(
             matches!(http_request(&request), Err(HostCallError::Protocol(message)) if message.contains("unknown field"))
         );
+    }
+
+    #[test]
+    fn catalog_rejects_unknown_commands_and_drives_json_extensions() {
+        let _guard = install_native_host(|command, arguments| {
+            assert_eq!(command, "verify_virtual_key");
+            assert_eq!(arguments, br#"{"key":"v"}"#);
+            native_value(br#"{"valid":true}"#.to_vec())
+        });
+        assert!(
+            matches!(host_call("env.future", &EmptyArgs {}), Err(HostCallError::Protocol(message)) if message.contains("unknown host command"))
+        );
+        assert_eq!(
+            extension_call("verify_virtual_key", br#"{"key":"v"}"#).unwrap()["valid"],
+            true
+        );
+        assert!(matches!(
+            extension_call("verify_virtual_key", b"[]"),
+            Err(HostCallError::Protocol(_))
+        ));
     }
 
     #[test]
