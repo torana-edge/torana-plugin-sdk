@@ -79,8 +79,16 @@ func (x *SyntheticResponse) Validate() error {
 		return err
 	}
 	hasTools := false
-	for _, block := range x.Message.Blocks {
-		if call := block.GetToolCall(); call != nil {
+	for i, block := range x.Message.Blocks {
+		if block == nil || block.Kind == nil {
+			return fmt.Errorf("synthetic response block %d has no kind", i)
+		}
+		switch kind := block.Kind.(type) {
+		case *ResponseBlock_Text:
+			if kind == nil || kind.Text == nil { return fmt.Errorf("synthetic response text block %d is nil", i) }
+		case *ResponseBlock_ToolCall:
+			if kind == nil || kind.ToolCall == nil { return fmt.Errorf("synthetic response tool block %d is nil", i) }
+			call := kind.ToolCall
 			hasTools = true
 			if call.Signature != "" || call.Id != "" {
 				return fmt.Errorf("synthetic tool IDs and signatures are host-owned")
@@ -88,6 +96,8 @@ func (x *SyntheticResponse) Validate() error {
 			if err := validateJSONObject(call.ArgumentsJson); err != nil {
 				return err
 			}
+		default:
+			return fmt.Errorf("synthetic response block %d has an unsupported arm", i)
 		}
 	}
 	if (!hasTools && x.FinishReason != "stop") || (hasTools && x.FinishReason != "tool_calls") {
