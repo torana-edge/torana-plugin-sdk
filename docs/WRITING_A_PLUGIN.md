@@ -365,6 +365,23 @@ unknown/provider arms, and any number of cache-marker arms. Zero text arms
 the result UNCHANGED. Text arms are never concatenated (concatenation is not
 injective and the flat scalar had no such shape).
 
+Follow the [tool-result safety rules](PLUGIN_SEMANTICS.md#explicit-tool-failures)
+before any compaction side effects. Resolve the name from the result itself or
+the matching call, and decline unsupported content shapes:
+
+```go
+names := sdk.ToolNamesByCallID(req.Messages)
+for _, msg := range req.Messages {
+    for _, result := range sdk.ToolResults(msg) {
+        text, ok := sdk.ToolResultScalarText(result)
+        if !ok || result.MustStayExact(names[result.ToolCallId], text) {
+            continue
+        }
+        // The scalar result is eligible for further policy/economic checks.
+    }
+}
+```
+
 ### `ReplaceToolResultText(msg, block, text) (changed bool, err error)`
 
 The total, self-validating, ATOMIC in-place replacement of a tool-result
@@ -921,12 +938,3 @@ responses, and includes the descriptor in the digest-bound approval.
 
 See [AGENT_CONTROL_PLANE.md](https://github.com/torana-edge/torana-edge/blob/main/docs/AGENT_CONTROL_PLANE.md) for the descriptor schema,
 dispatch contract, validation rules, and a complete curl example.
-
-### Explicit tool failures
-
-`ToolResults` preserves the optional `is_error` flag in the copied
-`ToolResultView.IsError` pointer. Compaction must leave explicit failures
-verbatim, even when the tool name and diagnostic text look successful. Use
-`result.MustStayExact(resolvedToolName, text)` before cache lookup, model
-completion, mutation, or savings reporting. An absent flag and explicit false
-remain distinct values; neither overrides the existing name/text safety checks.

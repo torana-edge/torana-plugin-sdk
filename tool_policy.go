@@ -131,10 +131,15 @@ func ToolResultMustStayExact(toolName, content string) bool {
 	return false
 }
 
-// MustStayExact is the non-overridable compaction safety check. toolName may
-// be resolved from the matching call when a provider omits it on the result.
+// MustStayExact is a conservative compaction check for plugin authors. The
+// result name takes precedence; toolName is a fallback from the matching call.
+// Unknown names and explicit failures stay exact. The host independently
+// enforces mutation grants and provenance; this helper is not an enforcement boundary.
 func (v ToolResultView) MustStayExact(toolName, content string) bool {
-	return (v.IsError != nil && *v.IsError) || ToolResultMustStayExact(toolName, content)
+	if v.ToolName != "" {
+		toolName = v.ToolName
+	}
+	return toolName == "" || (v.IsError != nil && *v.IsError) || ToolResultMustStayExact(toolName, content)
 }
 
 func toolNameTokens(name string) []string {

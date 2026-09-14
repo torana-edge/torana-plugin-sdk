@@ -120,6 +120,11 @@ State deletion uses the typed delete command, authorized by `env.state_set`.
 
 ## 4. Mutation authority and provenance
 
+Compaction authors must also follow the
+[tool-result safety rules](PLUGIN_SEMANTICS.md#explicit-tool-failures); the SDK
+provides copied error presence and a conservative eligibility helper.
+
+
 Every accepted request, response, or stream mutation is verified by the host.
 Declare the narrow `ir.*.write` permissions for the sections that actually
 change:
@@ -192,12 +197,3 @@ or explicitly budgeted provider egress. Return pass-through when idle and a
 11. Are absence and present-empty values kept distinct?
 12. Does a compiled guest run through the real host conformance harness, not
     merely compile?
-
-### Explicit tool failures
-
-`ToolResults` preserves the optional `is_error` flag in the copied
-`ToolResultView.IsError` pointer. Compaction must leave explicit failures
-verbatim, even when the tool name and diagnostic text look successful. Use
-`result.MustStayExact(resolvedToolName, text)` before cache lookup, model
-completion, mutation, or savings reporting. An absent flag and explicit false
-remain distinct values; neither overrides the existing name/text safety checks.
