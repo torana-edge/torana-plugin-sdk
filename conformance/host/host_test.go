@@ -46,6 +46,9 @@ func TestCompiledRustGuestImplementsRunHook(t *testing.T) {
 func TestCompiledRustLoggerCallsHost(t *testing.T) {
 	path := os.Getenv("TORANA_RUST_LOGGER")
 	if path == "" {
+		if os.Getenv("TORANA_E2E") == "1" {
+			t.Fatal("TORANA_RUST_LOGGER is required in E2E mode")
+		}
 		t.Log("TORANA_RUST_LOGGER unset; exercised in CI")
 		return
 	}

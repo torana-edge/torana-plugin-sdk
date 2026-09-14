@@ -30,11 +30,14 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - run: go test ./...
       - run: cargo test --manifest-path rust/torana-plugin-sdk/Cargo.toml
+      - name: Generated capability contracts are current
+        run: ./scripts/check-capabilities.sh
       - name: Verify tag matches crate version
         run: |
           version="${GITHUB_REF_NAME#v}"
           grep -q "^version = \"${version}\"$" rust/torana-plugin-sdk/Cargo.toml
-      - run: cargo package --manifest-path rust/torana-plugin-sdk/Cargo.toml --locked
+      - name: Published crate is self-contained
+        run: ./scripts/check-rust-package.sh
       - run: |
           mkdir -p dist
           GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -buildvcs=false -o dist/go-logger.wasm ./examples/go-logger
