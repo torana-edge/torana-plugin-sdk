@@ -36,8 +36,8 @@ guests in the host test: the language-support claim is an executable contract,
 not merely two crates that happen to compile.
 
 1. **Bump `rust/torana-plugin-sdk/Cargo.toml`** to the version you are about to
-   tag, without the `v`. Public Go tags already run through `v0.2.0`, so the
-   next coordinated Go/Rust release is `v0.4.0`. ABI and package versions are
+   tag, without the `v`, and update the SDK and example Cargo lockfiles. Choose
+   an unused version newer than the latest tag. ABI and package versions are
    independent: ABI v1 does not imply SDK v0.1. Commit the version to `main`.
 2. **Verify** — `go test ./...`, `cargo test --manifest-path rust/torana-plugin-sdk/Cargo.toml`,
    and a `GOOS=wasip1 GOARCH=wasm go build ./...` (a compile check of the SDK
@@ -52,9 +52,11 @@ not merely two crates that happen to compile.
 4. **Ensure the repository has a `CARGO_REGISTRY_TOKEN` secret** authorized to
    publish `torana-plugin-sdk`.
 5. **Watch the release workflow.** It runs both test suites, asserts the version
-   match, publishes the Rust crate, builds
-   the example plugins, publishes a GitHub Release with checksums, and attests
-   build provenance. A failure here means the release train is incomplete.
+   match, packages the Rust crate, builds the example plugins, publishes a
+   GitHub Release with checksums, and attests build provenance. Rust publishing
+   runs last: a crates.io failure stays visible but leaves the GitHub release
+   and Go module available. Resolve Rust publication separately without moving
+   the tag; verify the failing step before proceeding with Go consumers.
 
 ## Then the downstream repos
 
