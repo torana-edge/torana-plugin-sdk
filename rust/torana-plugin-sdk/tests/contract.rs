@@ -154,3 +154,28 @@ fn native_injection_preserves_typed_refusal() {
         Err(torana_plugin_sdk::HostCallError::Refused(_))
     ));
 }
+
+#[test]
+fn typed_plugin_dispatch_invokes_family_callback() {
+    struct P;
+    impl torana_plugin_sdk::Plugin for P {
+        const SUPPORTED_HOOKS: u32 = HOOK_BEFORE_REQUEST;
+        fn before_request(
+            r: pbv1::ChatRequest,
+        ) -> Result<torana_plugin_sdk::RequestResult, String> {
+            Ok(torana_plugin_sdk::RequestResult::replace(r)?)
+        }
+    }
+    let input = pbv1::HookInput {
+        payload: Some(pbv1::hook_input::Payload::ChatRequest(pbv1::ChatRequest {
+            model: "typed".into(),
+            ..Default::default()
+        })),
+        ..Default::default()
+    };
+    let result = torana_plugin_sdk::__plugin_dispatch::<P>(input).unwrap();
+    assert!(matches!(
+        result.unwrap().action,
+        Some(pbv1::hook_result::Action::ReplaceRequest(_))
+    ));
+}

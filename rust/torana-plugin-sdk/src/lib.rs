@@ -170,7 +170,9 @@ impl RequestResult {
     pub fn replace(r: pbv1::ChatRequest) -> Result<Self, String> {
         Ok(Self(Some(replace_request(r)?)))
     }
-    pub fn into_hook_result(self) -> Option<pbv1::HookResult> { self.0 }
+    pub fn into_hook_result(self) -> Option<pbv1::HookResult> {
+        self.0
+    }
 }
 impl ResponseResult {
     pub fn pass() -> Self {
@@ -179,7 +181,9 @@ impl ResponseResult {
     pub fn replace(r: pbv1::ChatResponse) -> Result<Self, String> {
         Ok(Self(Some(replace_response(r)?)))
     }
-    pub fn into_hook_result(self) -> Option<pbv1::HookResult> { self.0 }
+    pub fn into_hook_result(self) -> Option<pbv1::HookResult> {
+        self.0
+    }
 }
 impl StreamResult {
     pub fn pass() -> Self {
@@ -193,7 +197,9 @@ impl StreamResult {
     pub fn emit(e: Vec<pbv1::StreamEvent>) -> Result<Self, String> {
         Ok(Self(Some(emit_events(e)?)))
     }
-    pub fn into_hook_result(self) -> Option<pbv1::HookResult> { self.0 }
+    pub fn into_hook_result(self) -> Option<pbv1::HookResult> {
+        self.0
+    }
 }
 impl HttpResult {
     pub fn pass() -> Self {
@@ -202,7 +208,9 @@ impl HttpResult {
     pub fn serve(r: pbv1::HttpResponse) -> Result<Self, String> {
         Ok(Self(Some(serve_http(r)?)))
     }
-    pub fn into_hook_result(self) -> Option<pbv1::HookResult> { self.0 }
+    pub fn into_hook_result(self) -> Option<pbv1::HookResult> {
+        self.0
+    }
 }
 impl TickResult {
     pub fn pass() -> Self {
@@ -211,9 +219,23 @@ impl TickResult {
     pub fn outcome(actions: i32, note: impl Into<String>) -> Result<Self, String> {
         Ok(Self(Some(tick_outcome(actions, note)?)))
     }
-    pub fn into_hook_result(self) -> Option<pbv1::HookResult> { self.0 }
+    pub fn into_hook_result(self) -> Option<pbv1::HookResult> {
+        self.0
+    }
 }
 
+/// Typed plugin callbacks cannot return another hook family's result:
+///
+/// ```compile_fail
+/// use torana_plugin_sdk::{Plugin, RequestResult, ResponseResult, pbv1};
+/// struct Wrong;
+/// impl Plugin for Wrong {
+///     const SUPPORTED_HOOKS: u32 = 1 << 2;
+///     fn after_response(_: pbv1::ChatResponse) -> Result<ResponseResult, String> {
+///         Ok(RequestResult::pass())
+///     }
+/// }
+/// ```
 pub trait Plugin {
     const SUPPORTED_HOOKS: u32;
     fn before_request(_: pbv1::ChatRequest) -> Result<RequestResult, String> {
@@ -233,13 +255,25 @@ pub trait Plugin {
     }
 }
 
-pub fn __plugin_dispatch<P: Plugin>(input: pbv1::HookInput) -> Result<Option<pbv1::HookResult>, String> {
+pub fn __plugin_dispatch<P: Plugin>(
+    input: pbv1::HookInput,
+) -> Result<Option<pbv1::HookResult>, String> {
     match input.payload {
-        Some(pbv1::hook_input::Payload::ChatRequest(r)) => P::before_request(r).map(|x|x.into_hook_result()),
-        Some(pbv1::hook_input::Payload::AfterResponse(r)) => P::after_response(r.response.ok_or("missing response")?).map(|x|x.into_hook_result()),
-        Some(pbv1::hook_input::Payload::StreamEvent(e)) => P::on_stream(e).map(|x|x.into_hook_result()),
-        Some(pbv1::hook_input::Payload::HttpRequest(r)) => P::on_http(r).map(|x|x.into_hook_result()),
-        Some(pbv1::hook_input::Payload::TickRequest(r)) => P::on_tick(r).map(|x|x.into_hook_result()),
+        Some(pbv1::hook_input::Payload::ChatRequest(r)) => {
+            P::before_request(r).map(|x| x.into_hook_result())
+        }
+        Some(pbv1::hook_input::Payload::AfterResponse(r)) => {
+            P::after_response(r.response.ok_or("missing response")?).map(|x| x.into_hook_result())
+        }
+        Some(pbv1::hook_input::Payload::StreamEvent(e)) => {
+            P::on_stream(e).map(|x| x.into_hook_result())
+        }
+        Some(pbv1::hook_input::Payload::HttpRequest(r)) => {
+            P::on_http(r).map(|x| x.into_hook_result())
+        }
+        Some(pbv1::hook_input::Payload::TickRequest(r)) => {
+            P::on_tick(r).map(|x| x.into_hook_result())
+        }
         None => Err("missing hook payload".into()),
     }
 }
@@ -911,9 +945,25 @@ pub fn __dispatch_v1<E: core::fmt::Display>(
 #[macro_export]
 macro_rules! export_plugin_v1 {
     ($plugin:ty) => {
-        #[no_mangle] pub extern "C" fn abi_version() -> u64 { $crate::ABI_VERSION }
-        #[no_mangle] pub extern "C" fn supported_hooks() -> u32 { <$plugin as $crate::Plugin>::SUPPORTED_HOOKS }
-        #[no_mangle] pub extern "C" fn run_hook(ptr:u32,len:u32)->u64 { let input=unsafe{$crate::__input(ptr,len)}; let output=$crate::__dispatch_v1(input, <$plugin as $crate::Plugin>::SUPPORTED_HOOKS, $crate::__plugin_dispatch::<$plugin>).unwrap_or_else(|e|panic!("{e}")); $crate::__result(&output) }
+        #[no_mangle]
+        pub extern "C" fn abi_version() -> u64 {
+            $crate::ABI_VERSION
+        }
+        #[no_mangle]
+        pub extern "C" fn supported_hooks() -> u32 {
+            <$plugin as $crate::Plugin>::SUPPORTED_HOOKS
+        }
+        #[no_mangle]
+        pub extern "C" fn run_hook(ptr: u32, len: u32) -> u64 {
+            let input = unsafe { $crate::__input(ptr, len) };
+            let output = $crate::__dispatch_v1(
+                input,
+                <$plugin as $crate::Plugin>::SUPPORTED_HOOKS,
+                $crate::__plugin_dispatch::<$plugin>,
+            )
+            .unwrap_or_else(|e| panic!("{e}"));
+            $crate::__result(&output)
+        }
     };
     ($hooks:expr, $handler:path) => {
         #[no_mangle]
