@@ -325,7 +325,12 @@ fn stream_assembler_propagates_meta_refusal() {
             pbv1::ContentBlockStart {
                 index: 1,
                 block: Some(pbv1::content_block_start::Block::ToolCall(
-                    Default::default(),
+                    pbv1::ToolCallRef {
+                        id: "id".into(),
+                        name: "tool".into(),
+                        invocation_kind: pbv1::ToolInvocationKind::Function as i32,
+                        ..Default::default()
+                    },
                 )),
             },
         )),
@@ -334,6 +339,127 @@ fn stream_assembler_propagates_meta_refusal() {
         asm.feed(ev),
         Err(torana_plugin_sdk::HostCallError::Refused(_))
     ));
+}
+
+#[test]
+fn stream_assembler_passes_non_tool_events_and_rejects_corrupt_frames() {
+    use std::sync::{Arc, Mutex};
+    let replies = Arc::new(Mutex::new(vec![
+        Vec::<u8>::new(),
+        vec![0x01],
+        vec![0, 0, 0, 1, 0xff],
+    ]));
+    let transport_replies = replies.clone();
+    let _guard = torana_plugin_sdk::install_native_host(move |command, args| {
+        assert_eq!(command, "env.meta_append");
+        let call = pbv1::MetaAppendArgs::decode(args).unwrap();
+        assert!(call.fragment.is_empty());
+        let value = transport_replies.lock().unwrap().remove(0);
+        Ok(pbv1::HostCallResult {
+            result: Some(pbv1::host_call_result::Result::Value(value)),
+        }
+        .encode_to_vec())
+    });
+    let assembler = torana_plugin_sdk::StreamAssembler::new();
+    let start = pbv1::StreamEvent {
+        event: Some(pbv1::stream_event::Event::ContentBlockStart(
+            pbv1::ContentBlockStart {
+                index: 0,
+                block: Some(pbv1::content_block_start::Block::Text(pbv1::TextBlock {})),
+            },
+        )),
+    };
+    assert_eq!(assembler.feed(start.clone()).unwrap().emit, vec![start]);
+    let delta = pbv1::StreamEvent {
+        event: Some(pbv1::stream_event::Event::TextDelta("hello".into())),
+    };
+    assert_eq!(assembler.feed(delta.clone()).unwrap().emit, vec![delta]);
+    let stop = || pbv1::StreamEvent {
+        event: Some(pbv1::stream_event::Event::ContentBlockStop(
+            pbv1::ContentBlockStop { index: 0 },
+        )),
+    };
+    assert_eq!(assembler.feed(stop()).unwrap().emit, vec![stop()]);
+    assert!(
+        matches!(assembler.feed(stop()), Err(torana_plugin_sdk::HostCallError::Protocol(message)) if message.contains("header"))
+    );
+    assert!(
+        matches!(assembler.feed(stop()), Err(torana_plugin_sdk::HostCallError::Protocol(message)) if message.contains("decode") || message.contains("reference"))
+    );
+}
+
+#[test]
+fn stream_handler_rejects_invalid_input_and_propagates_callback_errors() {
+    let _guard =
+        torana_plugin_sdk::install_native_host(|_, _| panic!("invalid input reached host"));
+    let invalid = pbv1::StreamEvent {
+        event: Some(pbv1::stream_event::Event::ContentBlockStart(
+            pbv1::ContentBlockStart {
+                index: 0,
+                block: Some(pbv1::content_block_start::Block::ToolCall(
+                    pbv1::ToolCallRef {
+                        id: "id".into(),
+                        name: "tool".into(),
+                        invocation_kind: 99,
+                        ..Default::default()
+                    },
+                )),
+            },
+        )),
+    };
+    let handler = torana_plugin_sdk::StreamHandler::new(|_| Ok::<_, String>(None));
+    assert!(handler.handle(invalid).unwrap_err().contains("invocation"));
+    drop(_guard);
+
+    let buffers = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    let state = buffers.clone();
+    let _guard = torana_plugin_sdk::install_native_host(move |_, args| {
+        let call = pbv1::MetaAppendArgs::decode(args).unwrap();
+        let mut buffer = state.lock().unwrap();
+        if call.fragment.is_empty() {
+            Ok(pbv1::HostCallResult {
+                result: Some(pbv1::host_call_result::Result::Value(buffer.clone())),
+            }
+            .encode_to_vec())
+        } else {
+            buffer.extend(call.fragment);
+            Ok(pbv1::HostCallResult {
+                result: Some(pbv1::host_call_result::Result::Value(vec![])),
+            }
+            .encode_to_vec())
+        }
+    });
+    let handler =
+        torana_plugin_sdk::StreamHandler::new(|_| Err::<Option<String>, _>("callback failed"));
+    for event in [
+        pbv1::StreamEvent {
+            event: Some(pbv1::stream_event::Event::ContentBlockStart(
+                pbv1::ContentBlockStart {
+                    index: 1,
+                    block: Some(pbv1::content_block_start::Block::ToolCall(
+                        pbv1::ToolCallRef {
+                            id: "id".into(),
+                            name: "tool".into(),
+                            invocation_kind: pbv1::ToolInvocationKind::Function as i32,
+                            ..Default::default()
+                        },
+                    )),
+                },
+            )),
+        },
+        pbv1::StreamEvent {
+            event: Some(pbv1::stream_event::Event::ContentBlockStop(
+                pbv1::ContentBlockStop { index: 1 },
+            )),
+        },
+    ] {
+        let result = handler.handle(event);
+        if let Err(error) = result {
+            assert!(error.contains("callback failed"));
+            return;
+        }
+    }
+    panic!("callback error was not returned");
 }
 
 #[test]

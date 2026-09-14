@@ -668,7 +668,7 @@ fn validate_stream_event(event: &pbv1::StreamEvent) -> Result<(), String> {
                 if call.id.is_empty() || call.name.is_empty() {
                     return Err("torana sdk: tool call start requires id and name".into());
                 }
-                if !matches!(call.invocation_kind, 1 | 2) {
+                if !matches!(call.invocation_kind, 0 | 1) {
                     return Err("torana sdk: invalid tool invocation kind".into());
                 }
             }
@@ -1797,6 +1797,7 @@ impl StreamAssembler {
         Self
     }
     pub fn feed(&self, event: pbv1::StreamEvent) -> Result<StreamFeed, HostCallError> {
+        validate_stream_event(&event).map_err(HostCallError::Protocol)?;
         let original = event.clone();
         use pbv1::stream_event::Event;
         match event.event {
@@ -1826,12 +1827,15 @@ impl StreamAssembler {
             }
             Some(Event::ContentBlockStop(s)) => {
                 let b = meta_append(s.index, &[])?;
-                if b.len() < 4 {
+                if b.is_empty() {
                     return Ok(StreamFeed {
-                        emit: vec![],
-                        suppress: true,
+                        emit: vec![original],
+                        suppress: false,
                         complete: None,
                     });
+                }
+                if b.len() < 4 {
+                    return Err(HostCallError::Protocol("corrupt tool frame header".into()));
                 }
                 let n = u32::from_be_bytes(b[..4].try_into().unwrap()) as usize;
                 if n + 4 > b.len() {
@@ -1839,6 +1843,18 @@ impl StreamAssembler {
                 }
                 let r = pbv1::ToolCallRef::decode(&b[4..4 + n])
                     .map_err(|e| HostCallError::Protocol(e.to_string()))?;
+                if r.id.is_empty()
+                    || r.name.is_empty()
+                    || !matches!(
+                        r.invocation_kind,
+                        value if value == pbv1::ToolInvocationKind::Function as i32
+                            || value == pbv1::ToolInvocationKind::Freeform as i32
+                    )
+                {
+                    return Err(HostCallError::Protocol(
+                        "corrupt tool frame reference".into(),
+                    ));
+                }
                 let args = String::from_utf8(b[4 + n..].to_vec())
                     .map_err(|_| HostCallError::Protocol("tool arguments not UTF-8".into()))?;
                 let input = (r.invocation_kind == pbv1::ToolInvocationKind::Freeform as i32)
@@ -1853,7 +1869,9 @@ impl StreamAssembler {
                         name: r.name,
                         signature: r.signature,
                         invocation_kind: pbv1::ToolInvocationKind::try_from(r.invocation_kind)
-                            .unwrap_or(pbv1::ToolInvocationKind::Function),
+                            .map_err(|_| {
+                                HostCallError::Protocol("corrupt tool invocation kind".into())
+                            })?,
                         arguments,
                         input_text: input,
                     }),
