@@ -486,30 +486,19 @@ grant.
 | `env.state_get` / `env.state_set` / `env.state_delete` / `env.state_keys` | `sdk.StateGet`, `sdk.StateSet`, `sdk.StateDelete`, `sdk.StateKeys` | Across requests and restarts, private, never expires. Empty is a stored value. |
 | `env.state_compare_and_set` / `env.state_compare_and_delete` / `env.state_scan` | `sdk.StateCompareAndSet`, `sdk.StateCompareAndDelete`, `sdk.StateScan` | Versioned updates use opaque non-reusable versions, so retries cannot overwrite a newer value (no ABA). Scans are ordered, cursor-based, and limited to 256 entries per page. |
 
-**Reading meta and cache: three outcomes, not two**
+**Reading meta and cache: distinguish missing from empty**
 
-Reads return `(value, *HostError, error)`; writes return `(*HostError, error)`.
+Reads return `(value, found, error)`; writes return `error`. `MetaAppend`
+returns `([]byte, error)` and an empty fragment reads the assembled value.
 The same shape applies to `StateGet` / `StateSet`, and the same
 absence-vs-emptiness rule applies to all three stores. The read pattern is where
 the three channels matter — branch on the middle one:
 
 ```go
-v, herr, err := sdk.MetaGet("draft")
-switch {
-case err != nil:
-    // The call could not be made at all — a transport or protocol fault.
-    return sdk.PassRequest(), err
-case sdk.IsNotFound(herr):
-    // The key does not exist. Ordinary: nothing was stored yet.
-    v = defaultDraft
-case herr != nil:
-    // Any OTHER refusal is a bug, not a condition to absorb. Approval is
-    // all-or-nothing, so a permission denial means you called a capability you
-    // did not declare, or the manifest and host disagree. Returning an error
-    // lets your failure_mode decide; swallowing it silently disables the thing
-    // your plugin exists to do, and a security plugin would fail open.
-    return sdk.PassRequest(), fmt.Errorf("meta_get refused: %s", herr.Message)
-}
+v, found, err := sdk.MetaGet("draft")
+if err != nil { return sdk.PassRequest(), err }
+if !found { v = defaultDraft }
+// found=true and v=="" means an explicitly stored empty value.
 // v is the stored value, which may legitimately be "".
 ```
 
@@ -808,9 +797,8 @@ Use the `sdktest` package. It runs your hooks in-process, so an ordinary
 toolchain, no sibling checkout.
 
 Native tests and the compiled Go guest share the same `DispatchHook`
-implementation and config helpers. `PluginConfigStrict` preserves typed host
-refusals and protocol errors; use it for policy configuration. `PluginConfig`
-defaults to `{}` on failure and is only suitable when defaults are safe. WASI memory transfer and
+implementation and config helpers. `PluginConfig` returns raw JSON and an
+error; decode it only after checking the error. WASI memory transfer and
 error-to-trap conversion remain covered by the compiled conformance suite.
 
 ```go
