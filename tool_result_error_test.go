@@ -36,6 +36,7 @@ func TestMustStayExactResolvesNamesConservatively(t *testing.T) {
 	}{
 		{"", "", true}, {"write_file", "", true}, {"write_file", "read", true},
 		{"", "write_file", true}, {"", "read", false}, {"read", "", false},
+		{"read", "write_file", false},
 	} {
 		if got := (ToolResultView{ToolName: tc.name}).MustStayExact(tc.fallback, "done"); got != tc.want {
 			t.Errorf("name=%q fallback=%q: got %v, want %v", tc.name, tc.fallback, got, tc.want)
