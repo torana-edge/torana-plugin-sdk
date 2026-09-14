@@ -51,11 +51,11 @@ func (x *OutputFormat) Validate() error {
 		return err
 	}
 	switch x.Mode {
-	case OutputFormat_TEXT, OutputFormat_JSON_OBJECT:
+	case OutputFormat_MODE_TEXT, OutputFormat_MODE_JSON_OBJECT:
 		if x.Name != "" || len(x.SchemaJson) != 0 || x.Strict != nil {
 			return fmt.Errorf("text/object output format cannot carry schema options")
 		}
-	case OutputFormat_JSON_SCHEMA:
+	case OutputFormat_MODE_JSON_SCHEMA:
 		if x.Name == "" {
 			return fmt.Errorf("JSON schema output requires a name")
 		}

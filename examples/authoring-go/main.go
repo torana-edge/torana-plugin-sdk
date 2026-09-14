@@ -40,7 +40,7 @@ func classify(text string) (string, error) {
 			Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: text}},
 		}}}},
 		MaxTokens:    &max,
-		OutputFormat: &pbv1.OutputFormat{Mode: pbv1.OutputFormat_JSON_SCHEMA, Name: "classification", SchemaJson: []byte(`{"type":"object","properties":{"safe":{"type":"boolean"}},"required":["safe"],"additionalProperties":false}`), Strict: &strict},
+		OutputFormat: &pbv1.OutputFormat{Mode: pbv1.OutputFormat_MODE_JSON_SCHEMA, Name: "classification", SchemaJson: []byte(`{"type":"object","properties":{"safe":{"type":"boolean"}},"required":["safe"],"additionalProperties":false}`), Strict: &strict},
 	})
 }
 

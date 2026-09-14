@@ -240,22 +240,25 @@ func (ErrorCode) EnumDescriptor() ([]byte, []int) {
 type OutputFormat_Mode int32
 
 const (
-	OutputFormat_TEXT        OutputFormat_Mode = 0
-	OutputFormat_JSON_OBJECT OutputFormat_Mode = 1
-	OutputFormat_JSON_SCHEMA OutputFormat_Mode = 2
+	// An explicitly present OutputFormat defaults to unconstrained text;
+	// absence of OutputFormat preserves the provider's existing setting.
+	// buf:lint:ignore ENUM_ZERO_VALUE_SUFFIX
+	OutputFormat_MODE_TEXT        OutputFormat_Mode = 0
+	OutputFormat_MODE_JSON_OBJECT OutputFormat_Mode = 1
+	OutputFormat_MODE_JSON_SCHEMA OutputFormat_Mode = 2
 )
 
 // Enum value maps for OutputFormat_Mode.
 var (
 	OutputFormat_Mode_name = map[int32]string{
-		0: "TEXT",
-		1: "JSON_OBJECT",
-		2: "JSON_SCHEMA",
+		0: "MODE_TEXT",
+		1: "MODE_JSON_OBJECT",
+		2: "MODE_JSON_SCHEMA",
 	}
 	OutputFormat_Mode_value = map[string]int32{
-		"TEXT":        0,
-		"JSON_OBJECT": 1,
-		"JSON_SCHEMA": 2,
+		"MODE_TEXT":        0,
+		"MODE_JSON_OBJECT": 1,
+		"MODE_JSON_SCHEMA": 2,
 	}
 )
 
@@ -5740,7 +5743,7 @@ func (x *OutputFormat) GetMode() OutputFormat_Mode {
 	if x != nil {
 		return x.Mode
 	}
-	return OutputFormat_TEXT
+	return OutputFormat_MODE_TEXT
 }
 
 func (x *OutputFormat) GetName() string {
@@ -6877,17 +6880,17 @@ const file_proto_torana_v1_torana_proto_rawDesc = "" +
 	"\x15warm_interval_seconds\x18\x05 \x01(\rH\x02R\x13warmIntervalSeconds\x88\x01\x01B\x1a\n" +
 	"\x18_cache_read_usd_per_mtokB\x1b\n" +
 	"\x19_cache_write_usd_per_mtokB\x18\n" +
-	"\x16_warm_interval_seconds\"\xd1\x01\n" +
+	"\x16_warm_interval_seconds\"\xe0\x01\n" +
 	"\fOutputFormat\x120\n" +
 	"\x04mode\x18\x01 \x01(\x0e2\x1c.torana.v1.OutputFormat.ModeR\x04mode\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1f\n" +
 	"\vschema_json\x18\x03 \x01(\fR\n" +
 	"schemaJson\x12\x1b\n" +
-	"\x06strict\x18\x04 \x01(\bH\x00R\x06strict\x88\x01\x01\"2\n" +
-	"\x04Mode\x12\b\n" +
-	"\x04TEXT\x10\x00\x12\x0f\n" +
-	"\vJSON_OBJECT\x10\x01\x12\x0f\n" +
-	"\vJSON_SCHEMA\x10\x02B\t\n" +
+	"\x06strict\x18\x04 \x01(\bH\x00R\x06strict\x88\x01\x01\"A\n" +
+	"\x04Mode\x12\r\n" +
+	"\tMODE_TEXT\x10\x00\x12\x14\n" +
+	"\x10MODE_JSON_OBJECT\x10\x01\x12\x14\n" +
+	"\x10MODE_JSON_SCHEMA\x10\x02B\t\n" +
 	"\a_strict\"n\n" +
 	"\x11SyntheticResponse\x124\n" +
 	"\amessage\x18\x01 \x01(\v2\x1a.torana.v1.ResponseMessageR\amessage\x12#\n" +

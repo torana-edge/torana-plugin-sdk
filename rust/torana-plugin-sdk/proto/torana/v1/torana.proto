@@ -1181,7 +1181,14 @@ message PromptCachePolicy {
 // Portable structured-output controls. TEXT carries no name/schema/strictness;
 // JSON_OBJECT carries no schema/name; JSON_SCHEMA requires a named object schema.
 message OutputFormat {
-  enum Mode { TEXT = 0; JSON_OBJECT = 1; JSON_SCHEMA = 2; }
+  enum Mode {
+    // An explicitly present OutputFormat defaults to unconstrained text;
+    // absence of OutputFormat preserves the provider's existing setting.
+    // buf:lint:ignore ENUM_ZERO_VALUE_SUFFIX
+    MODE_TEXT = 0;
+    MODE_JSON_OBJECT = 1;
+    MODE_JSON_SCHEMA = 2;
+  }
   Mode mode = 1;
   string name = 2;
   bytes schema_json = 3;
