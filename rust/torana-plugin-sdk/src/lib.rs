@@ -604,6 +604,27 @@ fn validate_chat_request(request: &pbv1::ChatRequest) -> Result<(), String> {
         "provider_extensions_json",
     )?;
     json_array(&request.safety_settings_json, "safety_settings_json")?;
+    if let Some(format) = request.output_format.as_ref() {
+        match format.mode {
+            0 | 1 => {
+                if !format.name.is_empty()
+                    || !format.schema_json.is_empty()
+                    || format.strict.is_some()
+                {
+                    return Err(
+                        "torana sdk: text/object output format carries schema options".into(),
+                    );
+                }
+            }
+            2 => {
+                if format.name.is_empty() {
+                    return Err("torana sdk: JSON schema output requires a name".into());
+                }
+                json_object(&format.schema_json, "output_format.schema_json")?;
+            }
+            _ => return Err("torana sdk: unknown output format mode".into()),
+        }
+    }
     Ok(())
 }
 
