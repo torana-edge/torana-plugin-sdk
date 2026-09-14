@@ -374,3 +374,33 @@ func TestStateDeleteUsesTheStateSetPermission(t *testing.T) {
 		t.Fatal("env.state_set is not a known permission")
 	}
 }
+
+func TestPluginConfigStrictRetainsFailureClasses(t *testing.T) {
+	for _, tc := range []struct {
+		name, reply string
+		transport   error
+		wantCode    pbv1.ErrorCode
+		wantErr     bool
+		want        string
+	}{
+		{name: "configured", reply: sdktest.HostResultValue([]byte(`{"mode":"strict"}`)), want: `{"mode":"strict"}`},
+		{name: "unset", reply: sdktest.HostResultValue(nil), want: "{}"},
+		{name: "denied", reply: sdktest.HostResultError(pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "denied"), wantCode: pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED},
+		{name: "malformed", reply: "not protobuf", wantErr: true},
+		{name: "transport", transport: errors.New("transport failed"), wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := sdktest.New(t)
+			h.StubHostCall("env.plugin_config", func(string) (string, error) { return tc.reply, tc.transport })
+			h.Run(func() {
+				got, herr, err := sdk.PluginConfigStrict()
+				if got != tc.want || (err != nil) != tc.wantErr || herr.GetCode() != tc.wantCode {
+					t.Fatalf("got %q, %v, %v", got, herr, err)
+				}
+				if tc.transport != nil && !errors.Is(err, tc.transport) {
+					t.Fatalf("transport identity lost: %v", err)
+				}
+			})
+		})
+	}
+}

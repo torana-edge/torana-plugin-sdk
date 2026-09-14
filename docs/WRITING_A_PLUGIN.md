@@ -559,7 +559,7 @@ extension helpers such as `sdk.SendRequest` own their extension framing.
 | `env.emit_metric` | `sdk.EmitMetric` | OTel metrics. |
 | `env.host_call.torana_plugin_counter` | `sdk.HostCallExtension` | Named counters that appear in `/stats`. |
 | `env.serve_http` | `sdk.OnHTTPRequest` | Serve pages and JSON under `/_torana/plugin/<name>/`. |
-| `env.plugin_config` | `sdk.PluginConfig` | Read your own `plugins.config.<name>` blob. |
+| `env.plugin_config` | `sdk.PluginConfigStrict` / `sdk.PluginConfig` | Read your own `plugins.config.<name>` blob. |
 
 ### What the host tells you about a request
 
@@ -793,7 +793,9 @@ Use the `sdktest` package. It runs your hooks in-process, so an ordinary
 toolchain, no sibling checkout.
 
 Native tests and the compiled Go guest share the same `DispatchHook`
-implementation and `PluginConfig` fallback. WASI memory transfer and
+implementation and config helpers. `PluginConfigStrict` preserves typed host
+refusals and protocol errors; use it for policy configuration. `PluginConfig`
+defaults to `{}` on failure and is only suitable when defaults are safe. WASI memory transfer and
 error-to-trap conversion remain covered by the compiled conformance suite.
 
 ```go

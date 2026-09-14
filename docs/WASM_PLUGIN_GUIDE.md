@@ -112,7 +112,9 @@ the operator's approval of the exact bundle digest grants.
 envelope must contain exactly one `value` or classified `HostError` arm. An
 empty envelope, malformed frame, unknown field, unspecified error code, or
 unknown error code is a protocol error—not success and not an advisory refusal.
-Branch on error codes, never diagnostic strings.
+Branch on error codes, never diagnostic strings. Go policy plugins should use
+`PluginConfigStrict` to retain those distinctions; `PluginConfig` suppresses
+failures and is only appropriate when defaults are safe.
 
 Core `env.*` operations use protobuf arguments through the typed SDK helpers.
 Feature calls such as `torana_send_request` use the extension path and their

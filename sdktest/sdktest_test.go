@@ -2,6 +2,7 @@ package sdktest_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -47,8 +48,8 @@ func TestHandlerErrorPropagates(t *testing.T) {
 		return sdk.PassRequest(), context.Canceled
 	})
 	res := sdktest.New(t).BeforeRequest(&pbv1.ChatRequest{})
-	if res.Err == nil {
-		t.Fatal("expected handler error")
+	if !errors.Is(res.Err, context.Canceled) || !strings.Contains(res.Err.Error(), "HOOK_BEFORE_REQUEST: handler:") {
+		t.Fatalf("handler attribution or identity lost: %v", res.Err)
 	}
 	if res.PassedThrough {
 		t.Fatal("handler error must not look like pass-through; failure_mode decides")
@@ -609,4 +610,22 @@ func ExampleHarness_BeforeRequest() {
 		panic(err)
 	}
 	// Output:
+}
+
+func TestDispatchValidationHasStageAndHook(t *testing.T) {
+	if _, err := sdk.DispatchHook(nil); err == nil || !strings.Contains(err.Error(), "validate hook input") {
+		t.Fatalf("nil input: %v", err)
+	}
+	if _, err := sdk.DispatchHook(&pbv1.HookInput{}); err == nil || !strings.Contains(err.Error(), "validate input") {
+		t.Fatalf("invalid input: %v", err)
+	}
+	sdktest.Reset()
+	t.Cleanup(sdktest.Reset)
+	sdk.OnBeforeRequest(func(context.Context, *pbv1.ChatRequest) (sdk.RequestResult, error) {
+		return sdk.ReplaceRequest(nil), nil
+	})
+	res := sdktest.New(t).BeforeRequest(&pbv1.ChatRequest{})
+	if res.Err == nil || !strings.Contains(res.Err.Error(), "HOOK_BEFORE_REQUEST: construct result:") {
+		t.Fatalf("invalid handler result: %v", res.Err)
+	}
 }
