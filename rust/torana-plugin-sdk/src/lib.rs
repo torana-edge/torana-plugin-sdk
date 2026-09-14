@@ -41,19 +41,22 @@ pub enum HostCallError {
 
 /// Installs a native transport for the duration of a test. The guard restores
 /// the previous transport on drop and storage is thread-local.
-pub struct NativeHostGuard;
+pub struct NativeHostGuard {
+    #[cfg(not(target_arch = "wasm32"))]
+    previous: Option<Box<NativeTransport>>,
+}
 #[cfg(not(target_arch = "wasm32"))]
 pub fn install_native_host<F>(call: F) -> NativeHostGuard
 where
     F: Fn(&str, &[u8]) -> Result<Vec<u8>, HostCallError> + 'static,
 {
-    NATIVE_HOST.with(|slot| *slot.borrow_mut() = Some(Box::new(call)));
-    NativeHostGuard
+    let previous = NATIVE_HOST.with(|slot| slot.borrow_mut().replace(Box::new(call)));
+    NativeHostGuard { previous }
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl Drop for NativeHostGuard {
     fn drop(&mut self) {
-        NATIVE_HOST.with(|slot| *slot.borrow_mut() = None);
+        NATIVE_HOST.with(|slot| *slot.borrow_mut() = self.previous.take());
     }
 }
 
@@ -281,10 +284,16 @@ pub fn move_cache_breakpoint(
     if from >= message.blocks.len() || to > message.blocks.len() {
         return Err("cache breakpoint index out of range".into());
     }
-    let b = message.blocks.remove(from);
-    if !matches!(b.kind, Some(pbv1::request_block::Kind::CacheBreakpoint(_))) {
+    if !matches!(
+        message
+            .blocks
+            .get(from)
+            .and_then(|block| block.kind.as_ref()),
+        Some(pbv1::request_block::Kind::CacheBreakpoint(_))
+    ) {
         return Err("block is not cache breakpoint".into());
     }
+    let b = message.blocks.remove(from);
     let at = if to > from { to - 1 } else { to };
     message.blocks.insert(at, b);
     Ok(())
@@ -764,14 +773,18 @@ pub fn __validate_wire_message(mut bytes: &[u8], name: &str) -> Result<(), Strin
         {
             return Err(format!("torana sdk: duplicate field {number} in {name}"));
         }
-        let expected = match field.r#type.and_then(|value| Type::try_from(value).ok()) {
+        let field_type = field.r#type.and_then(|value| Type::try_from(value).ok());
+        let expected = match field_type {
             Some(Type::Double) | Some(Type::Fixed64) | Some(Type::Sfixed64) => 1,
             Some(Type::Float) | Some(Type::Fixed32) | Some(Type::Sfixed32) => 5,
             Some(Type::Int32) | Some(Type::Sint32) | Some(Type::Int64) | Some(Type::Sint64)
             | Some(Type::Uint32) | Some(Type::Uint64) | Some(Type::Bool) | Some(Type::Enum) => 0,
             _ => 2,
         };
-        if wire != expected {
+        let repeated =
+            field.label.and_then(|label| Label::try_from(label).ok()) == Some(Label::Repeated);
+        let packable = repeated && matches!(expected, 0 | 1 | 5);
+        if !accepts_wire_type(repeated, expected, wire) {
             return Err(format!(
                 "torana sdk: field {number} in {name} has wrong wire type"
             ));
@@ -787,11 +800,28 @@ pub fn __validate_wire_message(mut bytes: &[u8], name: &str) -> Result<(), Strin
             if p.checked_add(len).ok_or("torana sdk: length overflow")? > bytes.len() {
                 return Err("torana sdk: truncated nested field".into());
             }
-            if let Some(ty) = field.type_name.as_deref() {
+            if packable {
+                validate_packed_field(&bytes[p..p + len], expected)?;
+            } else if field_type == Some(Type::Message) {
+                let ty = field.type_name.as_deref().ok_or_else(|| {
+                    format!("torana sdk: message field {number} in {name} has no type")
+                })?;
                 __validate_wire_message(&bytes[p..p + len], ty)?;
             }
         }
         let consumed = skip_wire(bytes, wire)?;
+        bytes = &bytes[consumed..];
+    }
+    Ok(())
+}
+
+fn accepts_wire_type(repeated: bool, scalar_wire: u64, actual_wire: u64) -> bool {
+    actual_wire == scalar_wire || (repeated && matches!(scalar_wire, 0 | 1 | 5) && actual_wire == 2)
+}
+
+fn validate_packed_field(mut bytes: &[u8], element_wire: u64) -> Result<(), String> {
+    while !bytes.is_empty() {
+        let consumed = skip_wire(bytes, element_wire)?;
         bytes = &bytes[consumed..];
     }
     Ok(())
@@ -1708,7 +1738,13 @@ fn cache_get_named(command: &str, key: &str) -> Result<Option<String>, HostCallE
 }
 pub fn respond_request(response: pbv1::SyntheticResponse) -> Result<(), HostCallError> {
     validate_synthetic_response(&response).map_err(HostCallError::Protocol)?;
-    host_call("env.respond_request", &response).map(|_| ())
+    host_call(
+        "env.respond_request",
+        &pbv1::RespondRequestArgs {
+            response: Some(response),
+        },
+    )
+    .map(|_| ())
 }
 
 fn validate_synthetic_response(response: &pbv1::SyntheticResponse) -> Result<(), String> {
@@ -1996,7 +2032,10 @@ where
 #[derive(Clone, PartialEq, prost::Message)]
 struct EmptyArgs {}
 pub fn plugin_config<T: serde::de::DeserializeOwned>() -> Result<T, HostCallError> {
-    let bytes = host_call("env.plugin_config", &EmptyArgs {})?;
+    let mut bytes = host_call("env.plugin_config", &EmptyArgs {})?;
+    if bytes.is_empty() {
+        bytes.extend_from_slice(b"{}");
+    }
     let value = strict_json(&bytes)
         .map_err(|e| HostCallError::Protocol(format!("plugin config is invalid JSON: {e}")))?;
     if !value.is_object() {
@@ -2541,6 +2580,65 @@ mod tests {
     }
 
     #[test]
+    fn nested_native_host_guards_restore_the_previous_transport() {
+        let outer = install_native_host(|command, _| native_value(command.as_bytes().to_vec()));
+        assert_eq!(
+            host_call("env.plugin_config", &EmptyArgs {}).unwrap(),
+            b"env.plugin_config"
+        );
+        {
+            let _inner = install_native_host(|_, _| native_value(b"inner".to_vec()));
+            assert_eq!(
+                host_call("env.plugin_config", &EmptyArgs {}).unwrap(),
+                b"inner"
+            );
+        }
+        assert_eq!(
+            host_call("env.plugin_config", &EmptyArgs {}).unwrap(),
+            b"env.plugin_config"
+        );
+        drop(outer);
+        assert!(matches!(
+            host_call("env.plugin_config", &EmptyArgs {}),
+            Err(HostCallError::Protocol(message)) if message.contains("no native host transport")
+        ));
+    }
+
+    #[test]
+    fn failed_cache_breakpoint_move_preserves_the_message() {
+        let mut message = pbv1::Message {
+            role: "user".into(),
+            blocks: vec![pbv1::RequestBlock {
+                kind: Some(pbv1::request_block::Kind::Text(pbv1::RequestTextBlock {
+                    text: "keep".into(),
+                    ..Default::default()
+                })),
+            }],
+        };
+        let before = message.clone();
+        assert_eq!(
+            move_cache_breakpoint(&mut message, 0, 1),
+            Err("block is not cache breakpoint".into())
+        );
+        assert_eq!(message, before);
+    }
+
+    #[test]
+    fn packed_numeric_payload_validation_rejects_truncation() {
+        for scalar_wire in [0, 1, 5] {
+            assert!(accepts_wire_type(true, scalar_wire, scalar_wire));
+            assert!(accepts_wire_type(true, scalar_wire, 2));
+            assert!(!accepts_wire_type(false, scalar_wire, 2));
+        }
+        assert!(validate_packed_field(&[1, 0xac, 0x02], 0).is_ok());
+        assert!(validate_packed_field(&[0x80], 0).is_err());
+        assert!(validate_packed_field(&[0; 8], 1).is_ok());
+        assert!(validate_packed_field(&[0; 7], 1).is_err());
+        assert!(validate_packed_field(&[0; 4], 5).is_ok());
+        assert!(validate_packed_field(&[0; 3], 5).is_err());
+    }
+
+    #[test]
     fn state_keys_uses_empty_args_and_host_json_shape() {
         let _guard = install_native_host(|command, arguments| {
             assert_eq!(command, "env.state_keys");
@@ -2561,6 +2659,19 @@ mod tests {
         });
         assert!(
             matches!(plugin_config::<serde_json::Value>(), Err(HostCallError::Protocol(message)) if message.contains("JSON object"))
+        );
+    }
+
+    #[test]
+    fn empty_plugin_config_reply_is_an_empty_object() {
+        let _guard = install_native_host(|command, arguments| {
+            assert_eq!(command, "env.plugin_config");
+            assert!(arguments.is_empty());
+            native_value(Vec::new())
+        });
+        assert_eq!(
+            plugin_config::<serde_json::Value>().unwrap(),
+            serde_json::json!({})
         );
     }
 

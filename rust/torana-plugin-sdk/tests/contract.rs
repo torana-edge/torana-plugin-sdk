@@ -587,7 +587,13 @@ fn plugin_config_is_strict_and_typed() {
 
 #[test]
 fn synthetic_response_accepts_text_and_function_tools_only() {
-    let _guard = torana_plugin_sdk::install_native_host(|_, _| {
+    use std::sync::{Arc, Mutex};
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let captured = seen.clone();
+    let _guard = torana_plugin_sdk::install_native_host(move |command, arguments| {
+        assert_eq!(command, "env.respond_request");
+        let decoded = pbv1::RespondRequestArgs::decode(arguments).unwrap();
+        captured.lock().unwrap().push(decoded);
         Ok(pbv1::HostCallResult {
             result: Some(pbv1::host_call_result::Result::Value(vec![])),
         }
@@ -603,7 +609,8 @@ fn synthetic_response_accepts_text_and_function_tools_only() {
         }),
         finish_reason: "stop".into(),
     };
-    assert!(torana_plugin_sdk::respond_request(text).is_ok());
+    assert!(torana_plugin_sdk::respond_request(text.clone()).is_ok());
+    assert_eq!(seen.lock().unwrap()[0].response.as_ref(), Some(&text));
     let tool = pbv1::SyntheticResponse {
         message: Some(pbv1::ResponseMessage {
             blocks: vec![pbv1::ResponseBlock {
@@ -616,7 +623,8 @@ fn synthetic_response_accepts_text_and_function_tools_only() {
         }),
         finish_reason: "tool_calls".into(),
     };
-    assert!(torana_plugin_sdk::respond_request(tool).is_ok());
+    assert!(torana_plugin_sdk::respond_request(tool.clone()).is_ok());
+    assert_eq!(seen.lock().unwrap()[1].response.as_ref(), Some(&tool));
     let bad = pbv1::SyntheticResponse {
         message: Some(pbv1::ResponseMessage {
             blocks: vec![pbv1::ResponseBlock {

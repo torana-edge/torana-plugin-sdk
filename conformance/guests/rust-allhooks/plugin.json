@@ -14,5 +14,7 @@
     {"name": "run_on_http_request"},
     {"name": "run_on_tick"}
   ],
-  "permissions": []
+  "permissions": [
+    {"name": "env.respond_request", "description": "Exercise the typed synthetic response host call"}
+  ]
 }
