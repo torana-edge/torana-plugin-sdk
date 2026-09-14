@@ -233,3 +233,20 @@ func TestModelResourceHelpersRejectMalformedHostValues(t *testing.T) {
 		})
 	}
 }
+
+func TestModelCompleteTextRefusesPartialToolProjection(t *testing.T) {
+	result := &pbv1.ModelCompleteResult{Message: &pbv1.ResponseMessage{Blocks: []*pbv1.ResponseBlock{
+		{Kind: &pbv1.ResponseBlock_Text{Text: &pbv1.ResponseTextBlock{Text: "preface"}}},
+		{Kind: &pbv1.ResponseBlock_ToolCall{ToolCall: &pbv1.ToolCall{Name: "lookup", ArgumentsJson: []byte(`{}`)}}},
+	}}}
+	raw, err := proto.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	WithTestHost(&TestHost{HostCall: func(string, []byte) ([]byte, error) { return framedValue(t, raw), nil }}, func() {
+		text, err := ModelCompleteText(&pbv1.ModelCompleteArgs{Service: "summarizer", Messages: []*pbv1.Message{{Role: "user", Blocks: []*pbv1.RequestBlock{{Kind: &pbv1.RequestBlock_Text{Text: &pbv1.RequestTextBlock{Text: "summarize"}}}}}}})
+		if err == nil || text != "" {
+			t.Fatalf("partial text projection = %q, %v", text, err)
+		}
+	})
+}

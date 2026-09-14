@@ -19,14 +19,14 @@ Generated from `capabilities.json`; run `scripts/generate-capabilities.py` after
 | `env.cache_policy` | `env.cache_policy` | `PromptCachePolicyGetArgs` | `PromptCachePolicy` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `GetPromptCachePolicy` |
 | `env.cache_set` | `env.cache_set` | `CacheSetArgs` | `empty` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `CacheSet`, `CacheSetTTL` |
 | `env.credential_get` | `env.credential_get` | `CredentialGetArgs` | `bytes` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `GetCredential` |
-| `env.emit_metric` | `env.emit_metric` | `import` | `empty` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `EmitMetric` |
+| `env.emit_metric` | `env.emit_metric` | `import` | `empty` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `EmitMetric`, `Counter`, `Histogram`, `Gauge` |
 | `env.file_append` | `env.file_append` | `FileAppendArgs` | `empty` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `AppendFile` |
 | `env.file_delete` | `env.file_delete` | `FileDeleteArgs` | `empty` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `DeleteFile` |
 | `env.file_list` | `env.file_list` | `FileListArgs` | `json-string-list` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `ListFiles` |
 | `env.file_read` | `env.file_read` | `FileReadArgs` | `bytes` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `ReadFile` |
 | `env.file_write` | `env.file_write` | `FileWriteArgs` | `empty` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `WriteFile` |
 | `env.http_request` | `env.http_request` | `OutboundHTTPRequestArgs` | `OutboundHTTPResponse` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `HTTPRequest` |
-| `env.log` | `env.log` | `import` | `empty` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `Log` |
+| `env.log` | `env.log` | `import` | `empty` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `Log`, `Debug`, `Info` |
 | `env.meta_append` | `env.meta_set` | `MetaAppendArgs` | `bytes` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `MetaAppend` |
 | `env.meta_get` | `env.meta_get` | `MetaGetArgs` | `utf8` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `MetaGet` |
 | `env.meta_set` | `env.meta_set` | `MetaSetArgs` | `empty` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `MetaSet` |

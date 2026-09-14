@@ -135,7 +135,10 @@
         "run_on_tick"
       ],
       "helpers": [
-        "EmitMetric"
+        "EmitMetric",
+        "Counter",
+        "Histogram",
+        "Gauge"
       ]
     },
     {
@@ -247,7 +250,9 @@
         "run_on_tick"
       ],
       "helpers": [
-        "Log"
+        "Log",
+        "Debug",
+        "Info"
       ]
     },
     {

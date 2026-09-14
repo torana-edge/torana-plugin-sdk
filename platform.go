@@ -88,7 +88,8 @@ func ModelComplete(request *pbv1.ModelCompleteArgs) (*pbv1.ModelCompleteResult, 
 	return &result, nil
 }
 
-// ModelCompleteText extracts the concatenated text blocks from a completion.
+// ModelCompleteText returns a text-only completion. A tool or other non-text
+// block is an error; callers needing those results must use ModelComplete.
 func ModelCompleteText(request *pbv1.ModelCompleteArgs) (string, error) {
 	result, err := ModelComplete(request)
 	if err != nil {
@@ -101,6 +102,8 @@ func ModelCompleteText(request *pbv1.ModelCompleteArgs) (string, error) {
 	for _, block := range result.Message.Blocks {
 		if text := block.GetText(); text != nil {
 			out += text.Text
+		} else {
+			return "", fmt.Errorf("torana: model completion contains a non-text block; use ModelComplete")
 		}
 	}
 	return out, nil
