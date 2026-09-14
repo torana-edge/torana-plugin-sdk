@@ -49,6 +49,32 @@ func TestTypedModelResourceStubsOwnFraming(t *testing.T) {
 	})
 }
 
+func TestMandatoryValueHelpersPreserveUnexpectedNotFound(t *testing.T) {
+	tests := []struct {
+		name, command string
+		call          func() error
+	}{
+		{"credential", "env.credential_get", func() error { _, err := sdk.GetCredential("api"); return err }},
+		{"file", "env.file_read", func() error { _, err := sdk.ReadFile("events.log"); return err }},
+		{"pricing", "env.model_pricing", func() error { _, err := sdk.GetModelPricing("target"); return err }},
+		{"cache policy", "env.cache_policy", func() error { _, err := sdk.GetPromptCachePolicy("target"); return err }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := sdktest.New(t)
+			h.StubHostCall(tc.command, func(string) (string, error) {
+				return sdktest.HostResultError(pbv1.ErrorCode_ERROR_CODE_NOT_FOUND, "unexpected absence"), nil
+			})
+			h.Run(func() {
+				var refusal *sdk.HostCallRefusalError
+				if err := tc.call(); !errors.As(err, &refusal) || refusal.Code != pbv1.ErrorCode_ERROR_CODE_NOT_FOUND {
+					t.Fatalf("error = %v", err)
+				}
+			})
+		})
+	}
+}
+
 // Egress refusals are classified: the code survives programmatically so a
 // plugin can branch on the class (retry / operator / plugin fix / host
 // defect) without matching prose. Every known code is pinned through

@@ -316,8 +316,55 @@ func TestMalformedOriginalRequestReportsNotOK(t *testing.T) {
 		return sdktest.HostResultValue([]byte{0xff, 0xff, 0xff, 0xff}), nil
 	})
 	h.Run(func() {
-		if _, ok, _ := sdk.OriginalRequest(); ok {
-			t.Fatal("a malformed original request decoded as ok")
+		if _, ok, err := sdk.OriginalRequest(); ok || err == nil || !strings.Contains(err.Error(), "decode original request") {
+			t.Fatalf("malformed original request: ok=%v err=%v", ok, err)
+		}
+	})
+}
+
+func TestOriginalsPreserveClassifiedRefusals(t *testing.T) {
+	for _, command := range []string{"env.original_request", "env.original_response"} {
+		t.Run(command, func(t *testing.T) {
+			h := sdktest.New(t)
+			h.StubHostCall(command, func(string) (string, error) {
+				return sdktest.HostResultError(pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "denied"), nil
+			})
+			h.Run(func() {
+				var err error
+				if command == "env.original_request" {
+					_, _, err = sdk.OriginalRequest()
+				} else {
+					_, _, err = sdk.OriginalResponse()
+				}
+				var refusal *sdk.HostCallRefusalError
+				if !errors.As(err, &refusal) || refusal.Code != pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
+					t.Fatalf("refusal = %v", err)
+				}
+			})
+		})
+	}
+}
+
+func TestOriginalRequestRejectsUnknownWireFields(t *testing.T) {
+	h := sdktest.New(t)
+	h.StubHostCall("env.original_request", func(string) (string, error) {
+		return sdktest.HostResultValue([]byte{0xa0, 0x06, 0x01}), nil
+	})
+	h.Run(func() {
+		if _, ok, err := sdk.OriginalRequest(); ok || err == nil || !strings.Contains(err.Error(), "unknown field") {
+			t.Fatalf("closed decode: ok=%v err=%v", ok, err)
+		}
+	})
+}
+
+func TestStateScanRequiresConfiguredStore(t *testing.T) {
+	h := sdktest.New(t)
+	h.StateConfigured = false
+	h.Run(func() {
+		_, err := sdk.StateScan("", "", 1)
+		var refusal *sdk.HostCallRefusalError
+		if !errors.As(err, &refusal) || refusal.Code != pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED {
+			t.Fatalf("StateScan refusal = %v", err)
 		}
 	})
 }

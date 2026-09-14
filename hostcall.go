@@ -181,6 +181,20 @@ func checkedHostCallValue(cmd string, args proto.Message) ([]byte, bool, error) 
 	return value, true, nil
 }
 
+// checkedHostCallRequired is for commands whose public contract has no
+// absence return. It preserves every refusal, including NOT_FOUND, rather than
+// silently turning an unexpected absence into an empty successful value.
+func checkedHostCallRequired(cmd string, args proto.Message) ([]byte, error) {
+	value, herr, err := hostCallChecked(cmd, args)
+	if err != nil {
+		return nil, err
+	}
+	if herr != nil {
+		return nil, fmt.Errorf("torana: %s: %w", cmd, classifiedRefusal(herr))
+	}
+	return value, nil
+}
+
 // mustHostCall is the explicitly named panic convenience for code that has no
 // useful recovery path. Checked public helpers use checkedHostCall instead.
 func mustHostCall(cmd string, args proto.Message) {

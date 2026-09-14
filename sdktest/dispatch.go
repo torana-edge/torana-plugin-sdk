@@ -152,6 +152,24 @@ func (r *Request) finalize(err error) {
 			last[c.Command] = i
 		}
 	}
+	// Edge retains the first respond verdict for diagnostics, but request
+	// dispatch serves the block whenever both were recorded. Effective getters
+	// describe that client-visible outcome; AcceptedCalls still exposes the
+	// retained successful respond call.
+	blocked := false
+	for i := range r.accepted {
+		if r.accepted[i].Command == "env.block_request" && r.accepted[i].Effective {
+			blocked = true
+			break
+		}
+	}
+	if blocked {
+		for i := range r.accepted {
+			if r.accepted[i].Command == "env.respond_request" {
+				r.accepted[i].Effective = false
+			}
+		}
+	}
 	for _, entry := range r.accepted {
 		index := entry.index
 		r.h.calls[index].Effective = entry.Effective

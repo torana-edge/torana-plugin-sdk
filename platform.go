@@ -10,7 +10,7 @@ import (
 // GetCredential resolves one credential slot declared by this plugin and
 // bound by the operator. The returned bytes must be treated as secret.
 func GetCredential(slot string) ([]byte, error) {
-	value, _, err := checkedHostCallValue("env.credential_get", &pbv1.CredentialGetArgs{Slot: slot})
+	value, err := checkedHostCallRequired("env.credential_get", &pbv1.CredentialGetArgs{Slot: slot})
 	return append([]byte(nil), value...), err
 }
 
@@ -21,7 +21,7 @@ func AppendFile(path string, data []byte) error {
 
 // ReadFile reads a declared plugin-private file up to the host-approved limit.
 func ReadFile(path string) ([]byte, error) {
-	value, _, err := checkedHostCallValue("env.file_read", &pbv1.FileReadArgs{Path: path})
+	value, err := checkedHostCallRequired("env.file_read", &pbv1.FileReadArgs{Path: path})
 	return append([]byte(nil), value...), err
 }
 
@@ -32,7 +32,7 @@ func WriteFile(path string, data []byte) error {
 
 // ListFiles lists declared files under prefix in stable lexical order.
 func ListFiles(prefix string) ([]string, error) {
-	value, _, err := checkedHostCallValue("env.file_list", &pbv1.FileListArgs{Prefix: prefix})
+	value, err := checkedHostCallRequired("env.file_list", &pbv1.FileListArgs{Prefix: prefix})
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +50,7 @@ func DeleteFile(path string) error {
 
 // HTTPRequest performs one request through an operator-approved endpoint slot.
 func HTTPRequest(request *pbv1.OutboundHTTPRequestArgs) (*pbv1.OutboundHTTPResponse, error) {
-	value, _, err := checkedHostCallValue("env.http_request", request)
+	value, err := checkedHostCallRequired("env.http_request", request)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +73,7 @@ func HTTPRequest(request *pbv1.OutboundHTTPRequestArgs) (*pbv1.OutboundHTTPRespo
 // The result contains a canonical ResponseMessage plus provider-reported model,
 // finish reason, and usage when available.
 func ModelComplete(request *pbv1.ModelCompleteArgs) (*pbv1.ModelCompleteResult, error) {
-	value, _, err := checkedHostCallValue("env.model_complete", request)
+	value, err := checkedHostCallRequired("env.model_complete", request)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +115,7 @@ func ModelCompleteText(request *pbv1.ModelCompleteArgs) (string, error) {
 // GetModelPricing resolves one operator-bound pricing resource. Pointer fields
 // preserve absent (unknown) versus explicitly-zero rates.
 func GetModelPricing(resource string) (*pbv1.ModelPricing, error) {
-	value, _, err := checkedHostCallValue("env.model_pricing", &pbv1.ModelPricingGetArgs{Resource: resource})
+	value, err := checkedHostCallRequired("env.model_pricing", &pbv1.ModelPricingGetArgs{Resource: resource})
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +140,7 @@ func GetPromptCachePolicy(resource string) (*pbv1.PromptCachePolicy, error) {
 	if err := request.Validate(); err != nil {
 		return nil, err
 	}
-	value, _, err := checkedHostCallValue("env.cache_policy", request)
+	value, err := checkedHostCallRequired("env.cache_policy", request)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +165,7 @@ func GetResourceInfo(kind, name string) (*pbv1.ResourceInfo, error) {
 	if err := request.Validate(); err != nil {
 		return nil, err
 	}
-	raw, _, err := checkedHostCallValue("env.resource_info", request)
+	raw, err := checkedHostCallRequired("env.resource_info", request)
 	if err != nil {
 		return nil, err
 	}

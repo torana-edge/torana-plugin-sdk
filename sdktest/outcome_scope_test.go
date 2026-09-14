@@ -132,8 +132,17 @@ func TestNativeVerdictPriorityAndIdentityRollback(t *testing.T) {
 	if result := r.BeforeRequest(&pb.ChatRequest{}); result.Err != nil {
 		t.Fatal(result.Err)
 	}
-	if len(r.AcceptedCalls()) != 6 || len(r.EffectiveBlockCalls()) != 1 || len(r.EffectiveRespondCalls()) != 1 || len(r.EffectiveIdentityCalls()) != 1 {
+	if len(r.AcceptedCalls()) != 6 || len(r.EffectiveBlockCalls()) != 1 || len(r.EffectiveRespondCalls()) != 0 || len(r.EffectiveIdentityCalls()) != 1 {
 		t.Fatalf("priority not applied: %+v", r.AcceptedCalls())
+	}
+	respondAccepted := 0
+	for _, call := range r.AcceptedCalls() {
+		if call.Command == "env.respond_request" {
+			respondAccepted++
+		}
+	}
+	if respondAccepted != 2 {
+		t.Fatalf("retained respond calls = %d, want 2", respondAccepted)
 	}
 	if got := h.EffectiveBlockCalls(); len(got) != 1 {
 		t.Fatalf("aggregate effective blocks = %d, want one winner: %+v", len(got), got)

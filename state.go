@@ -106,7 +106,7 @@ func StateDelete(key string) error {
 // StateKeys lists this plugin's durable keys, sorted. Useful when a plugin
 // stores one key per conversation and must enumerate them on a tick.
 func StateKeys() ([]string, error) {
-	raw, _, err := checkedHostCallValue("env.state_keys", nil)
+	raw, err := checkedHostCallRequired("env.state_keys", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +206,7 @@ func StateGetVersioned(key string) (*pbv1.StateValue, bool, error) {
 // version read by StateGetVersioned. Applied=false is a clean conflict; reread
 // before retrying because versions are opaque and non-reusable.
 func StateCompareAndSet(key, value string, expectedVersion *string) (*pbv1.StateMutationResult, error) {
-	raw, _, err := checkedHostCallValue("env.state_compare_and_set", &pbv1.StateCompareAndSetArgs{Key: key, Value: value, ExpectedVersion: expectedVersion})
+	raw, err := checkedHostCallRequired("env.state_compare_and_set", &pbv1.StateCompareAndSetArgs{Key: key, Value: value, ExpectedVersion: expectedVersion})
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +223,7 @@ func StateCompareAndSet(key, value string, expectedVersion *string) (*pbv1.State
 // StateCompareAndDelete removes key only at expectedVersion. Applied=false is
 // a clean conflict or absence, not a host-call failure.
 func StateCompareAndDelete(key, expectedVersion string) (*pbv1.StateMutationResult, error) {
-	raw, _, err := checkedHostCallValue("env.state_compare_and_delete", &pbv1.StateCompareAndDeleteArgs{Key: key, ExpectedVersion: expectedVersion})
+	raw, err := checkedHostCallRequired("env.state_compare_and_delete", &pbv1.StateCompareAndDeleteArgs{Key: key, ExpectedVersion: expectedVersion})
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +240,7 @@ func StateCompareAndDelete(key, expectedVersion string) (*pbv1.StateMutationResu
 // StateScan returns a stable lexical page for prefix. Pass the returned cursor
 // to continue; limit must be within the ABI bound of 1..256.
 func StateScan(prefix, cursor string, limit uint32) (*pbv1.StateScanResult, error) {
-	raw, _, err := checkedHostCallValue("env.state_scan", &pbv1.StateScanArgs{Prefix: prefix, Cursor: cursor, Limit: limit})
+	raw, err := checkedHostCallRequired("env.state_scan", &pbv1.StateScanArgs{Prefix: prefix, Cursor: cursor, Limit: limit})
 	if err != nil {
 		return nil, err
 	}

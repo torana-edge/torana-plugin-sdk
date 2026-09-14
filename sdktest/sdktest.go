@@ -855,6 +855,8 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 		h.cache[a.Key] = a.Value
 		if a.TtlMs != nil {
 			h.cacheExpiry[a.Key] = h.now() + int64(*a.TtlMs)
+		} else {
+			delete(h.cacheExpiry, a.Key)
 		}
 		return hostCallResultValue(nil), nil
 	case "env.cache_delete":
@@ -888,6 +890,8 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 		h.sharedCache[a.Key] = a.Value
 		if a.TtlMs != nil {
 			h.sharedExpiry[a.Key] = h.now() + int64(*a.TtlMs)
+		} else {
+			delete(h.sharedExpiry, a.Key)
 		}
 		return hostCallResultValue(nil), nil
 	case "env.shared_cache_delete":
@@ -989,6 +993,9 @@ func (h *Harness) builtinTyped(cmd string, args []byte) ([]byte, error) {
 		var a pbv1.StateScanArgs
 		if err := proto.Unmarshal(args, &a); err != nil || a.Validate() != nil {
 			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid StateScanArgs"), nil
+		}
+		if !h.StateConfigured {
+			return hostCallResultError(pbv1.ErrorCode_ERROR_CODE_NOT_CONFIGURED, "state unavailable"), nil
 		}
 		entries := make([]*pbv1.StateEntry, 0)
 		for k, v := range h.state {

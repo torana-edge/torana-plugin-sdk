@@ -49,6 +49,37 @@ func TestCacheSetThenGetReturnsTheStoredValue(t *testing.T) {
 	})
 }
 
+func TestUntimedCacheOverwriteClearsPreviousExpiry(t *testing.T) {
+	for _, store := range []struct {
+		name   string
+		setTTL func(string, string, uint64) error
+		set    func(string, string) error
+		get    func(string) (string, bool, error)
+	}{
+		{"private", sdk.CacheSetTTL, sdk.CacheSet, sdk.CacheGet},
+		{"shared", sdk.SharedCacheSetTTL, sdk.SharedCacheSet, sdk.SharedCacheGet},
+	} {
+		t.Run(store.name, func(t *testing.T) {
+			h := sdktest.New(t).SetNow(100)
+			h.Run(func() {
+				if err := store.setTTL("k", "timed", 10); err != nil {
+					t.Fatal(err)
+				}
+				if err := store.set("k", "permanent"); err != nil {
+					t.Fatal(err)
+				}
+			})
+			h.SetNow(111)
+			h.Run(func() {
+				got, found, err := store.get("k")
+				if err != nil || !found || got != "permanent" {
+					t.Fatalf("overwrite = %q, found=%v err=%v", got, found, err)
+				}
+			})
+		})
+	}
+}
+
 func TestSharedCacheSetThenGetUsesExplicitCommands(t *testing.T) {
 	h := sdktest.New(t)
 	h.Run(func() {
