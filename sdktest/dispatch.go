@@ -25,6 +25,7 @@ type Request struct {
 	calls          []HostCallEntry
 	accepted       []HostCallEntry
 	callbackFailed bool
+	invocationHook string
 }
 
 // NewRequest starts an explicit request scope for a related hook chain.
@@ -65,35 +66,40 @@ func (r *Request) AcceptedCalls() []HostCallEntry { return append([]HostCallEntr
 func (r *Request) EffectiveBlockCalls() []HostCallEntry {
 	var out []HostCallEntry
 	for _, c := range r.accepted {
-		if c.Command == "env.block_request" {
+		if c.Command == "env.block_request" && c.Effective {
 			out = append(out, c)
 		}
 	}
 	return out
 }
 func (r *Request) EffectiveRespondCalls() []HostCallEntry {
-	if r.callbackFailed {
-		return nil
-	}
 	var out []HostCallEntry
 	for _, c := range r.accepted {
-		if c.Command == "env.respond_request" {
+		if c.Command == "env.respond_request" && c.Effective {
 			out = append(out, c)
 		}
 	}
 	return out
 }
 func (r *Request) EffectiveRouteCalls() []HostCallEntry {
-	if r.callbackFailed {
-		return nil
-	}
 	var out []HostCallEntry
 	for _, c := range r.accepted {
-		if c.Command == "env.route_request" {
+		if c.Command == "env.route_request" && c.Effective {
 			out = append(out, c)
 		}
 	}
 	return out
+}
+
+func (r *Request) finalize(start int, err error) {
+	if err == nil {
+		return
+	}
+	for i := start; i < len(r.accepted); i++ {
+		if r.accepted[i].Command == "env.respond_request" || r.accepted[i].Command == "env.route_request" {
+			r.accepted[i].Effective = false
+		}
+	}
 }
 
 // RequestResult is the outcome of a before-request dispatch.
@@ -114,6 +120,9 @@ func (r *Request) BeforeRequest(req *pbv1.ChatRequest) RequestResult {
 	if !r.h.hookAllowed("run_before_request") {
 		return RequestResult{Err: fmt.Errorf("sdktest: hook run_before_request is not declared")}
 	}
+	if !r.h.hookAllowed("run_before_request") {
+		return RequestResult{Err: fmt.Errorf("sdktest: hook run_before_request is not declared")}
+	}
 	h := r.h
 	h.t.Helper()
 	if sdk.RegisteredBeforeRequest() == nil {
@@ -125,11 +134,14 @@ func (r *Request) BeforeRequest(req *pbv1.ChatRequest) RequestResult {
 		RequestId:        r.requestID,
 		Payload:          &pbv1.HookInput_ChatRequest{ChatRequest: req},
 	}
+	r.invocationHook = "run_before_request"
+	start := len(r.accepted)
 	var raw []byte
 	var err error
 	r.with(func() { raw, err = sdk.DispatchHook(in) })
 	res := RequestResult{Err: err, PassedThrough: err == nil && len(raw) == 0}
 	r.callbackFailed = err != nil
+	r.finalize(start, err)
 	if err != nil || len(raw) == 0 {
 		return res
 	}
@@ -169,6 +181,9 @@ func (r *Request) AfterResponse(resp *pbv1.ChatResponse, mutable bool) ResponseR
 	if !r.h.hookAllowed("run_after_response") {
 		return ResponseResult{Err: fmt.Errorf("sdktest: hook run_after_response is not declared")}
 	}
+	if !r.h.hookAllowed("run_after_response") {
+		return ResponseResult{Err: fmt.Errorf("sdktest: hook run_after_response is not declared")}
+	}
 	h := r.h
 	h.t.Helper()
 	if sdk.RegisteredAfterResponse() == nil {
@@ -182,11 +197,14 @@ func (r *Request) AfterResponse(resp *pbv1.ChatResponse, mutable bool) ResponseR
 			Mutable:  mutable,
 		}},
 	}
+	r.invocationHook = "run_after_response"
+	start := len(r.accepted)
 	var raw []byte
 	var err error
 	r.with(func() { raw, err = sdk.DispatchHook(in) })
 	res := ResponseResult{Err: err, Mutable: mutable, PassedThrough: err == nil && len(raw) == 0}
 	r.callbackFailed = err != nil
+	r.finalize(start, err)
 	if err != nil || len(raw) == 0 {
 		return res
 	}
@@ -223,6 +241,9 @@ func (r *Request) StreamChunk(ev *pbv1.StreamEvent) StreamResult {
 	if !r.h.hookAllowed("run_on_stream_chunk") {
 		return StreamResult{Err: fmt.Errorf("sdktest: hook run_on_stream_chunk is not declared")}
 	}
+	if !r.h.hookAllowed("run_on_stream_chunk") {
+		return StreamResult{Err: fmt.Errorf("sdktest: hook run_on_stream_chunk is not declared")}
+	}
 	h := r.h
 	h.t.Helper()
 	if sdk.RegisteredStreamChunk() == nil {
@@ -233,11 +254,14 @@ func (r *Request) StreamChunk(ev *pbv1.StreamEvent) StreamResult {
 		RequestId:        r.requestID,
 		Payload:          &pbv1.HookInput_StreamEvent{StreamEvent: ev},
 	}
+	r.invocationHook = "run_on_stream_chunk"
+	start := len(r.accepted)
 	var raw []byte
 	var err error
 	r.with(func() { raw, err = sdk.DispatchHook(in) })
 	res := StreamResult{Err: err, PassedThrough: err == nil && len(raw) == 0}
 	r.callbackFailed = err != nil
+	r.finalize(start, err)
 	if err != nil || len(raw) == 0 {
 		return res
 	}
@@ -272,6 +296,9 @@ func (h *Harness) HTTPRequest(req *pbv1.HttpRequest) HTTPResult {
 
 // HTTPRequest dispatches run_on_http_request in this request scope.
 func (r *Request) HTTPRequest(req *pbv1.HttpRequest) HTTPResult {
+	if !r.h.hookAllowed("run_on_http_request") {
+		return HTTPResult{Err: fmt.Errorf("sdktest: hook run_on_http_request is not declared")}
+	}
 	if !r.h.hookAllowed("run_on_http_request") {
 		return HTTPResult{Err: fmt.Errorf("sdktest: hook run_on_http_request is not declared")}
 	}
@@ -316,6 +343,9 @@ func (h *Harness) Tick(req *pbv1.TickRequest) TickResult {
 
 // Tick dispatches run_on_tick in this request scope.
 func (r *Request) Tick(req *pbv1.TickRequest) TickResult {
+	if !r.h.hookAllowed("run_on_tick") {
+		return TickResult{Err: fmt.Errorf("sdktest: hook run_on_tick is not declared")}
+	}
 	if !r.h.hookAllowed("run_on_tick") {
 		return TickResult{Err: fmt.Errorf("sdktest: hook run_on_tick is not declared")}
 	}

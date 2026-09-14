@@ -75,9 +75,10 @@ type MetricEntry struct {
 // to prove a plugin asked for what you expect — and, just as usefully, that it
 // did not ask for anything it never declared a permission for.
 type HostCallEntry struct {
-	Command string
-	Args    string
-	Result  string
+	Command   string
+	Args      string
+	Result    string
+	Effective bool
 }
 
 // Harness is a fake Torana host. Create one with New.
@@ -512,6 +513,17 @@ func (h *Harness) State(key string) (string, bool) {
 func (h *Harness) hostCallBytes(cmd string, args []byte) ([]byte, error) {
 	h.mu.Lock()
 	stub := h.stubs[cmd]
+	if h.active != nil && h.active.invocationHook != "" {
+		spec, ok := sdk.Command(cmd)
+		if !ok || !containsString(spec.Hooks, h.active.invocationHook) {
+			denied := []byte(HostResultError(pbv1.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "command unavailable in this hook"))
+			entry := HostCallEntry{Command: cmd, Args: string(args), Result: string(denied)}
+			h.calls = append(h.calls, entry)
+			h.active.calls = append(h.active.calls, entry)
+			h.mu.Unlock()
+			return denied, nil
+		}
+	}
 	if h.permissions != nil {
 		permission, ok := sdk.CommandPermission(cmd)
 		if !ok || !h.permissions[permission] {
@@ -541,7 +553,7 @@ func (h *Harness) hostCallBytes(cmd string, args []byte) ([]byte, error) {
 			return nil, err
 		}
 		h.mu.Lock()
-		entry := HostCallEntry{Command: cmd, Args: argsStr, Result: res}
+		entry := HostCallEntry{Command: cmd, Args: argsStr, Result: res, Effective: hostResultAccepted([]byte(res))}
 		h.calls = append(h.calls, entry)
 		if h.active != nil {
 			h.active.calls = append(h.active.calls, entry)
@@ -561,7 +573,7 @@ func (h *Harness) hostCallBytes(cmd string, args []byte) ([]byte, error) {
 		return nil, err
 	}
 	h.mu.Lock()
-	entry := HostCallEntry{Command: cmd, Args: argsStr, Result: string(raw)}
+	entry := HostCallEntry{Command: cmd, Args: argsStr, Result: string(raw), Effective: hostResultAccepted(raw)}
 	h.calls = append(h.calls, entry)
 	if h.active != nil {
 		h.active.calls = append(h.active.calls, entry)
@@ -577,12 +589,21 @@ func (h *Harness) hostCallBytes(cmd string, args []byte) ([]byte, error) {
 }
 
 func hostResultAccepted(raw []byte) bool {
-	var r pbv1.HostCallResult
-	if proto.Unmarshal(raw, &r) != nil {
+	r, err := pbv1.DecodeHostCallResult(raw)
+	if err != nil {
 		return false
 	}
 	_, ok := r.Result.(*pbv1.HostCallResult_Value)
 	return ok
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 func (h *Harness) AcceptedCalls() []HostCallEntry {
 	h.mu.Lock()
