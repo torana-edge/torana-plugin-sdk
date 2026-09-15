@@ -188,9 +188,9 @@ it may spend their money.
 
 ## 6. Prompt-Cache Compliance
 
-Provider prompt caching bills cached input tokens at ~10% of full price — it is
-the single biggest cost lever an agent session has, and a plugin can silently
-destroy it. Two rules keep a plugin compliant:
+Provider prompt caching can discount repeated input, but rates, cache lifetimes
+and write charges depend on the provider and model. A plugin that changes a
+cached prefix can erase that benefit. Two rules preserve cache identity:
 
 **1. Never strip cache breakpoints.** Cache markers are `RequestCacheBreakpoint`
 blocks at explicit positions in the ordered message body (Anthropic
@@ -241,11 +241,14 @@ consumed. Keep it exact unless an explicit rule opts a recoverable tool into
 deterministic `first_pass` reduction. Model-based compaction must always wait
 for at least one exact exposure.
 
-Unknown tools, mutation outputs, and failures default to exact. Historical
-source reads need a recent exact window and a deterministic recovery marker;
-economically gated transformations must be assessed as one batch from the
-earliest changed item. Reuse the policy and cache-key helpers in `plugin-sdk`
-rather than inventing plugin-specific matching or call-ID-only keys. See
+Unknown tools default to exact; mutation outputs and failures remain exact.
+Current official policies are explicit: `exact`, `deterministic`, and either
+`keyword` or `model`, depending on the compactor. There is no automatic
+three-turn source-reading window. Keep source-code reads under explicit
+`exact` rules when later edits need the original text; broad non-exact rules
+can otherwise select them. Assess economically gated transformations as one
+batch from the earliest changed item. Reuse the SDK policy and cache-key
+helpers rather than inventing plugin-specific matching or call-ID-only keys. See
 [COMPACTION.md](https://github.com/torana-edge/torana-edge/blob/main/docs/COMPACTION.md) for the public contract.
 
 ### Explicit tool failures

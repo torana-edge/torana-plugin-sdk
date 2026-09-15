@@ -66,9 +66,8 @@ not merely two crates that happen to compile.
 
 ## Recover Rust publication without replacing the GitHub release
 
-SDK v0.5.0's GitHub release and Go module were published, but its Rust upload
-failed because `CARGO_REGISTRY_TOKEN` was empty. This is a distribution failure,
-not a reason to change the already-published tag or regenerate release assets.
+If a GitHub release succeeds but the Rust upload fails, recover that
+distribution channel without moving the tag or regenerating release assets.
 The Edge Rust scaffold uses an exact Git revision and works independently of
 crates.io publication.
 
@@ -77,10 +76,10 @@ crates.io publication.
    means nothing was published. See [Cargo's publish behavior](https://doc.rust-lang.org/cargo/commands/cargo-publish.html).
 2. Add or repair the repository Actions secret described above. Ensure the
    crates.io account can publish this crate and has completed email verification.
-3. Once `publish-rust.yml` is on the default branch, dispatch the existing tag:
+3. Dispatch `publish-rust.yml` from the default branch for the existing tag:
 
    ```bash
-   gh workflow run publish-rust.yml --repo torana-edge/torana-plugin-sdk -f tag=v0.5.0
+   gh workflow run publish-rust.yml --repo torana-edge/torana-plugin-sdk -f tag=vX.Y.Z
    ```
 
    The recovery workflow requires an existing published `vX.Y.Z` GitHub
