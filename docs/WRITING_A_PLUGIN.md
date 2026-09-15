@@ -841,7 +841,7 @@ structured model call in [`examples/authoring-go`](../examples/authoring-go).
 The maintained Rust guest is [`examples/rust-logger`](../examples/rust-logger),
 and the compiled [all-hooks guest](../conformance/guests/rust-allhooks) pins all
 five default method signatures.
-Run `scripts/check-doc-examples.sh` after changing either guide or SDK surface.
+Run `scripts/check-doc-examples.sh` after changing the example code or SDK surface.
 
 ---
 
