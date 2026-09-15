@@ -1,73 +1,64 @@
 # Torana Plugin SDK
 
-The versioned Go and Rust SDKs for Torana WASM Plugin ABI v1.
+Write a plugin once. Use it across the coding harnesses and supported model
+APIs you route through [Torana](https://github.com/torana-edge/torana-edge).
 
-SDK **v0.5.0** implements ABI major 1, contract revision 1. The SDK package
-version, ABI contract, and Edge binary release are separate version numbers.
-Go consumers use the module tag; Edge's Rust scaffold pins the matching source
-commit with `git` and `rev`, so authoring does not depend on crates.io availability.
-For publishing and recovery, see [RELEASING.md](RELEASING.md).
+The Go and Rust SDKs give your plugin a shared request/response format, typed
+hooks, and helpers for safe transformations. Torana handles provider parsing,
+WASM isolation and operator-approved resources.
+
+## Build your first plugin
+
+With Torana installed:
+
+```bash
+torana plugin new my-plugin                 # Go
+torana plugin new my-rust-plugin --language rust
+```
+
+Choose one and follow [Your first plugin](docs/FIRST_PLUGIN.md): build, inspect,
+approve, enable, and see it handle a request. You do not need to fork this repo
+or register a plugin to share it.
+
+## Find the right guide
+
+| You want to… | Read |
+| --- | --- |
+| Get a plugin running | [First plugin](docs/FIRST_PLUGIN.md) |
+| Add hooks, settings, resources or tests | [Authoring reference](docs/WRITING_A_PLUGIN.md) |
+| Understand mutation, streaming and cache safety | [Plugin semantics](docs/PLUGIN_SEMANTICS.md) |
+| Implement an SDK or inspect the ABI | [WASM contract](docs/WASM_PLUGIN_GUIDE.md) |
+| Look up permissions | [Capability reference](capabilities-reference.md) |
+| Work in Rust | [Rust SDK](rust/torana-plugin-sdk/README.md) |
+| Find working plugins to learn from | [Official plugins](https://github.com/torana-edge/torana-plugins) |
+
+Plugins have no ambient filesystem or sockets. Files, HTTP endpoints, model
+services, pricing and credentials must be declared and approved for the exact
+bundle. Private cache entries belong to one plugin; cross-plugin exchange
+requires separate shared-cache permissions.
+
+For optional JSON operations exposed to agents, see
+[Add agent-facing operations](docs/AGENT_OPERATIONS.md).
+
+## Compatibility
+
+SDK **v0.5.0** implements ABI major **1**, contract revision **1**. SDK package
+versions and Edge releases are separate. Use the SDK pinned by your target
+host; `torana plugin new` does this for you. Go uses the module tag. Rust uses
+an exact Git revision and does not depend on crates.io publication.
+
+## Contributing
 
 ```bash
 go test ./...
-GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o plugin.wasm ./examples/go-logger
+./scripts/check-doc-examples.sh
 ```
 
-**`-buildmode=c-shared` is not optional.** Without it Go produces a *command*
-module: the host instantiates it, `main()` runs to completion, and the module
-exits before a single hook is called. The hooks are still exported and
-instantiation still reports success — wazero treats a clean exit as one — so the
-plugin loads and is pooled. Every call against it then fails with
-`module closed with exit_code(0)`, and the operator's `failure_mode` decides
-what happens to the request.
+The example check executes maintained Go recipes and compiles the Rust
+examples; it is not a test of every prose snippet. Go WASM plugins require
+reactor mode (`-buildmode=c-shared`), which `torana plugin build` supplies.
 
-So it is not silent, but it fails on every request with an error that names
-nothing you did wrong. Torana needs a *reactor* module that stays resident and
-waits to be called. See
-[docs/PLUGIN_SEMANTICS.md](docs/PLUGIN_SEMANTICS.md).
-
-Use the Go package as `github.com/torana-edge/torana-plugin-sdk` and the
-protobuf API as `github.com/torana-edge/torana-plugin-sdk/pb/v1`. Go guests
-export the v1 surface (`abi_version`, `run_hook`, `supported_hooks`). Declare
-`"abi_version": "v1"` in `plugin.json`; generated guests export the exact
-contract value `(1 << 32) | 1` through `abi_version()`.
-
-The Rust crate in `rust/torana-plugin-sdk` exports the same ABI surface. Its
-logger and all-hooks guest run through the shared host conformance harness in
-CI, so Rust support is exercised as an executable contract rather than only a
-compile example.
-
-After changing the ABI, regenerate the checked-in Go bindings with
-`./scripts/generate-go.sh`, then run the conformance suite.
-
-Run `./scripts/check-doc-examples.sh` to compile the maintained Rust author
-example and execute the Go author recipes against the native host harness.
-
-Plugins have no ambient filesystem or sockets. Capability-scoped helpers expose
-operator-bound credentials, plugin-private logical files, exact-origin HTTP
-endpoints, model services, and pricing resources in both Go and Rust. A
-manifest must declare each resource and the operator must approve the exact
-bundle before the host call succeeds. Model-service bindings—not guest code—own
-provider URLs, models, credentials, and hard budgets.
-
-## Documentation
-
-| Guide | For |
-| --- | --- |
-| [Writing a plugin](docs/WRITING_A_PLUGIN.md) | Start here — scaffold, build, install, activate |
-| [Plugin semantics and gotchas](docs/PLUGIN_SEMANTICS.md) | Hook behaviour, protobuf decoding, prompt-cache and tool-output safety |
-| [Implementing the WASM contract](docs/WASM_PLUGIN_GUIDE.md) | **AI agents and humans** writing a plugin or an SDK from scratch — the boundary, and why every mistake there fails silently |
-
-Official plugins built on this SDK live in
-[torana-plugins](https://github.com/torana-edge/torana-plugins). The proxy itself is
-[torana-edge](https://github.com/torana-edge/torana-edge).
-
-## Cache namespaces
-
-`env.cache_get` and `env.cache_set` are private to the executing plugin. Two
-plugins using the same key cannot observe or overwrite each other's values.
-
-Intentional cross-plugin exchange uses the separately approved
-`env.shared_cache_get` / `env.shared_cache_set` capabilities through
-`sdk.SharedCacheGet` / `sdk.SharedCacheSet`. Private cache grants never imply
-shared-cache access.
+Both languages run compiled guests through Edge's conformance harness. ABI
+changes need matching Go/Rust helpers, generated bindings, host enforcement
+and cross-repository tests. Read [AGENTS.md](AGENTS.md) for repository
+contribution boundaries and [RELEASING.md](RELEASING.md) for release procedures.

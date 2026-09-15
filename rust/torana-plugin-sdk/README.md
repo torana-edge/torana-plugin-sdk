@@ -1,68 +1,54 @@
 # Torana Plugin SDK for Rust
 
-Rust bindings, safe memory plumbing, typed host-call results, and a single-hook
-dispatcher for Torana's WASM Plugin ABI v1. The crate requires Rust 1.85 or
-newer and `protoc`.
+Build a Torana plugin in Rust without writing provider-specific request
+parsers. Implement the typed `Plugin` trait, choose your hooks, and let the
+SDK handle WASM memory, protobuf framing and classified host-call errors.
 
-Observability uses typed `LogLevel` and `MetricKind` values with the
-`debug`, `info`, `counter`, `histogram`, and `gauge` helpers. These map to the
-ABI v1 `env.log` and `env.emit_metric` imports and are best effort: the void
-imports cannot acknowledge delivery or report a missing permission.
-
-Add the crate and build for WASI Preview 1:
+Start with [your first plugin](../../docs/FIRST_PLUGIN.md). Rust 1.85+,
+`protoc`, and the `wasm32-wasip1` target are required.
 
 ```toml
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-torana-plugin-sdk = { git = "https://github.com/torana-edge/torana-plugin-sdk", tag = "v0.5.0", version = "=0.5.0" }
+torana-plugin-sdk = { git = "https://github.com/torana-edge/torana-plugin-sdk", rev = "ad98c6d3467f628dd2f630c054715f8b347daa29", version = "=0.5.0" }
 ```
 
-The tag and exact package version deliberately agree. This path works directly
-from the signed GitHub release even when crates.io publication is unavailable.
-After `torana-plugin-sdk` 0.5.0 is published to crates.io, registry consumers
-may use `torana-plugin-sdk = "=0.5.0"`.
+Keep the exact revision and your reviewed Cargo.lock. This Git dependency
+works independently of crates.io publication.
+
+```rust
+use torana_plugin_sdk::{export_plugin_v1, pbv1, Plugin, RequestResult, HOOK_BEFORE_REQUEST};
+
+struct MyPlugin;
+impl Plugin for MyPlugin {
+    const SUPPORTED_HOOKS: u32 = HOOK_BEFORE_REQUEST;
+    fn before_request(_: pbv1::ChatRequest) -> Result<RequestResult, String> {
+        Ok(RequestResult::pass())
+    }
+}
+export_plugin_v1!(MyPlugin);
+```
 
 ```bash
 rustup target add wasm32-wasip1
 cargo build --release --target wasm32-wasip1
 ```
 
-Declare the hooks your dispatcher handles and export the v1 surface:
+Declare the same hooks in `plugin.json`. Each hook has its own result family:
+pass keeps input unchanged, replacement proposes a change, and an error lets
+the host apply the approved failure policy. The lower-level two-argument
+dispatcher macro remains available for custom dispatchers.
 
-```rust
-use torana_plugin_sdk::{export_plugin_v1, pbv1, HOOK_BEFORE_REQUEST};
+Plugins have no ambient filesystem or network. Model, pricing, file and HTTP
+helpers address declared, operator-approved resources. `execution()` exposes
+invocation facts, not credentials or destinations. Typed host refusals retain
+stable error codes; do not branch on diagnostic strings.
 
-fn dispatch(input: pbv1::HookInput) -> Result<Option<pbv1::HookResult>, String> {
-    match input.payload {
-        Some(pbv1::hook_input::Payload::ChatRequest(request)) => {
-            println!("model: {}", request.model);
-            Ok(None) // exact pass-through
-        }
-        _ => Err("received an undeclared hook".into()),
-    }
-}
+The best-effort `debug`, `info`, `counter`, `histogram` and `gauge` helpers
+use approved logging/metric imports. Void imports cannot acknowledge delivery
+or report a missing permission.
 
-export_plugin_v1!(HOOK_BEFORE_REQUEST, dispatch);
-```
-
-`Ok(None)` is the only pass-through spelling. A returned `HookResult` must use
-the action belonging to the dispatched hook. Use `host_call` for
-protobuf-framed host calls and branch on `HostCallError::Refused(error).code`,
-never the diagnostic text.
-
-The typed `model_complete` and `get_model_pricing` helpers address declared,
-operator-bound resource slots. They do not accept provider URLs, model names,
-or credentials from guest code.
-
-See the repository's
-[Rust authoring guide](https://github.com/torana-edge/torana-plugin-sdk/blob/main/docs/WRITING_A_PLUGIN.md#rust)
-for hooks, manifests, capabilities, and bundle installation.
-Rust authors implement the typed `Plugin` trait and use
-`export_plugin_v1!(PluginType)`. Result families are hook-specific, and helper
-errors remain classified rather than being converted to pass-through. Use
-`plugin_config::<T>()` for strict typed JSON configuration,
-`state_compare_and_set` for opaque versioned updates, and `StreamHandler` for
-host-backed tool-call assembly. `execution()` exposes only the current
-invocation snapshot; it never contains credentials or destinations.
+Continue with the [authoring reference](../../docs/WRITING_A_PLUGIN.md#rust)
+and [compiled logger example](../../examples/rust-logger).

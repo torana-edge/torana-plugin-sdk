@@ -1,7 +1,7 @@
-# Writing a Torana plugin
+# Plugin authoring reference
 
-End to end: scaffold a plugin, write its logic, declare what it needs, build it,
-and get it running in a Torana instance.
+New to plugins? [Build your first plugin](FIRST_PLUGIN.md) in Go or Rust, then
+use this reference for hooks, configuration, resources, testing and distribution.
 
 A plugin is a WASI module. Torana hands it the request or response as protobuf,
 it returns a modified one (or nothing, to pass through). It has no filesystem, no
@@ -49,7 +49,7 @@ go mod init github.com/your-org/my-custom-plugin
 2. Fetch the standalone Torana plugin SDK:
 
 ```bash
-go get github.com/torana-edge/torana-plugin-sdk@latest
+go get github.com/torana-edge/torana-plugin-sdk@v0.5.0
 ```
 
 > **Note**: The SDK repository contains the ABI, helpers, templates, and
@@ -600,9 +600,9 @@ determinism check, so it is safe for the host to vary per request.
 
 | Key | Meaning |
 | --- | --- |
-| `_provider` | The provider this request was routed to. You need this to ask about pricing, which is keyed by provider name. |
+| `_provider` | The selected route's provider name. For prices, use an operator-bound pricing resource rather than constructing provider/model coordinates. |
 | `_conversation_id` | A stable label for the conversation, derived from the canonical IR — not from any harness header, so it works identically across every wire format. |
-| `_path` | The provider-stripped request path. Torana forwards whatever the caller sent rather than synthesizing one, so anything replaying a conversation needs this. |
+| `_path` | The provider-stripped caller path. Native routing preserves it; an explicit protocol bridge constructs the destination endpoint. Do not treat it as a universal upstream replay URL. |
 | `_response` | On `run_after_response` only: latency, upstream status, and token usage including cache reads and writes. |
 
 ```go
@@ -741,11 +741,13 @@ approximated.** An array or a nested object has no scalar control that could
 hold it, and a form that rendered one would corrupt the value on save. Declaring
 such a setting is fine — `keyword_compactor` does — it simply is not rendered.
 
-Values are type-checked against what you declare before they reach your plugin,
-so a string where you said number is rejected at save time rather than
-misbehaving inside the guest. Keys you do *not* declare are passed through
-untouched: `schema.json` describes the form, not the whole accepted config, and
-several official plugins read settings they never declare.
+The host validates the whole configuration against JSON Schema before saving:
+nested objects and arrays, required fields, enums and `additionalProperties`
+are enforced, not just the fields rendered as controls. With
+`additionalProperties: false`, undeclared keys are rejected. The legacy
+`fields` format validates declared scalar fields but permits unlisted keys;
+it is not equivalent to a closed JSON Schema. The host retains a compatibility
+exception for a top-level `_comment` entry in older configurations.
 
 ### Live pickers
 
@@ -795,12 +797,12 @@ implements the typed `Plugin` trait and declares its exact hook bitmap with
 `export_plugin_v1!`; the macro exports `abi_version`, `supported_hooks`, and
 `run_hook`.
 
-Pin both the Git release tag and crate version so a new plugin remains
-buildable even if the registry publication is delayed:
+Pin the source revision used by your host so the build does not depend on
+registry publication:
 
 ```toml
 [dependencies]
-torana-plugin-sdk = { git = "https://github.com/torana-edge/torana-plugin-sdk", tag = "v0.5.0", version = "=0.5.0" }
+torana-plugin-sdk = { git = "https://github.com/torana-edge/torana-plugin-sdk", rev = "ad98c6d3467f628dd2f630c054715f8b347daa29", version = "=0.5.0" }
 ```
 
 Once version 0.5.0 is available on crates.io, a registry-only dependency may
@@ -839,7 +841,7 @@ structured model call in [`examples/authoring-go`](../examples/authoring-go).
 The maintained Rust guest is [`examples/rust-logger`](../examples/rust-logger),
 and the compiled [all-hooks guest](../conformance/guests/rust-allhooks) pins all
 five default method signatures.
-Run `scripts/check-doc-examples.sh` after changing either guide or SDK surface.
+Run `scripts/check-doc-examples.sh` after changing the example code or SDK surface.
 
 ---
 
@@ -916,15 +918,15 @@ Cache, state, meta, and the clock are emulated in memory. Everything else —
 model services, egress, and pricing — answer exactly as an unconfigured host
 would, so stub the ones your plugin needs.
 
-### Why the harness mirrors the host's rough edges
+### Test effective outcomes, not just attempted calls
 
-`sdktest` reproduces the host's reply shapes byte for byte, including its
-inconsistent ones. A tidier fake would let tests pass against responses no
-plugin will ever see in production.
-
-The same applies to footguns. If you set a verdict and then return `nil` from
-your handler, `sdktest` reports no verdict — because that is what the host
-does, and it is a mistake worth catching in a test rather than in a demo.
+A typed pass result keeps the payload unchanged; it does not undo an accepted
+`BlockRequest`. An accepted block also survives a later callback failure.
+Transient respond/route verdicts from a failed invocation are discarded.
+Check accepted and effective calls as well as attempted calls, and return
+verdict-helper errors so the operator's failure policy can apply. The
+[block/pass test](../sdktest/sdktest_test.go) and
+[failure-outcome tests](../sdktest/outcome_scope_test.go) exercise these cases.
 
 ### Parallel tests
 
@@ -985,5 +987,6 @@ handle the advertised path beneath `/agent` in the same HTTP hook. Torana
 aggregates enabled operations in `GET /_torana/api/v1/`, enforces JSON
 responses, and includes the descriptor in the digest-bound approval.
 
-See [AGENT_CONTROL_PLANE.md](https://github.com/torana-edge/torana-edge/blob/main/docs/AGENT_CONTROL_PLANE.md) for the descriptor schema,
-dispatch contract, validation rules, and a complete curl example.
+See [Add agent-facing operations](AGENT_OPERATIONS.md) for the descriptor
+schema and authoring contract. The [host control-plane reference](https://github.com/torana-edge/torana-edge/blob/main/docs/AGENT_CONTROL_PLANE.md)
+covers discovery, dispatch and caller protections.
