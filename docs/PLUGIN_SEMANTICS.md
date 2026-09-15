@@ -120,8 +120,9 @@ forward only the current fragment.
   fragments by block index.
 - `env.cache_set` / `env.cache_get` — private to one plugin across requests
 - `env.shared_cache_set` / `env.shared_cache_get` — explicitly shared across plugins and requests
-  (with a TTL). Use for cross-request handoff, e.g. the compactor caches
-  intents by `tool_call_id` that the keyword_compactor reads next turn.
+  (with a TTL). Agree on a versioned key and value contract with each consumer.
+  Include the identity required by that contract; a reused call ID alone is not
+  enough to distinguish content from different conversations or inputs.
 
 ## 4. Response Hooks: `run_after_response` semantics differ by path
 
@@ -217,11 +218,8 @@ hashes the rendered prompt up to each breakpoint. Concretely:
 
 - No wall-clock time, randomness, request IDs, or counters in anything you
   inject before a breakpoint.
-- Any value derived for a *historical* message must be a pure function of
-  that message (the intent plugin's heuristic fill once mixed in a snippet of
-  the latest user message — every turn re-serialized the same history to
-  different bytes, busting the cache from that point on; it now derives only
-  from the call's own name+args).
+- Derive historical annotations from stable historical inputs, not later user
+  messages. Replaying the same history must not change its earlier bytes.
 - One-time changes are fine: the first compaction of a tool result re-caches
   once and then stays stable (keyed by content, tool arguments, intent, and
   policy version) — a potential net win after rewrite cost. What's
@@ -229,32 +227,28 @@ hashes the rendered prompt up to each breakpoint. Concretely:
 - Per-request state belongs in `ToranaMetaJson` (never serialized to the
   wire), not in messages or tool schemas.
 
-The guardrail test `internal/plugin/cache_compliance_test.go` runs every
-in-repo plugin twice over an identical request and asserts byte-identical
-output, and asserts markers survive the round-trip. New plugins are picked up
-by adding their name to the list — do so.
+Test repeated identical inputs and assert both stable output and preserved
+markers. Edge's [cache-compliance tests](https://github.com/torana-edge/torana-edge/blob/main/internal/plugin/cache_compliance_test.go)
+exercise its explicitly listed catalogue plugins; a new independent plugin is
+not automatically covered by that list. Add equivalent cases to your tests.
 
 ## 7. Tool-output safety
 
-The trailing tool-result batch is evidence the model requested but has not yet
-consumed. Keep it exact unless an explicit rule opts a recoverable tool into
-deterministic `first_pass` reduction. Model-based compaction must always wait
-for at least one exact exposure.
+The SDK provides reusable policy matching, identity and text-replacement
+helpers. `MatchToolPolicy` selects the first case-insensitive shell-style match;
+it does not enable a plugin, approve a mutation or define which policy modes
+your plugin implements.
 
-Unknown tools default to exact; mutation outputs and failures remain exact.
-Current official policies are explicit: `exact`, `deterministic`, and either
-`keyword` or `model`, depending on the compactor. There is no automatic
-three-turn source-reading window. Keep source-code reads under explicit
-`exact` rules when later edits need the original text; broad non-exact rules
-can otherwise select them. Assess economically gated transformations as one
-batch from the earliest changed item. Reuse the SDK policy and cache-key
-helpers rather than inventing plugin-specific matching or call-ID-only keys. See
-[COMPACTION.md](https://github.com/torana-edge/torana-edge/blob/main/docs/COMPACTION.md) for the public contract.
+Use content- and policy-aware keys for cached transformations rather than call
+IDs alone. Read the [official compactor policy guide](https://github.com/torana-edge/torana-plugins/blob/main/plugins/compactor/COMPACTION.md)
+for those plugins' modes, exactness rules, first-exposure handling and economics.
+Those choices are plugin behavior, not a universal host policy for every plugin.
 
 ### Explicit tool failures
 
-Compaction must leave explicit tool failures, mutation-tool results, and results
-whose tool name cannot be resolved verbatim. `ToolResultView.IsError` is a copied
+`ToolResultView.MustStayExact` is a conservative helper for authors who compact
+tool output: it vetoes explicit tool failures, mutation-tool results, and
+results whose tool name cannot be resolved. `ToolResultView.IsError` is a copied
 optional pointer: it preserves absent versus explicit false for round trips.
 Both mean no explicit-error veto; neither bypasses name or textual failure checks.
 Use `result.MustStayExact(fallbackName, text)` before cache lookup, model calls,

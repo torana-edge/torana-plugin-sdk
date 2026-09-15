@@ -987,5 +987,6 @@ handle the advertised path beneath `/agent` in the same HTTP hook. Torana
 aggregates enabled operations in `GET /_torana/api/v1/`, enforces JSON
 responses, and includes the descriptor in the digest-bound approval.
 
-See [AGENT_CONTROL_PLANE.md](https://github.com/torana-edge/torana-edge/blob/main/docs/AGENT_CONTROL_PLANE.md) for the descriptor schema,
-dispatch contract, validation rules, and a complete curl example.
+See [Add agent-facing operations](AGENT_OPERATIONS.md) for the descriptor
+schema and authoring contract. The [host control-plane reference](https://github.com/torana-edge/torana-edge/blob/main/docs/AGENT_CONTROL_PLANE.md)
+covers discovery, dispatch and caller protections.

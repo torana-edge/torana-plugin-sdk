@@ -37,6 +37,9 @@ services, pricing and credentials must be declared and approved for the exact
 bundle. Private cache entries belong to one plugin; cross-plugin exchange
 requires separate shared-cache permissions.
 
+For optional JSON operations exposed to agents, see
+[Add agent-facing operations](docs/AGENT_OPERATIONS.md).
+
 ## Compatibility
 
 SDK **v0.5.0** implements ABI major **1**, contract revision **1**. SDK package
