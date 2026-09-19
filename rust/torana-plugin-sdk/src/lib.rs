@@ -2432,10 +2432,7 @@ mod tests {
             }],
         };
 
-        assert_eq!(
-            replace_tool_result_with_error(&mut message, 0, "withheld").unwrap(),
-            true
-        );
+        assert!(replace_tool_result_with_error(&mut message, 0, "withheld").unwrap());
         let Some(pbv1::request_block::Kind::ToolResult(result)) = message.blocks[0].kind.as_ref()
         else {
             panic!("missing tool result")
@@ -2461,10 +2458,7 @@ mod tests {
             result.content[3].kind,
             Some(pbv1::tool_result_content_block::Kind::CacheBreakpoint(_))
         ));
-        assert_eq!(
-            replace_tool_result_with_error(&mut message, 0, "withheld").unwrap(),
-            false
-        );
+        assert!(!replace_tool_result_with_error(&mut message, 0, "withheld").unwrap());
     }
 
     // CI has run `cargo test` on this crate all along, against zero tests — so
