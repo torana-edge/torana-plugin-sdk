@@ -301,7 +301,10 @@ pub fn replace_tool_result_with_error(
     let mut replacement = Vec::with_capacity(tr.content.len());
     let mut inserted_in_segment = false;
     for content in &tr.content {
-        if matches!(content.kind, Some(pbv1::tool_result_content_block::Kind::CacheBreakpoint(_))) {
+        if matches!(
+            content.kind,
+            Some(pbv1::tool_result_content_block::Kind::CacheBreakpoint(_))
+        ) {
             replacement.push(content.clone());
             inserted_in_segment = false;
         } else if !inserted_in_segment {
@@ -2404,7 +2407,9 @@ mod tests {
                             },
                             pbv1::ToolResultContentBlock {
                                 kind: Some(pbv1::tool_result_content_block::Kind::CacheBreakpoint(
-                                    pbv1::ToolResultCacheBreakpoint { marker_json: br#"{"type":"ephemeral","ttl":"5m"}"#.to_vec() },
+                                    pbv1::ToolResultCacheBreakpoint {
+                                        marker_json: br#"{"type":"ephemeral","ttl":"5m"}"#.to_vec(),
+                                    },
                                 )),
                             },
                             pbv1::ToolResultContentBlock {
@@ -2414,7 +2419,9 @@ mod tests {
                             },
                             pbv1::ToolResultContentBlock {
                                 kind: Some(pbv1::tool_result_content_block::Kind::CacheBreakpoint(
-                                    pbv1::ToolResultCacheBreakpoint { marker_json: br#"{"type":"ephemeral","ttl":"1h"}"#.to_vec() },
+                                    pbv1::ToolResultCacheBreakpoint {
+                                        marker_json: br#"{"type":"ephemeral","ttl":"1h"}"#.to_vec(),
+                                    },
                                 )),
                             },
                         ],
