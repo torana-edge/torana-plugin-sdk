@@ -261,6 +261,75 @@ pub fn replace_tool_result_text(
     tr.signature.clear();
     Ok(true)
 }
+
+/// Replaces a tool result with one safe text arm per cache-delimited segment
+/// and marks the result as an explicit tool error. Cache markers are preserved
+/// byte-for-byte and in their original relative order. Validation completes
+/// before mutation.
+pub fn replace_tool_result_with_error(
+    message: &mut pbv1::Message,
+    block: usize,
+    text: &str,
+) -> Result<bool, String> {
+    let Some(slot) = message.blocks.get_mut(block) else {
+        return Err("tool result index out of range".into());
+    };
+    let Some(pbv1::request_block::Kind::ToolResult(tr)) = slot.kind.as_mut() else {
+        return Err("block is not tool result".into());
+    };
+
+    let mut has_visible = false;
+    for content in &tr.content {
+        match content.kind.as_ref() {
+            Some(pbv1::tool_result_content_block::Kind::Text(_)) => {
+                has_visible = true;
+            }
+            Some(pbv1::tool_result_content_block::Kind::Unknown(unknown)) => {
+                json_object(&unknown.payload_json, "tool result unknown payload")?;
+                has_visible = true;
+            }
+            Some(pbv1::tool_result_content_block::Kind::CacheBreakpoint(marker)) => {
+                json_object(&marker.marker_json, "tool result cache marker")?;
+            }
+            None => return Err("empty content arm".into()),
+        }
+    }
+    if !has_visible {
+        return Err("tool result has no provider-visible content arm".into());
+    }
+
+    let mut replacement = Vec::with_capacity(tr.content.len());
+    let mut inserted_in_segment = false;
+    for content in &tr.content {
+        if matches!(
+            content.kind,
+            Some(pbv1::tool_result_content_block::Kind::CacheBreakpoint(_))
+        ) {
+            replacement.push(content.clone());
+            inserted_in_segment = false;
+        } else if !inserted_in_segment {
+            replacement.push(pbv1::ToolResultContentBlock {
+                kind: Some(pbv1::tool_result_content_block::Kind::Text(
+                    pbv1::ToolResultTextBlock { text: text.into() },
+                )),
+            });
+            inserted_in_segment = true;
+        }
+    }
+
+    let content_changed = tr.content != replacement;
+    let error_changed = tr.is_error != Some(true);
+    if content_changed {
+        tr.content = replacement;
+    }
+    if error_changed {
+        tr.is_error = Some(true);
+    }
+    if content_changed || error_changed {
+        tr.signature.clear();
+    }
+    Ok(content_changed || error_changed)
+}
 pub fn set_cache_breakpoint(
     message: &mut pbv1::Message,
     block: usize,
@@ -2321,6 +2390,76 @@ fn validate_prompt_cache_policy(policy: &pbv1::PromptCachePolicy) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recoverable_tool_error_scrubs_content_and_is_idempotent() {
+        let mut message = pbv1::Message {
+            role: "user".into(),
+            blocks: vec![pbv1::RequestBlock {
+                kind: Some(pbv1::request_block::Kind::ToolResult(
+                    pbv1::RequestToolResultBlock {
+                        tool_call_id: "call-1".into(),
+                        content: vec![
+                            pbv1::ToolResultContentBlock {
+                                kind: Some(pbv1::tool_result_content_block::Kind::Text(
+                                    pbv1::ToolResultTextBlock { text: "one".into() },
+                                )),
+                            },
+                            pbv1::ToolResultContentBlock {
+                                kind: Some(pbv1::tool_result_content_block::Kind::CacheBreakpoint(
+                                    pbv1::ToolResultCacheBreakpoint {
+                                        marker_json: br#"{"type":"ephemeral","ttl":"5m"}"#.to_vec(),
+                                    },
+                                )),
+                            },
+                            pbv1::ToolResultContentBlock {
+                                kind: Some(pbv1::tool_result_content_block::Kind::Text(
+                                    pbv1::ToolResultTextBlock { text: "two".into() },
+                                )),
+                            },
+                            pbv1::ToolResultContentBlock {
+                                kind: Some(pbv1::tool_result_content_block::Kind::CacheBreakpoint(
+                                    pbv1::ToolResultCacheBreakpoint {
+                                        marker_json: br#"{"type":"ephemeral","ttl":"1h"}"#.to_vec(),
+                                    },
+                                )),
+                            },
+                        ],
+                        signature: "signed".into(),
+                        ..Default::default()
+                    },
+                )),
+            }],
+        };
+
+        assert!(replace_tool_result_with_error(&mut message, 0, "withheld").unwrap());
+        let Some(pbv1::request_block::Kind::ToolResult(result)) = message.blocks[0].kind.as_ref()
+        else {
+            panic!("missing tool result")
+        };
+        assert_eq!(result.is_error, Some(true));
+        assert!(result.signature.is_empty());
+        assert_eq!(result.content.len(), 4);
+        let Some(pbv1::tool_result_content_block::Kind::Text(text)) =
+            result.content[0].kind.as_ref()
+        else {
+            panic!("missing replacement text")
+        };
+        assert_eq!(text.text, "withheld");
+        assert!(matches!(
+            result.content[1].kind,
+            Some(pbv1::tool_result_content_block::Kind::CacheBreakpoint(_))
+        ));
+        assert!(matches!(
+            result.content[2].kind,
+            Some(pbv1::tool_result_content_block::Kind::Text(_))
+        ));
+        assert!(matches!(
+            result.content[3].kind,
+            Some(pbv1::tool_result_content_block::Kind::CacheBreakpoint(_))
+        ));
+        assert!(!replace_tool_result_with_error(&mut message, 0, "withheld").unwrap());
+    }
 
     // CI has run `cargo test` on this crate all along, against zero tests — so
     // the green tick meant only that the crate compiled. These cover the ABI

@@ -29,6 +29,7 @@ import (
 
 	pbv1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
 	"github.com/torana-edge/torana-plugin-sdk/pb/v1/jsontext"
+	"google.golang.org/protobuf/proto"
 )
 
 // TextSegment is a copied view of one text block's text.
@@ -299,6 +300,96 @@ func ReplaceToolResultText(msg *pbv1.Message, block int, text string) (bool, err
 	// (its covered content changed).
 	tr.Signature = ""
 	return true, nil
+}
+
+// ReplaceToolResultWithError replaces the provider-visible content of one tool
+// result with safe text and marks that result as an explicit tool
+// failure. It is the supported mutation
+// for a guard that must keep the conversation alive while preventing the
+// original tool output from reaching the model.
+//
+// Validation and mutation are atomic: every malformed arm leaves msg
+// unchanged. Provider-visible nested content is collapsed to one text arm per
+// cache-delimited segment. Cache markers are retained byte-for-byte and in
+// their original relative order. Keeping one safe arm before each marker makes
+// multiple Anthropic cache boundaries representable on the wire while ensuring
+// no withheld content survives. A marker-only result is rejected.
+// A real content or error-state change clears the result signature whose
+// covered fact changed. Result identity, metadata, and the message's trailing
+// signature carrier are preserved.
+func ReplaceToolResultWithError(msg *pbv1.Message, block int, text string) (bool, error) {
+	if msg == nil {
+		return false, fmt.Errorf("replace tool result with error: nil message")
+	}
+	if block < 0 || block >= len(msg.Blocks) {
+		return false, fmt.Errorf("replace tool result with error: block %d out of range (0..%d)", block, len(msg.Blocks)-1)
+	}
+	b := msg.Blocks[block]
+	if b == nil || b.GetToolResult() == nil {
+		return false, fmt.Errorf("replace tool result with error: block %d is not a tool-result block", block)
+	}
+
+	tr := b.GetToolResult()
+	hasVisible := false
+	for i, c := range tr.Content {
+		if c == nil {
+			return false, fmt.Errorf("replace tool result with error: block %d content[%d] is nil", block, i)
+		}
+		switch k := c.Kind.(type) {
+		case *pbv1.ToolResultContentBlock_Text:
+			if k.Text == nil {
+				return false, fmt.Errorf("replace tool result with error: block %d content[%d] is a typed-nil text arm", block, i)
+			}
+		case *pbv1.ToolResultContentBlock_Unknown:
+			if k.Unknown == nil {
+				return false, fmt.Errorf("replace tool result with error: block %d content[%d] is a typed-nil unknown arm", block, i)
+			}
+			if err := validJSONObject(k.Unknown.PayloadJson); err != nil {
+				return false, fmt.Errorf("replace tool result with error: block %d content[%d] has malformed unknown payload: %w", block, i, err)
+			}
+		case *pbv1.ToolResultContentBlock_CacheBreakpoint:
+			if k.CacheBreakpoint == nil {
+				return false, fmt.Errorf("replace tool result with error: block %d content[%d] is a typed-nil cache arm", block, i)
+			}
+			if err := validJSONObject(k.CacheBreakpoint.MarkerJson); err != nil {
+				return false, fmt.Errorf("replace tool result with error: block %d content[%d] has a malformed cache marker: %w", block, i, err)
+			}
+			continue
+		default:
+			return false, fmt.Errorf("replace tool result with error: block %d content[%d] is arm-less", block, i)
+		}
+		hasVisible = true
+	}
+
+	if !hasVisible {
+		return false, fmt.Errorf("replace tool result with error: block %d has no provider-visible content arm", block)
+	}
+	desired := make([]*pbv1.ToolResultContentBlock, 0, len(tr.Content))
+	insertedInSegment := false
+	for _, c := range tr.Content {
+		if c.GetCacheBreakpoint() != nil {
+			desired = append(desired, c)
+			insertedInSegment = false
+			continue
+		}
+		if !insertedInSegment {
+			desired = append(desired, &pbv1.ToolResultContentBlock{Kind: &pbv1.ToolResultContentBlock_Text{Text: &pbv1.ToolResultTextBlock{Text: text}}})
+			insertedInSegment = true
+		}
+	}
+	contentChanged := !proto.Equal(&pbv1.RequestToolResultBlock{Content: tr.Content}, &pbv1.RequestToolResultBlock{Content: desired})
+	if contentChanged {
+		tr.Content = desired
+	}
+	errorChanged := tr.IsError == nil || !*tr.IsError
+	if errorChanged {
+		isError := true
+		tr.IsError = &isError
+	}
+	if contentChanged || errorChanged {
+		tr.Signature = ""
+	}
+	return contentChanged || errorChanged, nil
 }
 
 // ToolCallView is a copied view of one tool-use block.

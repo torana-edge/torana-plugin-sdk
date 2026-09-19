@@ -87,27 +87,28 @@ type Harness struct {
 	t    testing.TB
 	host *sdk.TestHost
 
-	mu           sync.Mutex
-	meta         map[string]string
-	cache        map[string]string
-	cacheExpiry  map[string]int64
-	sharedCache  map[string]string
-	sharedExpiry map[string]int64
-	state        map[string]string
-	stateVersion map[string]string
-	stateSeq     uint64
-	files        map[string][]byte
-	credentials  map[string][]byte
-	config       string
-	stubs        map[string]func(args string) (string, error)
-	logs         []LogEntry
-	metrics      []MetricEntry
-	calls        []HostCallEntry
-	accepted     []HostCallEntry
-	permissions  map[string]bool
-	hooks        map[string]bool
-	active       *Request
-	now          func() int64
+	mu             sync.Mutex
+	meta           map[string]string
+	cache          map[string]string
+	cacheExpiry    map[string]int64
+	sharedCache    map[string]string
+	sharedExpiry   map[string]int64
+	state          map[string]string
+	stateVersion   map[string]string
+	stateSeq       uint64
+	files          map[string][]byte
+	credentials    map[string][]byte
+	config         string
+	stubs          map[string]func(args string) (string, error)
+	logs           []LogEntry
+	metrics        []MetricEntry
+	calls          []HostCallEntry
+	accepted       []HostCallEntry
+	permissions    map[string]bool
+	hooks          map[string]bool
+	active         *Request
+	now            func() int64
+	conversationID string
 	// Presence is tracked separately from the byte slices. An all-default
 	// ChatRequest marshals to zero bytes and an upstream body can legitimately
 	// be empty, so length is not presence — a harness that conflated them
@@ -155,6 +156,7 @@ func New(t testing.TB) *Harness {
 		config:          "{}",
 		stubs:           map[string]func(string) (string, error){},
 		now:             func() int64 { return time.Now().UnixMilli() },
+		conversationID:  "sdktest-conversation",
 		StateConfigured: true,
 	}
 	// New deliberately does NOT clear registrations.
@@ -185,6 +187,15 @@ func New(t testing.TB) *Harness {
 			h.metrics = append(h.metrics, MetricEntry{Name: name, Type: typ, Value: value, Labels: labels})
 		},
 	}
+	return h
+}
+
+// SetConversationID sets the stable conversation identity reported to request
+// hooks. It is useful for testing durable state isolation and resumed sessions.
+func (h *Harness) SetConversationID(id string) *Harness {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.conversationID = id
 	return h
 }
 

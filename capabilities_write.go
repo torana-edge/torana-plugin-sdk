@@ -46,6 +46,8 @@ var WritePermissions = []string{
 	"ir.model.write",
 	"ir.params.write",
 	"ir.stream.write",
+	"ir.tool_result_content.write",
+	"ir.tool_result_errors.write",
 	"ir.tool_results.write",
 	"ir.tools.write",
 }
@@ -92,14 +94,21 @@ const (
 	SectionMessagesSystem    WriteSection = "ir.messages.write.system"
 	SectionMessagesTool      WriteSection = "ir.messages.write.tool"
 
-	// SectionToolResultsWrite is the dedicated source-level capability for
-	// ToolResultTextBlock.text: it authorizes ONLY position-preserving text
-	// VALUE changes at the exact (message, block, content) position,
-	// independent of the enclosing message role. It does NOT authorize
-	// topology, cache markers, roles, metadata, identities, unknown arms,
-	// or ordinary prompt text (those stay under their own grants). The
-	// official compactors request ONLY this grant for result text.
+	// SectionToolResultsWrite covers ordered tool-result text values only.
 	SectionToolResultsWrite WriteSection = "ir.tool_results.write"
+
+	// SectionToolResultContentWrite covers provider-visible nested tool-result
+	// arm kinds/count/order and unknown/provider payloads. Text values remain
+	// under SectionToolResultsWrite; cache markers and result metadata remain
+	// separately governed.
+	SectionToolResultContentWrite WriteSection = "ir.tool_result_content.write"
+
+	// SectionToolResultErrorsWrite covers only RequestToolResultBlock.is_error.
+	// It is separate from result text so an already-approved compactor cannot
+	// silently gain authority to turn successful tool calls into failures after
+	// a host upgrade. Guards that replace sensitive output with a recoverable
+	// tool error request this grant together with SectionToolResultsWrite.
+	SectionToolResultErrorsWrite WriteSection = "ir.tool_result_errors.write"
 
 	// SectionMessagesDeveloper covers OpenAI's "developer" role, which is its
 	// rename of "system". Format adapters pass roles through verbatim — a
