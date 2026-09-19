@@ -69,5 +69,7 @@ Generated from `capabilities.json`; run `scripts/generate-capabilities.py` after
 - `ir.model.write`
 - `ir.params.write`
 - `ir.stream.write`
+- `ir.tool_result_content.write`
+- `ir.tool_result_errors.write`
 - `ir.tool_results.write`
 - `ir.tools.write`

@@ -213,6 +213,7 @@ func (r *Request) BeforeRequest(req *pbv1.ChatRequest) RequestResult {
 	in := &pbv1.HookInput{
 		ContractRevision: sdk.ContractRevision,
 		RequestId:        r.requestID,
+		Execution:        &pbv1.ExecutionInfo{ConversationId: proto.String(h.conversationID)},
 		Payload:          &pbv1.HookInput_ChatRequest{ChatRequest: req},
 	}
 	raw, err := r.dispatch(in, "run_before_request")

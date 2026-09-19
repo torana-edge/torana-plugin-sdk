@@ -36,6 +36,7 @@ var helperErrorResults = map[string]int{
 	"ReplaceAllText":               0,
 	"ReplaceToolCall":              0,
 	"ReplaceToolResultText":        1,
+	"ReplaceToolResultWithError":   1,
 	"RequestBlocksFingerprint":     1,
 	"RespondRequest":               0,
 	"RespondText":                  0,

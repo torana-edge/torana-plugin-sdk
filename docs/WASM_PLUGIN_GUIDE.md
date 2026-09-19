@@ -161,6 +161,9 @@ change:
 - role grants cover ordinary message content for that role;
 - `ir.tool_results.write` covers only position-preserving tool-result text
   value changes, independent of enclosing role;
+- `ir.tool_result_errors.write` covers only the optional tool-result error
+  status; use it with `ir.tool_results.write` when replacing output with a
+  recoverable tool failure;
 - `ir.cache_control.write` covers only cache-breakpoint marker fields;
 - `ir.tools.write` covers tool definitions and request-side tool changes;
 - `ir.model.write` and `ir.params.write` cover request selection and parameters;
@@ -179,7 +182,8 @@ identity fields cannot be forged even with every write grant.
 
 Cache-marker changes and tool-result text changes have deliberately narrow
 signature effects. Use `ReplaceLastCacheBreakpoint`,
-`ReplaceToolResultText`, `ReplaceToolCall`, `SetTextAt`, and the other typed
+`ReplaceToolResultText`, `ReplaceToolResultWithError`, `ReplaceToolCall`,
+`SetTextAt`, and the other typed
 helpers so the verified provenance contract remains synchronized with guest
 behavior.
 

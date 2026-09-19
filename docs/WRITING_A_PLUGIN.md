@@ -305,7 +305,9 @@ opaque signatures) are **host-owned** — immutable under plugin mutation
 
 | Capability | Covers |
 | --- | --- |
-| `ir.tool_results.write` | The tool-result TEXT VALUE ONLY: position-preserving changes to `ToolResultTextBlock.text` at the exact (message, block, content) position, independent of the enclosing message role (the official compactors request ONLY this grant for result text). It does NOT authorize topology, cache markers, roles, metadata, identities, unknown arms, `will_continue`/`scheduling`, or ordinary prompt text — those stay under their own grants. |
+| `ir.tool_results.write` | Ordered tool-result text values only. |
+| `ir.tool_result_content.write` | Provider-visible arm kinds/count/order and unknown/provider payloads. A full error replacement uses this with `ir.tool_results.write`; cache markers, roles, and result metadata remain separately governed. |
+| `ir.tool_result_errors.write` | The optional `is_error` status of an existing tool-result block, and nothing else. A guard that converts sensitive output into a recoverable failure uses this together with `ir.tool_results.write`; a text-only compactor does not receive it. |
 | `ir.cache_control.write` | The cache breakpoint marker ONLY, on its three ordered carriers: `ToolDef.cache_control_json` (tools-first section), `RequestBlock.cache_breakpoint` (outer block), and the nested `ToolResultContentBlock.cache_breakpoint` inside a tool result. It does NOT authorise message or tool content/schema changes, and the message-role grants / `ir.tools.write` do NOT authorise these marker fields — a plugin that changes a breakpoint marker must hold this grant, and nothing else it changes is covered by it. |
 | `ir.messages.write.{user,assistant,system,tool,developer,other}` | Message **content** of that role (request and response). Not response role or signatures. |
 | `ir.tools.write` | Tool definitions on the request. |
@@ -414,6 +416,17 @@ block's single text arm, by message block index:
   trailing-signature carrier (which covers only preceding text/thinking and
   its own metadata — NOT tool results), and clears only the containing
   tool-result signature — no stale token survives.
+
+### `ReplaceToolResultWithError(msg, block, text) (changed bool, err error)`
+
+Use this when a guard needs to withhold one tool result without aborting the
+conversation. It replaces provider-visible result content with one safe text
+arm per cache-delimited segment, preserves nested cache markers byte-for-byte
+and in their relative order, sets the canonical error
+status, and clears the affected result signature. Validation is atomic. The
+operation needs `ir.tool_results.write`, `ir.tool_result_content.write`,
+`ir.tool_result_errors.write`, and `ir.cache_control.write`. The Rust SDK exposes the equivalent
+`replace_tool_result_with_error` helper.
 
 ### Cache-marker provenance (ReplaceLastCacheBreakpoint)
 
