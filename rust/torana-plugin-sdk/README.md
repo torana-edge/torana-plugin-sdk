@@ -12,11 +12,11 @@ Start with [your first plugin](../../docs/FIRST_PLUGIN.md). Rust 1.85+,
 crate-type = ["cdylib"]
 
 [dependencies]
-torana-plugin-sdk = { git = "https://github.com/torana-edge/torana-plugin-sdk", rev = "ad98c6d3467f628dd2f630c054715f8b347daa29", version = "=0.5.0" }
+torana-plugin-sdk = "=0.5.1"
 ```
 
-Keep the exact revision and your reviewed Cargo.lock. This Git dependency
-works independently of crates.io publication.
+Keep the exact version and your reviewed Cargo.lock so plugin builds remain
+reproducible.
 
 ```rust
 use torana_plugin_sdk::{export_plugin_v1, pbv1, Plugin, RequestResult, HOOK_BEFORE_REQUEST};

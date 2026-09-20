@@ -810,16 +810,12 @@ implements the typed `Plugin` trait and declares its exact hook bitmap with
 `export_plugin_v1!`; the macro exports `abi_version`, `supported_hooks`, and
 `run_hook`.
 
-Pin the source revision used by your host so the build does not depend on
-registry publication:
+Pin the released SDK version so builds stay reproducible:
 
 ```toml
 [dependencies]
-torana-plugin-sdk = { git = "https://github.com/torana-edge/torana-plugin-sdk", rev = "ad98c6d3467f628dd2f630c054715f8b347daa29", version = "=0.5.0" }
+torana-plugin-sdk = "=0.5.1"
 ```
-
-Once version 0.5.0 is available on crates.io, a registry-only dependency may
-use `torana-plugin-sdk = "=0.5.0"`.
 
 ```rust
 use torana_plugin_sdk::{export_plugin_v1, pbv1, Plugin, RequestResult, HOOK_BEFORE_REQUEST};
