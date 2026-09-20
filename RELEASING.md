@@ -68,8 +68,8 @@ not merely two crates that happen to compile.
 
 If a GitHub release succeeds but the Rust upload fails, recover that
 distribution channel without moving the tag or regenerating release assets.
-The Edge Rust scaffold uses an exact Git revision and works independently of
-crates.io publication.
+Published Rust setup instructions use crates.io, so restore that channel before
+announcing the release or updating downstream scaffolds.
 
 1. Confirm the registry does not already contain the intended version. A
    publish timeout can occur after the upload succeeds; do not assume failure

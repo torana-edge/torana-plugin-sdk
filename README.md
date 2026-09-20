@@ -42,10 +42,10 @@ For optional JSON operations exposed to agents, see
 
 ## Compatibility
 
-SDK **v0.5.0** implements ABI major **1**, contract revision **1**. SDK package
-versions and Edge releases are separate. Use the SDK pinned by your target
-host; `torana plugin new` does this for you. Go uses the module tag. Rust uses
-an exact Git revision and does not depend on crates.io publication.
+SDK **v0.5.1** implements ABI major **1**, contract revision **1**. SDK package
+versions and Edge releases are separate. Use the SDK version documented by
+your target host. Go uses the module tag, and Rust uses the matching crate
+release.
 
 ## Contributing
 
