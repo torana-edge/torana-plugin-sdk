@@ -49,7 +49,7 @@ go mod init github.com/your-org/my-custom-plugin
 2. Fetch the standalone Torana plugin SDK:
 
 ```bash
-go get github.com/torana-edge/torana-plugin-sdk@v0.5.0
+go get github.com/torana-edge/torana-plugin-sdk@v0.5.1
 ```
 
 > **Note**: The SDK repository contains the ABI, helpers, templates, and
