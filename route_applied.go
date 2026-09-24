@@ -1,6 +1,7 @@
 package plugin_sdk
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -28,16 +29,18 @@ func RouteApplied(resp *pbv1.ChatResponse) (RouteAppliedInfo, bool, error) {
 	if resp == nil || len(resp.ToranaMetaJson) == 0 {
 		return zero, false, nil
 	}
-	var envelope struct {
-		Route *json.RawMessage `json:"_route_applied"`
-	}
+	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(resp.ToranaMetaJson, &envelope); err != nil {
 		return zero, false, fmt.Errorf("route applied metadata: %w", err)
 	}
-	if envelope.Route == nil {
+	raw, present := envelope["_route_applied"]
+	if !present {
 		return zero, false, nil
 	}
-	if err := json.Unmarshal(*envelope.Route, &zero); err != nil {
+	if trimmed := bytes.TrimSpace(raw); len(trimmed) == 0 || trimmed[0] != '{' {
+		return zero, false, fmt.Errorf("route applied metadata must be an object")
+	}
+	if err := json.Unmarshal(raw, &zero); err != nil {
 		return RouteAppliedInfo{}, false, fmt.Errorf("route applied metadata: %w", err)
 	}
 	return zero, true, nil
