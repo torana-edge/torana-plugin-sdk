@@ -340,6 +340,23 @@
       "implemented": true
     },
     {
+      "command": "env.model_capabilities",
+      "arguments": "ModelCapabilitiesArgs",
+      "result": "ModelCapabilities",
+      "permission": "env.model_capabilities",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "GetModelCapabilities"
+      ],
+      "implemented": true
+    },
+    {
       "command": "env.model_pricing",
       "arguments": "ModelPricingGetArgs",
       "result": "ModelPricing",
@@ -463,6 +480,20 @@
       "helpers": [
         "RouteRequest",
         "MustRouteRequest"
+      ],
+      "implemented": true
+    },
+    {
+      "command": "env.suggest",
+      "arguments": "SuggestArgs",
+      "result": "SuggestResult",
+      "permission": "env.suggest",
+      "hooks": [
+        "run_before_request",
+        "run_after_response"
+      ],
+      "helpers": [
+        "Suggest"
       ],
       "implemented": true
     },

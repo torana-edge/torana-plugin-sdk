@@ -252,7 +252,8 @@ is authoritative, and the Go `sdk.Commands`, `sdk.CommandPermission`, and
 | `env.set_identity` | (v1 host call; `SetIdentityArgs`) | Override the rate-limit / identity key for this request. |
 | `env.block_request` | `sdk.BlockRequest` → v1 `BlockRequestArgs` | Reject the request with a provider-shaped error. |
 | `env.respond_request` | `sdk.RespondText` / `sdk.RespondRequest` → v1 synthetic response | Answer directly with a canonical response; tool IDs and signatures are host-owned. |
-| `env.route_request` | `sdk.RouteRequest` → v1 `RouteRequestArgs` | Send the request to a different provider. |
+| `env.route_request` | `sdk.RouteRequest` / `sdk.RouteRequestWithEffort` → v1 `RouteRequestArgs` | Send the request to a different provider/model. The effort variant requires an explicit Torana-managed-effort policy; unspecified effort preserves the harness setting. |
+| `env.suggest` | `sdk.Suggest` | Propose a conversation-scoped action; Torana owns delivery, ID, code, and consent. |
 
 **Credentials, private files, and scoped HTTP**
 
@@ -272,6 +273,7 @@ is authoritative, and the Go `sdk.Commands`, `sdk.CommandPermission`, and
 | --- | --- | --- |
 | `env.model_complete` | `sdk.ModelComplete` | Run a provider-neutral prompt through one declared model-service slot. The operator binding owns provider, URL, model, credential, timeout, and hard budgets. |
 | `env.model_pricing` | `sdk.GetModelPricing` | Resolve one declared pricing slot without letting the plugin select arbitrary provider/model coordinates. Missing rates remain unknown rather than being guessed. |
+| `env.model_capabilities` | `sdk.GetModelCapabilities` | Read capabilities and optional pricing for an operator-declared provider/model. Unknown models return a typed refusal. |
 | `env.resource_info` | `sdk.GetResourceInfo` | Inspect the effective kind, name, operations, and hard limits of one declared resource without receiving its URL, credential, or secret configuration. |
 
 Model-service calls are attributed plugin egress and do not recursively run
@@ -638,6 +640,11 @@ than parsing JSON in every plugin.
 | `verdict_plugin` | Plugin that issued the verdict. |
 | `refused` | `null` on acceptance; otherwise one of `unknown_provider`, `credential_policy`, `bridge_unrepresentable`, `format_mismatch`, `invalid_target_url`, or `missing_route_context`. Future host revisions may add a code. |
 | `served_by`, `served_model`, `failover` | Upstream that eventually served the request and whether provider failover changed it. These can differ from the plugin route. |
+| `effort`, `effort_status` | Optional result of an explicitly authorized effort verdict; absence means no effort decision was made. |
+
+Use `sdk.Suggestions(req)` to read host-owned outcomes for this plugin's
+previous suggestions, and `sdk.ToranaMCP(req)` to read the host's optional MCP
+connection observation. Both live only in request metadata, not provider text.
 
 Treat every field as optional. An empty value means the host did not supply it,
 and a plugin that would spend money on the strength of it should decline instead.

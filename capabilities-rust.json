@@ -322,6 +322,22 @@
       ]
     },
     {
+      "command": "env.model_capabilities",
+      "permission": "env.model_capabilities",
+      "arguments": "ModelCapabilitiesArgs",
+      "result": "ModelCapabilities",
+      "hooks": [
+        "run_before_request",
+        "run_after_response",
+        "run_on_stream_chunk",
+        "run_on_http_request",
+        "run_on_tick"
+      ],
+      "helpers": [
+        "GetModelCapabilities"
+      ]
+    },
+    {
       "command": "env.model_pricing",
       "permission": "env.model_pricing",
       "arguments": "ModelPricingGetArgs",
@@ -438,6 +454,19 @@
       "helpers": [
         "RouteRequest",
         "MustRouteRequest"
+      ]
+    },
+    {
+      "command": "env.suggest",
+      "permission": "env.suggest",
+      "arguments": "SuggestArgs",
+      "result": "SuggestResult",
+      "hooks": [
+        "run_before_request",
+        "run_after_response"
+      ],
+      "helpers": [
+        "Suggest"
       ]
     },
     {

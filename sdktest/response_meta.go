@@ -22,3 +22,16 @@ func SetResponseMeta(resp *pbv1.ChatResponse, meta map[string]any) error {
 	resp.ToranaMetaJson = raw
 	return nil
 }
+
+// SetRequestMeta simulates host-owned metadata for before-request hooks.
+func SetRequestMeta(req *pbv1.ChatRequest, meta map[string]any) error {
+	if req == nil {
+		return errors.New("sdktest: nil request")
+	}
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	req.ToranaMetaJson = raw
+	return nil
+}

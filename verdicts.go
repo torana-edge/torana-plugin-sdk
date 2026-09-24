@@ -47,6 +47,17 @@ func RouteRequest(provider, model string) error {
 	})
 }
 
+// RouteRequestWithEffort routes a request with an explicitly chosen effort.
+// UNSPECIFIED leaves the harness's effort unchanged. Operators should not
+// grant this to a router that is not explicitly managing effort.
+func RouteRequestWithEffort(provider, model string, effort pbv1.Effort) error {
+	return checkedHostCall("env.route_request", &pbv1.RouteRequestArgs{
+		Provider: provider,
+		Model:    model,
+		Effort:   effort,
+	})
+}
+
 // SetIdentity overrides the rate-limit / identity key for this request.
 // Requires env.set_identity.
 func SetIdentity(identity string) error {

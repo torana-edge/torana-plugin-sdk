@@ -31,6 +31,7 @@ Generated from `capabilities.json`; run `scripts/generate-capabilities.py` after
 | `env.meta_get` | `env.meta_get` | `MetaGetArgs` | `utf8` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `MetaGet` |
 | `env.meta_set` | `env.meta_set` | `MetaSetArgs` | `empty` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `MetaSet` |
 | `env.model_complete` | `env.model_complete` | `ModelCompleteArgs` | `ModelCompleteResult` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `ModelComplete` |
+| `env.model_capabilities` | `env.model_capabilities` | `ModelCapabilitiesArgs` | `ModelCapabilities` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `GetModelCapabilities` |
 | `env.model_pricing` | `env.model_pricing` | `ModelPricingGetArgs` | `ModelPricing` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `GetModelPricing` |
 | `env.now` | `env.now` | `none` | `unix-ms` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `Now` |
 | `env.original_request` | `env.original_request` | `none` | `bytes` | `run_before_request`, `run_after_response`, `run_on_stream_chunk` | `OriginalRequest` |
@@ -39,6 +40,7 @@ Generated from `capabilities.json`; run `scripts/generate-capabilities.py` after
 | `env.resource_info` | `env.resource_info` | `ResourceInfoArgs` | `ResourceInfo` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `GetResourceInfo` |
 | `env.respond_request` | `env.respond_request` | `RespondRequestArgs` | `empty` | `run_before_request` | `RespondRequest`, `RespondText`, `MustRespondRequest`, `MustRespondText` |
 | `env.route_request` | `env.route_request` | `RouteRequestArgs` | `empty` | `run_before_request` | `RouteRequest`, `MustRouteRequest` |
+| `env.suggest` | `env.suggest` | `SuggestArgs` | `SuggestResult` | `run_before_request`, `run_after_response` | `Suggest` |
 | `env.set_identity` | `env.set_identity` | `SetIdentityArgs` | `empty` | `run_before_request` | `SetIdentity`, `MustSetIdentity` |
 | `env.shared_cache_delete` | `env.shared_cache_set` | `CacheDeleteArgs` | `empty` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `SharedCacheDelete` |
 | `env.shared_cache_get` | `env.shared_cache_get` | `CacheGetArgs` | `utf8` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `SharedCacheGet` |

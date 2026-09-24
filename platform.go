@@ -132,6 +132,46 @@ func GetModelPricing(resource string) (*pbv1.ModelPricing, error) {
 	return &pricing, nil
 }
 
+// GetModelCapabilities reads an operator-declared provider/model capability.
+// Unknown models return a typed host refusal; the SDK does not probe providers.
+func GetModelCapabilities(provider, model string) (*pbv1.ModelCapabilities, error) {
+	value, err := checkedHostCallRequired("env.model_capabilities", &pbv1.ModelCapabilitiesArgs{Provider: provider, Model: model})
+	if err != nil {
+		return nil, err
+	}
+	var capabilities pbv1.ModelCapabilities
+	if err := pbv1.ValidateWire(value, capabilities.ProtoReflect().Descriptor()); err != nil {
+		return nil, fmt.Errorf("torana: model capabilities wire: %w", err)
+	}
+	if err := proto.Unmarshal(value, &capabilities); err != nil {
+		return nil, fmt.Errorf("torana: decode model capabilities: %w", err)
+	}
+	if err := capabilities.Validate(); err != nil {
+		return nil, fmt.Errorf("torana: model capabilities: %w", err)
+	}
+	return &capabilities, nil
+}
+
+// Suggest submits a conversation-scoped suggestion for host-owned delivery and
+// consent. The returned ID and code are issued by the host, not the plugin.
+func Suggest(args *pbv1.SuggestArgs) (*pbv1.SuggestResult, error) {
+	value, err := checkedHostCallRequired("env.suggest", args)
+	if err != nil {
+		return nil, err
+	}
+	var result pbv1.SuggestResult
+	if err := pbv1.ValidateWire(value, result.ProtoReflect().Descriptor()); err != nil {
+		return nil, fmt.Errorf("torana: suggest wire: %w", err)
+	}
+	if err := proto.Unmarshal(value, &result); err != nil {
+		return nil, fmt.Errorf("torana: decode suggestion: %w", err)
+	}
+	if err := result.Validate(); err != nil {
+		return nil, fmt.Errorf("torana: suggestion: %w", err)
+	}
+	return &result, nil
+}
+
 // GetPromptCachePolicy resolves one operator-bound prompt-cache policy. The
 // plugin supplies only its declared resource name; provider, model, routing,
 // prices, and lifetime semantics belong to the operator binding.
