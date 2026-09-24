@@ -49,7 +49,7 @@ go mod init github.com/your-org/my-custom-plugin
 2. Fetch the standalone Torana plugin SDK:
 
 ```bash
-go get github.com/torana-edge/torana-plugin-sdk@v0.5.1
+go get github.com/torana-edge/torana-plugin-sdk@v0.6.0
 ```
 
 > **Note**: The SDK repository contains the ABI, helpers, templates, and
@@ -827,7 +827,7 @@ Pin the released SDK version so builds stay reproducible:
 
 ```toml
 [dependencies]
-torana-plugin-sdk = "=0.5.1"
+torana-plugin-sdk = "=0.6.0"
 ```
 
 ```rust
