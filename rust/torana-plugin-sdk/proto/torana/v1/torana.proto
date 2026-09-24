@@ -883,9 +883,44 @@ message RespondRequestArgs {
 // RouteRequestArgs is the argument body for env.route_request.
 // An empty provider with a non-empty model is a model-only override on the
 // original provider. At least one of provider or model must be set.
+enum Effort {
+  EFFORT_UNSPECIFIED = 0;
+  EFFORT_MINIMAL = 1;
+  EFFORT_LOW = 2;
+  EFFORT_MEDIUM = 3;
+  EFFORT_HIGH = 4;
+  EFFORT_XHIGH = 5;
+  EFFORT_MAX = 6;
+}
+
 message RouteRequestArgs {
   string provider = 1;
   string model = 2;
+  // UNSPECIFIED preserves the request's existing effort behavior.
+  Effort effort = 3;
+}
+
+// A plugin suggestion is scoped by the host to the current conversation.
+// The host owns IDs, confirmation codes, deduplication and delivery.
+message SuggestArgs {
+  string kind = 1;
+  string dedupe_key = 2;
+  string title = 3;
+  string body = 4;
+  repeated SuggestAction actions = 5;
+  optional double cost_usd = 6;
+  optional string harness_target_model = 7;
+  uint32 expires_after_user_turns = 8;
+}
+
+message SuggestAction {
+  string id = 1;
+  string label = 2;
+}
+
+message SuggestResult {
+  string suggestion_id = 1;
+  string code = 2;
 }
 
 // SetIdentityArgs is the argument body for env.set_identity.
@@ -1150,6 +1185,21 @@ message ModelPricing {
   optional double output_usd_per_mtok = 2;
   optional double cache_read_usd_per_mtok = 3;
   optional double cache_write_usd_per_mtok = 4;
+}
+
+// A capability query is restricted by the host to an operator-declared model.
+message ModelCapabilitiesArgs {
+  string provider = 1;
+  string model = 2;
+}
+
+message ModelCapabilities {
+  // Empty means the model has no declared portable effort support.
+  repeated Effort effort_levels = 1;
+  optional uint32 context_window_tokens = 2;
+  string format = 3;
+  // Absence means pricing is unknown, not free.
+  ModelPricing pricing = 4;
 }
 
 // PromptCachePolicyGetArgs resolves one operator-bound prompt-cache policy.

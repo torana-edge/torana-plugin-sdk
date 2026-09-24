@@ -122,6 +122,43 @@ func (x *RouteRequestArgs) Validate() error {
 	if x.Provider == "" && x.Model == "" {
 		return fmt.Errorf("route request args need a provider and/or model")
 	}
+	if !validEffort(x.Effort) {
+		return fmt.Errorf("route request has unknown effort %d", x.Effort)
+	}
+	return nil
+}
+
+func validEffort(value Effort) bool {
+	return value >= Effort_EFFORT_UNSPECIFIED && value <= Effort_EFFORT_MAX
+}
+
+func (x *SuggestArgs) Validate() error {
+	if x == nil {
+		return fmt.Errorf("suggest args are nil")
+	}
+	if x.Kind == "" || x.DedupeKey == "" || strings.TrimSpace(x.Title) == "" ||
+		utf8.RuneCountInString(x.Title) > 120 || strings.TrimSpace(x.Body) == "" ||
+		utf8.RuneCountInString(x.Body) > 600 {
+		return fmt.Errorf("suggestion needs kind, dedupe key, title (up to 120 characters), and body (up to 600 characters)")
+	}
+	for _, action := range x.Actions {
+		if action == nil || action.Id == "" || strings.TrimSpace(action.Label) == "" {
+			return fmt.Errorf("suggestion actions need an id and label")
+		}
+	}
+	if x.CostUsd != nil && (math.IsNaN(*x.CostUsd) || math.IsInf(*x.CostUsd, 0) || *x.CostUsd < 0) {
+		return fmt.Errorf("suggestion cost must be finite and non-negative")
+	}
+	if x.HarnessTargetModel != nil && strings.TrimSpace(*x.HarnessTargetModel) == "" {
+		return fmt.Errorf("suggestion target model must not be empty")
+	}
+	return nil
+}
+
+func (x *SuggestResult) Validate() error {
+	if x == nil || x.SuggestionId == "" || x.Code == "" {
+		return fmt.Errorf("suggest result needs an id and code")
+	}
 	return nil
 }
 
@@ -455,6 +492,33 @@ func (x *ModelPricing) Validate() error {
 		if rate.value != nil && (math.IsNaN(*rate.value) || math.IsInf(*rate.value, 0) || *rate.value < 0) {
 			return fmt.Errorf("model pricing %s must be finite and non-negative", rate.name)
 		}
+	}
+	return nil
+}
+
+func (x *ModelCapabilitiesArgs) Validate() error {
+	if x == nil || strings.TrimSpace(x.Provider) == "" || strings.TrimSpace(x.Model) == "" {
+		return fmt.Errorf("model capabilities args need a provider and model")
+	}
+	return nil
+}
+
+func (x *ModelCapabilities) Validate() error {
+	if x == nil || strings.TrimSpace(x.Format) == "" {
+		return fmt.Errorf("model capabilities need a format")
+	}
+	if x.ContextWindowTokens != nil && *x.ContextWindowTokens == 0 {
+		return fmt.Errorf("model context window must be positive")
+	}
+	seen := make(map[Effort]bool, len(x.EffortLevels))
+	for _, level := range x.EffortLevels {
+		if !validEffort(level) || level == Effort_EFFORT_UNSPECIFIED || seen[level] {
+			return fmt.Errorf("model capabilities contain an invalid or repeated effort level")
+		}
+		seen[level] = true
+	}
+	if x.Pricing != nil {
+		return x.Pricing.Validate()
 	}
 	return nil
 }
