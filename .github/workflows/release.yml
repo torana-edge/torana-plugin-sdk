@@ -51,7 +51,7 @@ jobs:
           targets: wasm32-wasip1
       - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - run: go test ./...
-      - run: cargo test --manifest-path rust/torana-plugin-sdk/Cargo.toml
+      - run: cargo test --locked --manifest-path rust/torana-plugin-sdk/Cargo.toml
       - name: Generated capability contracts are current
         run: ./scripts/check-capabilities.sh
       - name: Verify tag matches crate version
@@ -63,7 +63,7 @@ jobs:
       - run: |
           mkdir -p dist
           GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -buildvcs=false -o dist/go-logger.wasm ./examples/go-logger
-          cargo build --release --target wasm32-wasip1 --target-dir /tmp/rust-logger-target --manifest-path examples/rust-logger/Cargo.toml
+          cargo build --locked --release --target wasm32-wasip1 --target-dir /tmp/rust-logger-target --manifest-path examples/rust-logger/Cargo.toml
           cp /tmp/rust-logger-target/wasm32-wasip1/release/torana-rust-logger.wasm dist/rust-logger.wasm
           (cd dist && sha256sum -- *.wasm > checksums.txt)
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
