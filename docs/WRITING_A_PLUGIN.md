@@ -611,11 +611,6 @@ Beyond the request itself, Torana publishes routing context in
 `ChatRequest.ToranaMetaJson`. It never reaches the wire and is excluded from the
 determinism check, so it is safe for the host to vary per request.
 
-`ChatResponse.ToranaMetaJson` is the analogous host-owned, response-side
-metadata object for observational facts such as the final routing outcome.
-It is not provider output, is never sent to the model or harness, and a
-response replacement must preserve it byte-for-byte.
-
 | Key | Meaning |
 | --- | --- |
 | `_provider` | The selected route's provider name. For prices, use an operator-bound pricing resource rather than constructing provider/model coordinates. |
@@ -631,6 +626,19 @@ var meta struct {
 }
 _ = json.Unmarshal(req.ToranaMetaJson, &meta)
 ```
+
+`ChatResponse.ToranaMetaJson` is the analogous host-owned, response-side
+metadata object. It is not provider output, is never sent to the model or
+harness, and a response replacement must preserve it byte-for-byte. Use
+`sdk.RouteApplied(resp)` to read its optional `_route_applied` object rather
+than parsing JSON in every plugin.
+
+| `_route_applied` field | Meaning |
+| --- | --- |
+| `provider`, `model` | Route immediately after Torana considered the plugin verdict. On refusal, these remain the original route. |
+| `verdict_plugin` | Plugin that issued the verdict. |
+| `refused` | `null` on acceptance; otherwise one of `unknown_provider`, `credential_policy`, `bridge_unrepresentable`, `format_mismatch`, `invalid_target_url`, or `missing_route_context`. Future host revisions may add a code. |
+| `served_by`, `served_model`, `failover` | Upstream that eventually served the request and whether provider failover changed it. These can differ from the plugin route. |
 
 Treat every field as optional. An empty value means the host did not supply it,
 and a plugin that would spend money on the strength of it should decline instead.
