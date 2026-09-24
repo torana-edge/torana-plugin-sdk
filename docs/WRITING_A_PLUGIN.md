@@ -616,7 +616,6 @@ determinism check, so it is safe for the host to vary per request.
 | `_provider` | The selected route's provider name. For prices, use an operator-bound pricing resource rather than constructing provider/model coordinates. |
 | `_conversation_id` | A stable label for the conversation. Torana prefers a recognized harness/provider identity when present, then falls back to a format-independent content root. A harness session may contain multiple side threads, so plugins needing thread-level state must distinguish them. |
 | `_path` | The provider-stripped caller path. Native routing preserves it; an explicit protocol bridge constructs the destination endpoint. Do not treat it as a universal upstream replay URL. |
-| `_response` | On `run_after_response` only: latency, upstream status, and token usage including cache reads and writes. |
 
 ```go
 var meta struct {
