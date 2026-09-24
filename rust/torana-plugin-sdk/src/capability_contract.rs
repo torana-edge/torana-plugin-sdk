@@ -99,6 +99,11 @@ pub(crate) const COMMANDS: &[CommandContract] = &[
         result: "ModelCompleteResult",
     },
     CommandContract {
+        command: "env.model_capabilities",
+        arguments: "ModelCapabilitiesArgs",
+        result: "ModelCapabilities",
+    },
+    CommandContract {
         command: "env.model_pricing",
         arguments: "ModelPricingGetArgs",
         result: "ModelPricing",
@@ -137,6 +142,11 @@ pub(crate) const COMMANDS: &[CommandContract] = &[
         command: "env.route_request",
         arguments: "RouteRequestArgs",
         result: "empty",
+    },
+    CommandContract {
+        command: "env.suggest",
+        arguments: "SuggestArgs",
+        result: "SuggestResult",
     },
     CommandContract {
         command: "env.set_identity",

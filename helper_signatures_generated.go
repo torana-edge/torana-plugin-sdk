@@ -16,6 +16,7 @@ var helperErrorResults = map[string]int{
 	"DispatchHook":                 1,
 	"EncodeRequest":                1,
 	"GetCredential":                1,
+	"GetModelCapabilities":         1,
 	"GetModelPricing":              1,
 	"GetPromptCachePolicy":         1,
 	"GetResourceInfo":              1,
@@ -42,6 +43,7 @@ var helperErrorResults = map[string]int{
 	"RespondText":                  0,
 	"RouteApplied":                 2,
 	"RouteRequest":                 0,
+	"RouteRequestWithEffort":       0,
 	"SendRequest":                  1,
 	"SetCacheBreakpoint":           0,
 	"SetIdentity":                  0,
@@ -60,7 +62,10 @@ var helperErrorResults = map[string]int{
 	"StateScan":                    1,
 	"StateSet":                     0,
 	"StateSetJSON":                 0,
+	"Suggest":                      1,
+	"Suggestions":                  1,
 	"ToolResultContentFingerprint": 1,
+	"ToranaMCP":                    2,
 	"WriteFile":                    0,
 }
 
