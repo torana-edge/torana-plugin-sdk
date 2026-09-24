@@ -10,20 +10,28 @@ is a working example. For calling and administering operations, see the
 
 ## Contract
 
-`agent.json` is optional. When present it has this shape:
+`agent.json` is optional. For a plugin that wants its operations in Torana's
+MCP server and `torana>` commands, use schema version 2:
 
 ```json
 {
-  "schema_version": 1,
-  "description": "Machine-readable plugin operations.",
+  "schema_version": 2,
+  "namespace": {
+    "title": "My plugin",
+    "summary": "Explains and controls this plugin.",
+    "alias": "mine",
+    "categories": ["workflow"]
+  },
   "operations": [
     {
-      "id": "status",
+      "id": "session.status",
       "method": "GET",
       "path": "/status",
-      "description": "Read plugin status.",
+      "description": "Read this conversation's plugin status.",
       "risk": "read",
       "idempotent": true,
+      "model_access": "read",
+      "conversation_binding": "required",
       "output_schema": {
         "type": "object"
       }
@@ -31,6 +39,39 @@ is a working example. For calling and administering operations, see the
   ]
 }
 ```
+
+The plugin's manifest name is its canonical namespace. The optional short
+`alias` is for typing directives; MCP always uses the canonical name. Namespace
+title (up to 60 characters), summary (up to 300), and categories help people
+and agents find the plugin's operations. Torana also adds standard operations
+to every namespace, such as `_info`, `_status`, `_enable`, and `_disable`;
+plugins cannot declare IDs beginning with `_`.
+
+Each operation can add:
+
+- `model_access`: `read`, `confirm`, or `never`. The default follows `risk`
+  (`read` → `read`, `write` → `confirm`, `destructive` → `never`). A plugin may
+  make access stricter, and the operator may tighten it further. The host's
+  protected-operation floor cannot be relaxed.
+- `conversation_binding`: `none`, `preferred`, or `required`. Use `required`
+  whenever the result or change belongs to the current conversation. A model
+  cannot name a different conversation through an operation.
+- `directive`: for a user-typed `torana> <namespace> <command> ...` form, with
+  `command`, ordered property names in `args` (`?` marks an optional argument),
+  and optional `user_direct`. Set `user_direct` only for low-risk reversible
+  writes; the host disallows it on protected plugins and protected operations.
+- `examples`: short phrases to help operation search and `torana> ask`.
+- `deprecated` and `replaced_by`: keep an older operation callable while
+  directing people to its replacement; deprecated operations leave search.
+
+For example, a route pin may declare `"directive": {"command": "pin",
+"args": ["step", "user_turns?"], "user_direct": true}`. The host still checks
+the input schema and access policy before dispatch. The plugin itself must
+implement the operation's `/agent/...` HTTP path.
+
+Version-1 descriptors remain valid for existing integrations, but have no
+declared namespace title, alias, directives, or explicit model access. New
+plugins should use version 2.
 
 Each operation must use JSON input and output. `input_schema` is optional;
 `output_schema` is required. Supported methods are `GET`, `POST`, `PUT`,
