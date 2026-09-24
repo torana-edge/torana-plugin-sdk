@@ -611,6 +611,11 @@ Beyond the request itself, Torana publishes routing context in
 `ChatRequest.ToranaMetaJson`. It never reaches the wire and is excluded from the
 determinism check, so it is safe for the host to vary per request.
 
+`ChatResponse.ToranaMetaJson` is the analogous host-owned, response-side
+metadata object for observational facts such as the final routing outcome.
+It is not provider output, is never sent to the model or harness, and a
+response replacement must preserve it byte-for-byte.
+
 | Key | Meaning |
 | --- | --- |
 | `_provider` | The selected route's provider name. For prices, use an operator-bound pricing resource rather than constructing provider/model coordinates. |

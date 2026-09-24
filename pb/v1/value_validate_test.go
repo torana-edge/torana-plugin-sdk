@@ -5,7 +5,33 @@ import (
 	"testing"
 
 	v1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
+
+func TestResponseMetadataIsStrictObject(t *testing.T) {
+	field := (&v1.ChatResponse{}).ProtoReflect().Descriptor().Fields().ByName("torana_meta_json")
+	if field == nil || field.Number() != 11 || field.Kind() != protoreflect.BytesKind {
+		t.Fatalf("response metadata descriptor drift: %v", field)
+	}
+	for _, tc := range []struct {
+		name string
+		raw  string
+		ok   bool
+	}{
+		{"absent", "", true},
+		{"object", `{"_route_applied":{"model":"m"}}`, true},
+		{"array", `[]`, false},
+		{"duplicate", `{"x":1,"x":2}`, false},
+		{"trailing", `{} {}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := (&v1.ChatResponse{ToranaMetaJson: []byte(tc.raw)}).Validate()
+			if (err == nil) != tc.ok {
+				t.Fatalf("Validate() = %v, want ok=%v", err, tc.ok)
+			}
+		})
+	}
+}
 
 func TestNegativeStreamIndexesAreRejected(t *testing.T) {
 	cases := []struct {
