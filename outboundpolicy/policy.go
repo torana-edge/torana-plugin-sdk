@@ -915,6 +915,7 @@ var chatResponseFieldPolicies = map[string]FieldPolicy{
 	"provider_extensions_json": hostOwnedPolicy(),
 	"provider":                 hostOwnedPolicy(),
 	"completed_at_unix_ms":     hostOwnedPolicy(),
+	"torana_meta_json":         hostOwnedPolicy(),
 }
 
 var responseMessageFieldPolicies = map[string]FieldPolicy{

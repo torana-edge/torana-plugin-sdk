@@ -2068,8 +2068,12 @@ type ChatResponse struct {
 	// Host-owned completion wall-clock time in Unix milliseconds. Observability
 	// plugins can timestamp records without requesting ambient clock authority.
 	CompletedAtUnixMs int64 `protobuf:"varint,10,opt,name=completed_at_unix_ms,json=completedAtUnixMs,proto3" json:"completed_at_unix_ms,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Host-owned response-side metadata for plugins. This is never serialized
+	// to a model provider or returned to the harness. Routing outcomes and
+	// other post-request facts live here, not in provider_extensions_json.
+	ToranaMetaJson []byte `protobuf:"bytes,11,opt,name=torana_meta_json,json=toranaMetaJson,proto3" json:"torana_meta_json,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ChatResponse) Reset() {
@@ -2170,6 +2174,13 @@ func (x *ChatResponse) GetCompletedAtUnixMs() int64 {
 		return x.CompletedAtUnixMs
 	}
 	return 0
+}
+
+func (x *ChatResponse) GetToranaMetaJson() []byte {
+	if x != nil {
+		return x.ToranaMetaJson
+	}
+	return nil
 }
 
 // Identifies the tool call a "tool_call" content block is assembling. FUNCTION
@@ -6653,7 +6664,7 @@ const file_proto_torana_v1_torana_proto_rawDesc = "" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"d\n" +
 	"\x0fResponseMessage\x120\n" +
 	"\x06blocks\x18\x03 \x03(\v2\x18.torana.v1.ResponseBlockR\x06blocksJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\acontentR\n" +
-	"tool_calls\"\x88\x03\n" +
+	"tool_calls\"\xb2\x03\n" +
 	"\fChatResponse\x12\x14\n" +
 	"\x05model\x18\x01 \x01(\tR\x05model\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x124\n" +
@@ -6666,7 +6677,8 @@ const file_proto_torana_v1_torana_proto_rawDesc = "" +
 	"\x18provider_extensions_json\x18\b \x01(\fR\x16providerExtensionsJson\x12\x1a\n" +
 	"\bprovider\x18\t \x01(\tR\bprovider\x12/\n" +
 	"\x14completed_at_unix_ms\x18\n" +
-	" \x01(\x03R\x11completedAtUnixMs\"\x97\x01\n" +
+	" \x01(\x03R\x11completedAtUnixMs\x12(\n" +
+	"\x10torana_meta_json\x18\v \x01(\fR\x0etoranaMetaJson\"\x97\x01\n" +
 	"\vToolCallRef\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1c\n" +

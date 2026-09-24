@@ -80,7 +80,7 @@ func TestHookResultActionsAreHonestDelegates(t *testing.T) {
 }
 
 func TestObservedResponseFactsAreHostOwned(t *testing.T) {
-	for _, field := range []string{"model", "id", "usage", "upstream_status", "duration_ms", "provider_extensions_json"} {
+	for _, field := range []string{"model", "id", "usage", "upstream_status", "duration_ms", "provider_extensions_json", "torana_meta_json"} {
 		p, _ := OutboundFieldPolicy("torana.v1.ChatResponse", field)
 		if !p.IsHostOwned() {
 			t.Errorf("ChatResponse.%s must be host-owned", field)

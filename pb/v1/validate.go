@@ -278,6 +278,9 @@ func (x *ChatResponse) Validate() error {
 	if x == nil {
 		return fmt.Errorf("chat response is nil")
 	}
+	if err := validateJSONField(x.ToranaMetaJson, "torana_meta_json", jsonFieldRule{shape: "object"}); err != nil {
+		return err
+	}
 	if x.Message != nil {
 		if err := x.Message.Validate(); err != nil {
 			return err

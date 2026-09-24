@@ -22,6 +22,37 @@ pub mod pbv1 {
     include!(concat!(env!("OUT_DIR"), "/torana.v1.rs"));
 }
 
+/// Host observation for a plugin route verdict. The selected route and the
+/// eventual upstream can differ after failover.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize)]
+pub struct RouteAppliedInfo {
+    pub provider: String,
+    pub model: String,
+    pub verdict_plugin: String,
+    pub refused: Option<String>,
+    pub served_by: String,
+    pub served_model: String,
+    pub failover: bool,
+}
+
+/// Read the optional host-owned route observation on an after-response hook.
+pub fn route_applied(response: &pbv1::ChatResponse) -> Result<Option<RouteAppliedInfo>, String> {
+    if response.torana_meta_json.is_empty() {
+        return Ok(None);
+    }
+    let object = strict_json(&response.torana_meta_json)
+        .map_err(|err| format!("route applied metadata: {err}"))?;
+    let Some(route) = object.get("_route_applied") else {
+        return Ok(None);
+    };
+    if !route.is_object() {
+        return Err("route applied metadata must be an object".into());
+    }
+    serde_json::from_value(route.clone())
+        .map(Some)
+        .map_err(|err| format!("route applied metadata: {err}"))
+}
+
 /// Runtime ABI contract identifier. The high 32 bits are the ABI epoch and
 /// the low 32 bits are the contract revision within that epoch.
 pub const ABI_VERSION: u64 = (1u64 << 32) | 1;
@@ -2390,6 +2421,19 @@ fn validate_prompt_cache_policy(policy: &pbv1::PromptCachePolicy) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn route_applied_reads_host_observation() {
+        let mut response = pbv1::ChatResponse::default();
+        assert!(route_applied(&response).unwrap().is_none());
+        response.torana_meta_json = br#"{"_route_applied":{"provider":"a","model":"m","verdict_plugin":"router","refused":null,"served_by":"b","served_model":"m","failover":true}}"#.to_vec();
+        let route = route_applied(&response).unwrap().unwrap();
+        assert_eq!(route.provider, "a");
+        assert_eq!(route.served_by, "b");
+        assert!(route.failover);
+        response.torana_meta_json = br#"{"_route_applied":null}"#.to_vec();
+        assert!(route_applied(&response).is_err());
+    }
 
     #[test]
     fn recoverable_tool_error_scrubs_content_and_is_idempotent() {

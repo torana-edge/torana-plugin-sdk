@@ -385,6 +385,10 @@ message ChatResponse {
   // Host-owned completion wall-clock time in Unix milliseconds. Observability
   // plugins can timestamp records without requesting ambient clock authority.
   int64 completed_at_unix_ms = 10;
+  // Host-owned response-side metadata for plugins. This is never serialized
+  // to a model provider or returned to the harness. Routing outcomes and
+  // other post-request facts live here, not in provider_extensions_json.
+  bytes torana_meta_json = 11;
 }
 
 // ---------------------------------------------------------------------------

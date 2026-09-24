@@ -49,7 +49,7 @@ go mod init github.com/your-org/my-custom-plugin
 2. Fetch the standalone Torana plugin SDK:
 
 ```bash
-go get github.com/torana-edge/torana-plugin-sdk@v0.5.1
+go get github.com/torana-edge/torana-plugin-sdk@v0.6.0
 ```
 
 > **Note**: The SDK repository contains the ABI, helpers, templates, and
@@ -614,9 +614,8 @@ determinism check, so it is safe for the host to vary per request.
 | Key | Meaning |
 | --- | --- |
 | `_provider` | The selected route's provider name. For prices, use an operator-bound pricing resource rather than constructing provider/model coordinates. |
-| `_conversation_id` | A stable label for the conversation, derived from the canonical IR — not from any harness header, so it works identically across every wire format. |
+| `_conversation_id` | A stable label for the conversation. Torana prefers a recognized harness/provider identity when present, then falls back to a format-independent content root. A harness session may contain multiple side threads, so plugins needing thread-level state must distinguish them. |
 | `_path` | The provider-stripped caller path. Native routing preserves it; an explicit protocol bridge constructs the destination endpoint. Do not treat it as a universal upstream replay URL. |
-| `_response` | On `run_after_response` only: latency, upstream status, and token usage including cache reads and writes. |
 
 ```go
 var meta struct {
@@ -626,6 +625,19 @@ var meta struct {
 }
 _ = json.Unmarshal(req.ToranaMetaJson, &meta)
 ```
+
+`ChatResponse.ToranaMetaJson` is the analogous host-owned, response-side
+metadata object. It is not provider output, is never sent to the model or
+harness, and a response replacement must preserve it byte-for-byte. Use
+`sdk.RouteApplied(resp)` to read its optional `_route_applied` object rather
+than parsing JSON in every plugin.
+
+| `_route_applied` field | Meaning |
+| --- | --- |
+| `provider`, `model` | Route immediately after Torana considered the plugin verdict. On refusal, these remain the original route. |
+| `verdict_plugin` | Plugin that issued the verdict. |
+| `refused` | `null` on acceptance; otherwise one of `unknown_provider`, `credential_policy`, `bridge_unrepresentable`, `format_mismatch`, `invalid_target_url`, or `missing_route_context`. Future host revisions may add a code. |
+| `served_by`, `served_model`, `failover` | Upstream that eventually served the request and whether provider failover changed it. These can differ from the plugin route. |
 
 Treat every field as optional. An empty value means the host did not supply it,
 and a plugin that would spend money on the strength of it should decline instead.
@@ -814,7 +826,7 @@ Pin the released SDK version so builds stay reproducible:
 
 ```toml
 [dependencies]
-torana-plugin-sdk = "=0.5.1"
+torana-plugin-sdk = "=0.6.0"
 ```
 
 ```rust

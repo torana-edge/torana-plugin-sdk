@@ -40,6 +40,7 @@ var helperErrorResults = map[string]int{
 	"RequestBlocksFingerprint":     1,
 	"RespondRequest":               0,
 	"RespondText":                  0,
+	"RouteApplied":                 2,
 	"RouteRequest":                 0,
 	"SendRequest":                  1,
 	"SetCacheBreakpoint":           0,
