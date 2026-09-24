@@ -12,7 +12,7 @@ Start with [your first plugin](../../docs/FIRST_PLUGIN.md). Rust 1.85+,
 crate-type = ["cdylib"]
 
 [dependencies]
-torana-plugin-sdk = "=0.6.0"
+torana-plugin-sdk = "=0.6.1"
 ```
 
 Keep the exact version and your reviewed Cargo.lock so plugin builds remain

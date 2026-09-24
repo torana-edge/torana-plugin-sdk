@@ -42,7 +42,7 @@ For optional JSON operations exposed to agents, see
 
 ## Compatibility
 
-SDK **v0.5.1** implements ABI major **1**, contract revision **1**. SDK package
+SDK **v0.6.1** implements ABI major **1**, contract revision **1**. SDK package
 versions and Edge releases are separate. Use the SDK version documented by
 your target host. Go uses the module tag, and Rust uses the matching crate
 release.

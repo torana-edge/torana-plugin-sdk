@@ -36,11 +36,16 @@ guests in the host test: the language-support claim is an executable contract,
 not merely two crates that happen to compile.
 
 1. **Bump `rust/torana-plugin-sdk/Cargo.toml`** to the version you are about to
-   tag, without the `v`, and update the SDK and example Cargo lockfiles. Choose
+   tag, without the `v`, and update all three Cargo lockfiles:
+   `rust/torana-plugin-sdk/Cargo.lock`, `examples/rust-logger/Cargo.lock`, and
+   `conformance/guests/rust-allhooks/Cargo.lock`. Choose
    an unused version newer than the latest tag. ABI and package versions are
    independent: ABI v1 does not imply SDK v0.1. Commit the version to `main`.
-2. **Verify** — `go test ./...`, `cargo test --manifest-path rust/torana-plugin-sdk/Cargo.toml`,
-   and a `GOOS=wasip1 GOARCH=wasm go build ./...` (a compile check of the SDK
+2. **Verify** — `go test ./...`,
+   `cargo test --locked --manifest-path rust/torana-plugin-sdk/Cargo.toml`,
+   `cargo build --locked --target wasm32-wasip1 --manifest-path examples/rust-logger/Cargo.toml`,
+   `cargo build --locked --target wasm32-wasip1 --manifest-path conformance/guests/rust-allhooks/Cargo.toml`,
+   and `GOOS=wasip1 GOARCH=wasm go build ./...` (a compile check of the SDK
    library — no `-buildmode=c-shared`, because nothing here is a plugin).
 3. **Check publishing access before tagging.** The repository needs a
    `CARGO_REGISTRY_TOKEN` Actions secret restricted to the crate name
