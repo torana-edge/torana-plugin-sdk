@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	v1 "github.com/torana-edge/torana-plugin-sdk/pb/v1"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
@@ -46,13 +47,13 @@ func TestAdaptiveABIValidation(t *testing.T) {
 	if err := valid.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	tooLong := *valid
+	tooLong := proto.Clone(valid).(*v1.SuggestArgs)
 	tooLong.Title = strings.Repeat("界", 121)
 	if err := tooLong.Validate(); err == nil {
 		t.Fatal("title longer than 120 Unicode characters accepted")
 	}
 	negative := -1.0
-	tooLong = *valid
+	tooLong = proto.Clone(valid).(*v1.SuggestArgs)
 	tooLong.CostUsd = &negative
 	if err := tooLong.Validate(); err == nil {
 		t.Fatal("negative cost accepted")
@@ -68,12 +69,12 @@ func TestAdaptiveABIValidation(t *testing.T) {
 	if err := good.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	bad := *good
+	bad := proto.Clone(good).(*v1.ModelCapabilities)
 	bad.EffortLevels = []v1.Effort{v1.Effort_EFFORT_LOW, v1.Effort_EFFORT_LOW}
 	if err := bad.Validate(); err == nil {
 		t.Fatal("duplicate effort level accepted")
 	}
-	bad = *good
+	bad = proto.Clone(good).(*v1.ModelCapabilities)
 	bad.Pricing = &v1.ModelPricing{InputUsdPerMtok: new(float64)}
 	*bad.Pricing.InputUsdPerMtok = math.Inf(1)
 	if err := bad.Validate(); err == nil {
