@@ -825,6 +825,9 @@ enum ErrorCode {
   ERROR_CODE_INVALID_ARGUMENT = 5;
   // The host failed for a reason the plugin cannot act on.
   ERROR_CODE_INTERNAL = 6;
+  // The operation exists, but this host version does not implement the
+  // requested variant yet (for example a routed effort override).
+  ERROR_CODE_UNSUPPORTED = 7;
 }
 
 message HostError {

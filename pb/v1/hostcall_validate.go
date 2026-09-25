@@ -31,6 +31,7 @@ var knownErrorCodes = map[ErrorCode]bool{
 	ErrorCode_ERROR_CODE_UNAVAILABLE:       true,
 	ErrorCode_ERROR_CODE_INVALID_ARGUMENT:  true,
 	ErrorCode_ERROR_CODE_INTERNAL:          true,
+	ErrorCode_ERROR_CODE_UNSUPPORTED:       true,
 }
 
 // Validate reports whether a HostError carries a classified failure.

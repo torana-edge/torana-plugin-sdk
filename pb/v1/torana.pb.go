@@ -186,6 +186,9 @@ const (
 	ErrorCode_ERROR_CODE_INVALID_ARGUMENT ErrorCode = 5
 	// The host failed for a reason the plugin cannot act on.
 	ErrorCode_ERROR_CODE_INTERNAL ErrorCode = 6
+	// The operation exists, but this host version does not implement the
+	// requested variant yet (for example a routed effort override).
+	ErrorCode_ERROR_CODE_UNSUPPORTED ErrorCode = 7
 )
 
 // Enum value maps for ErrorCode.
@@ -198,6 +201,7 @@ var (
 		4: "ERROR_CODE_UNAVAILABLE",
 		5: "ERROR_CODE_INVALID_ARGUMENT",
 		6: "ERROR_CODE_INTERNAL",
+		7: "ERROR_CODE_UNSUPPORTED",
 	}
 	ErrorCode_value = map[string]int32{
 		"ERROR_CODE_UNSPECIFIED":       0,
@@ -207,6 +211,7 @@ var (
 		"ERROR_CODE_UNAVAILABLE":       4,
 		"ERROR_CODE_INVALID_ARGUMENT":  5,
 		"ERROR_CODE_INTERNAL":          6,
+		"ERROR_CODE_UNSUPPORTED":       7,
 	}
 )
 
@@ -7404,7 +7409,7 @@ const file_proto_torana_v1_torana_proto_rawDesc = "" +
 	"\x13HOOK_AFTER_RESPONSE\x10\x02\x12\x18\n" +
 	"\x14HOOK_ON_STREAM_CHUNK\x10\x03\x12\x18\n" +
 	"\x14HOOK_ON_HTTP_REQUEST\x10\x04\x12\x10\n" +
-	"\fHOOK_ON_TICK\x10\x05*\xd8\x01\n" +
+	"\fHOOK_ON_TICK\x10\x05*\xf4\x01\n" +
 	"\tErrorCode\x12\x1a\n" +
 	"\x16ERROR_CODE_UNSPECIFIED\x10\x00\x12 \n" +
 	"\x1cERROR_CODE_PERMISSION_DENIED\x10\x01\x12\x18\n" +
@@ -7412,7 +7417,8 @@ const file_proto_torana_v1_torana_proto_rawDesc = "" +
 	"\x19ERROR_CODE_NOT_CONFIGURED\x10\x03\x12\x1a\n" +
 	"\x16ERROR_CODE_UNAVAILABLE\x10\x04\x12\x1f\n" +
 	"\x1bERROR_CODE_INVALID_ARGUMENT\x10\x05\x12\x17\n" +
-	"\x13ERROR_CODE_INTERNAL\x10\x06*\x8a\x01\n" +
+	"\x13ERROR_CODE_INTERNAL\x10\x06\x12\x1a\n" +
+	"\x16ERROR_CODE_UNSUPPORTED\x10\a*\x8a\x01\n" +
 	"\x06Effort\x12\x16\n" +
 	"\x12EFFORT_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eEFFORT_MINIMAL\x10\x01\x12\x0e\n" +
