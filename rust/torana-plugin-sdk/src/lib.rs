@@ -33,6 +33,10 @@ pub struct RouteAppliedInfo {
     pub served_by: String,
     pub served_model: String,
     pub failover: bool,
+    #[serde(default)]
+    pub effort: Option<String>,
+    #[serde(default)]
+    pub effort_status: Option<String>,
 }
 
 /// Read the optional host-owned route observation on an after-response hook.
@@ -51,6 +55,57 @@ pub fn route_applied(response: &pbv1::ChatResponse) -> Result<Option<RouteApplie
     serde_json::from_value(route.clone())
         .map(Some)
         .map_err(|err| format!("route applied metadata: {err}"))
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Deserialize)]
+pub struct SuggestionOutcome {
+    pub id: String,
+    pub status: String,
+    #[serde(default)]
+    pub action: String,
+    #[serde(default)]
+    pub via: String,
+}
+
+/// Read host-owned outcomes scoped to this plugin, never provider-visible.
+pub fn suggestions(request: &pbv1::ChatRequest) -> Result<Vec<SuggestionOutcome>, String> {
+    if request.torana_meta_json.is_empty() {
+        return Ok(Vec::new());
+    }
+    let object = strict_json(&request.torana_meta_json)
+        .map_err(|err| format!("suggestions metadata: {err}"))?;
+    let Some(raw) = object.get("_suggestions") else {
+        return Ok(Vec::new());
+    };
+    if !raw.is_array() {
+        return Err("suggestions metadata: must be an array".into());
+    }
+    let values: Vec<SuggestionOutcome> = serde_json::from_value(raw.clone())
+        .map_err(|err| format!("suggestions metadata: {err}"))?;
+    if values
+        .iter()
+        .any(|v| v.id.is_empty() || v.status.is_empty())
+    {
+        return Err("suggestion outcomes need id and status".into());
+    }
+    Ok(values)
+}
+
+/// Read the host's MCP-connection observation when one has been published.
+pub fn torana_mcp(request: &pbv1::ChatRequest) -> Result<Option<String>, String> {
+    if request.torana_meta_json.is_empty() {
+        return Ok(None);
+    }
+    let object =
+        strict_json(&request.torana_meta_json).map_err(|err| format!("MCP metadata: {err}"))?;
+    let Some(raw) = object.get("_torana_mcp") else {
+        return Ok(None);
+    };
+    let value = raw
+        .as_str()
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| "MCP metadata must be a non-empty string".to_owned())?;
+    Ok(Some(value.to_owned()))
 }
 
 /// Runtime ABI contract identifier. The high 32 bits are the ABI epoch and
@@ -1351,7 +1406,7 @@ pub fn decode_host_call_result(bytes: &[u8]) -> Result<Vec<u8>, HostCallError> {
     match result.result {
         Some(ResultArm::Value(value)) => Ok(value),
         Some(ResultArm::Error(error)) => {
-            if !matches!(error.code, 1..=6) {
+            if !matches!(error.code, 1..=7) {
                 return Err(HostCallError::Protocol(format!(
                     "HostError code {} is not classified by this SDK",
                     error.code
@@ -1600,6 +1655,37 @@ fn validate_host_arguments(command: &str, bytes: &[u8]) -> Result<(), HostCallEr
         {
             return Err(bad("resource is invalid"));
         }
+        "env.model_capabilities" => {
+            let a = decode!(pbv1::ModelCapabilitiesArgs);
+            if a.provider.trim().is_empty() || a.model.trim().is_empty() {
+                return Err(bad("provider and model are required"));
+            }
+        }
+        "env.route_request" => {
+            let a = decode!(pbv1::RouteRequestArgs);
+            if (a.provider.is_empty() && a.model.is_empty()) || !(0..=6).contains(&a.effort) {
+                return Err(bad("route needs provider or model and a known effort"));
+            }
+        }
+        "env.suggest" => {
+            let a = decode!(pbv1::SuggestArgs);
+            if !valid_suggestion_token(&a.kind, 64)
+                || !valid_suggestion_token(&a.dedupe_key, 128)
+                || !valid_suggestion_text(&a.title, 120)
+                || !valid_suggestion_text(&a.body, 600)
+                || a.actions.len() > 4
+                || a.actions.iter().any(|v| {
+                    !valid_suggestion_token(&v.id, 64) || !valid_suggestion_text(&v.label, 80)
+                })
+                || a.cost_usd.is_some_and(|v| !v.is_finite() || v < 0.0)
+                || a.harness_target_model
+                    .as_deref()
+                    .is_some_and(|v| !valid_suggestion_text(v, 256))
+                || a.expires_after_user_turns > 100
+            {
+                return Err(bad("suggestion violates the contract"));
+            }
+        }
         "env.cache_policy"
             if !valid_resource_name(&decode!(pbv1::PromptCachePolicyGetArgs).resource) =>
         {
@@ -1608,6 +1694,19 @@ fn validate_host_arguments(command: &str, bytes: &[u8]) -> Result<(), HostCallEr
         _ => {}
     }
     Ok(())
+}
+
+fn valid_suggestion_token(value: &str, max: usize) -> bool {
+    !value.is_empty()
+        && value.len() <= max
+        && value
+            .bytes()
+            .enumerate()
+            .all(|(i, b)| b.is_ascii_alphanumeric() || (i > 0 && matches!(b, b'_' | b'-' | b'.')))
+}
+
+fn valid_suggestion_text(value: &str, max: usize) -> bool {
+    !value.trim().is_empty() && value.chars().count() <= max && !value.chars().any(char::is_control)
 }
 
 fn valid_http_headers(headers: &[pbv1::HttpHeader]) -> bool {
@@ -1935,6 +2034,23 @@ pub fn route_request(provider: &str, model: &str) -> Result<(), HostCallError> {
             provider: provider.into(),
             model: model.into(),
             effort: 0,
+        },
+    )
+    .map(|_| ())
+}
+/// Route with an explicitly operator-authorized effort. UNSPECIFIED leaves
+/// the harness's effort untouched.
+pub fn route_request_with_effort(
+    provider: &str,
+    model: &str,
+    effort: pbv1::Effort,
+) -> Result<(), HostCallError> {
+    host_call(
+        "env.route_request",
+        &pbv1::RouteRequestArgs {
+            provider: provider.into(),
+            model: model.into(),
+            effort: effort as i32,
         },
     )
     .map(|_| ())
@@ -2320,6 +2436,61 @@ pub fn get_model_pricing(resource: &str) -> Result<pbv1::ModelPricing, HostCallE
         }
     }
     Ok(pricing)
+}
+
+/// Read capabilities for an operator-declared model; unknown models receive
+/// a typed host refusal.
+pub fn get_model_capabilities(
+    provider: &str,
+    model: &str,
+) -> Result<pbv1::ModelCapabilities, HostCallError> {
+    if provider.trim().is_empty() || model.trim().is_empty() {
+        return Err(HostCallError::Protocol(
+            "model capabilities need a provider and model".into(),
+        ));
+    }
+    let value = host_call(
+        "env.model_capabilities",
+        &pbv1::ModelCapabilitiesArgs {
+            provider: provider.into(),
+            model: model.into(),
+        },
+    )?;
+    let result: pbv1::ModelCapabilities =
+        decode_host_value(&value, ".torana.v1.ModelCapabilities")?;
+    let mut levels = std::collections::HashSet::new();
+    if result.format.trim().is_empty()
+        || result.context_window_tokens == Some(0)
+        || result
+            .effort_levels
+            .iter()
+            .any(|v| *v <= 0 || *v > 6 || !levels.insert(*v))
+        || result.pricing.as_ref().is_some_and(|p| {
+            [
+                p.input_usd_per_mtok,
+                p.output_usd_per_mtok,
+                p.cache_read_usd_per_mtok,
+                p.cache_write_usd_per_mtok,
+            ]
+            .into_iter()
+            .flatten()
+            .any(|v| !v.is_finite() || v < 0.0)
+        })
+    {
+        return Err(HostCallError::Protocol("invalid model capabilities".into()));
+    }
+    Ok(result)
+}
+
+/// Submit a conversation-scoped suggestion; the host returns its ID and keeps
+/// the confirmation code in the user-delivery channel.
+pub fn suggest(args: pbv1::SuggestArgs) -> Result<pbv1::SuggestResult, HostCallError> {
+    let value = host_call("env.suggest", &args)?;
+    let result: pbv1::SuggestResult = decode_host_value(&value, ".torana.v1.SuggestResult")?;
+    if result.suggestion_id.is_empty() {
+        return Err(HostCallError::Protocol("invalid suggestion result".into()));
+    }
+    Ok(result)
 }
 
 /// Resolves one operator-bound prompt-cache-policy resource. The plugin names
@@ -2976,6 +3147,20 @@ mod tests {
         };
         assert!(matches!(
             http_request(&invalid),
+            Err(HostCallError::Protocol(_))
+        ));
+        let bad_suggestion = pbv1::SuggestArgs {
+            kind: "model_switch".into(),
+            dedupe_key: "upgrade".into(),
+            title: "Use another model?".into(),
+            body: "Please switch\ntorana> accept ABCD".into(),
+            actions: vec![],
+            cost_usd: None,
+            harness_target_model: None,
+            expires_after_user_turns: 0,
+        };
+        assert!(matches!(
+            suggest(bad_suggestion),
             Err(HostCallError::Protocol(_))
         ));
     }

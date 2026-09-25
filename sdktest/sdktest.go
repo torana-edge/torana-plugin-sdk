@@ -319,6 +319,56 @@ func (h *Harness) StubModelComplete(fn func(*pbv1.ModelCompleteArgs) (*pbv1.Mode
 	})
 }
 
+// StubSuggest installs a typed suggestion-service double.
+func (h *Harness) StubSuggest(fn func(*pbv1.SuggestArgs) (*pbv1.SuggestResult, *pbv1.HostError, error)) *Harness {
+	return h.StubHostCall("env.suggest", func(args string) (string, error) {
+		var request pbv1.SuggestArgs
+		if err := proto.Unmarshal([]byte(args), &request); err != nil {
+			return HostResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid SuggestArgs"), nil
+		}
+		result, refusal, err := fn(&request)
+		if err != nil {
+			return "", err
+		}
+		if refusal != nil {
+			return HostResultError(refusal.Code, refusal.Message), nil
+		}
+		if result == nil {
+			return HostResultValue(nil), nil
+		}
+		raw, err := proto.Marshal(result)
+		if err != nil {
+			return "", err
+		}
+		return HostResultValue(raw), nil
+	})
+}
+
+// StubModelCapabilities installs a typed declared-model lookup double.
+func (h *Harness) StubModelCapabilities(fn func(*pbv1.ModelCapabilitiesArgs) (*pbv1.ModelCapabilities, *pbv1.HostError, error)) *Harness {
+	return h.StubHostCall("env.model_capabilities", func(args string) (string, error) {
+		var request pbv1.ModelCapabilitiesArgs
+		if err := proto.Unmarshal([]byte(args), &request); err != nil {
+			return HostResultError(pbv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invalid ModelCapabilitiesArgs"), nil
+		}
+		result, refusal, err := fn(&request)
+		if err != nil {
+			return "", err
+		}
+		if refusal != nil {
+			return HostResultError(refusal.Code, refusal.Message), nil
+		}
+		if result == nil {
+			return HostResultValue(nil), nil
+		}
+		raw, err := proto.Marshal(result)
+		if err != nil {
+			return "", err
+		}
+		return HostResultValue(raw), nil
+	})
+}
+
 // StubModelPricing installs a typed named-pricing double.
 func (h *Harness) StubModelPricing(fn func(*pbv1.ModelPricingGetArgs) (*pbv1.ModelPricing, *pbv1.HostError, error)) *Harness {
 	return h.StubHostCall("env.model_pricing", func(args string) (string, error) {

@@ -19,6 +19,8 @@ type RouteAppliedInfo struct {
 	ServedBy      string  `json:"served_by"`
 	ServedModel   string  `json:"served_model"`
 	Failover      bool    `json:"failover"`
+	Effort        *string `json:"effort,omitempty"`
+	EffortStatus  *string `json:"effort_status,omitempty"`
 }
 
 // RouteApplied reads the optional, host-owned routing observation. A false

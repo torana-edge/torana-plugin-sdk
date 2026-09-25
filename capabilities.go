@@ -23,6 +23,7 @@ type capabilityCatalog struct {
 	Hooks            []string          `json:"hooks"`
 	HookGrants       map[string]string `json:"hook_grants"`
 	MetadataGrants   []string          `json:"metadata_grants"`
+	ExtraPermissions []string          `json:"extra_permissions"`
 	WritePermissions []string          `json:"write_permissions"`
 	Commands         []CommandSpec     `json:"commands"`
 }
@@ -55,6 +56,9 @@ func catalogPermissions() []string {
 		set[p] = true
 	}
 	for _, p := range catalog.MetadataGrants {
+		set[p] = true
+	}
+	for _, p := range catalog.ExtraPermissions {
 		set[p] = true
 	}
 	for _, p := range catalog.WritePermissions {
