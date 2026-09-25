@@ -153,7 +153,8 @@ func GetModelCapabilities(provider, model string) (*pbv1.ModelCapabilities, erro
 }
 
 // Suggest submits a conversation-scoped suggestion for host-owned delivery and
-// consent. The returned ID and code are issued by the host, not the plugin.
+// consent. The returned ID is issued by the host; confirmation codes stay
+// host-owned and are never returned to plugins.
 func Suggest(args *pbv1.SuggestArgs) (*pbv1.SuggestResult, error) {
 	value, err := checkedHostCallRequired("env.suggest", args)
 	if err != nil {
