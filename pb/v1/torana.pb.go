@@ -237,9 +237,6 @@ func (ErrorCode) EnumDescriptor() ([]byte, []int) {
 	return file_proto_torana_v1_torana_proto_rawDescGZIP(), []int{2}
 }
 
-// RouteRequestArgs is the argument body for env.route_request.
-// An empty provider with a non-empty model is a model-only override on the
-// original provider. At least one of provider or model must be set.
 type Effort int32
 
 const (
@@ -4201,6 +4198,9 @@ func (x *RespondRequestArgs) GetResponse() *SyntheticResponse {
 	return nil
 }
 
+// RouteRequestArgs is the argument body for env.route_request.
+// An empty provider with a non-empty model is a model-only override on the
+// original provider. At least one of provider or model must be set.
 type RouteRequestArgs struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Provider string                 `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
@@ -4419,7 +4419,6 @@ func (x *SuggestAction) GetLabel() string {
 type SuggestResult struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SuggestionId  string                 `protobuf:"bytes,1,opt,name=suggestion_id,json=suggestionId,proto3" json:"suggestion_id,omitempty"`
-	Code          string                 `protobuf:"bytes,2,opt,name=code,proto3" json:"code,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4457,13 +4456,6 @@ func (*SuggestResult) Descriptor() ([]byte, []int) {
 func (x *SuggestResult) GetSuggestionId() string {
 	if x != nil {
 		return x.SuggestionId
-	}
-	return ""
-}
-
-func (x *SuggestResult) GetCode() string {
-	if x != nil {
-		return x.Code
 	}
 	return ""
 }
@@ -7206,10 +7198,9 @@ const file_proto_torana_v1_torana_proto_rawDesc = "" +
 	"\x15_harness_target_model\"5\n" +
 	"\rSuggestAction\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
-	"\x05label\x18\x02 \x01(\tR\x05label\"H\n" +
+	"\x05label\x18\x02 \x01(\tR\x05label\":\n" +
 	"\rSuggestResult\x12#\n" +
-	"\rsuggestion_id\x18\x01 \x01(\tR\fsuggestionId\x12\x12\n" +
-	"\x04code\x18\x02 \x01(\tR\x04code\"-\n" +
+	"\rsuggestion_id\x18\x01 \x01(\tR\fsuggestionIdJ\x04\b\x02\x10\x03\"-\n" +
 	"\x0fSetIdentityArgs\x12\x1a\n" +
 	"\bidentity\x18\x01 \x01(\tR\bidentity\" \n" +
 	"\fStateGetArgs\x12\x10\n" +

@@ -18,7 +18,7 @@ func TestAdaptiveABIFieldInventory(t *testing.T) {
 		{(&v1.RouteRequestArgs{}).ProtoReflect().Descriptor(), map[protoreflect.Name]protoreflect.FieldNumber{"provider": 1, "model": 2, "effort": 3}},
 		{(&v1.SuggestArgs{}).ProtoReflect().Descriptor(), map[protoreflect.Name]protoreflect.FieldNumber{"kind": 1, "dedupe_key": 2, "title": 3, "body": 4, "actions": 5, "cost_usd": 6, "harness_target_model": 7, "expires_after_user_turns": 8}},
 		{(&v1.SuggestAction{}).ProtoReflect().Descriptor(), map[protoreflect.Name]protoreflect.FieldNumber{"id": 1, "label": 2}},
-		{(&v1.SuggestResult{}).ProtoReflect().Descriptor(), map[protoreflect.Name]protoreflect.FieldNumber{"suggestion_id": 1, "code": 2}},
+		{(&v1.SuggestResult{}).ProtoReflect().Descriptor(), map[protoreflect.Name]protoreflect.FieldNumber{"suggestion_id": 1}},
 		{(&v1.ModelCapabilitiesArgs{}).ProtoReflect().Descriptor(), map[protoreflect.Name]protoreflect.FieldNumber{"provider": 1, "model": 2}},
 		{(&v1.ModelCapabilities{}).ProtoReflect().Descriptor(), map[protoreflect.Name]protoreflect.FieldNumber{"effort_levels": 1, "context_window_tokens": 2, "format": 3, "pricing": 4}},
 	} {
@@ -83,7 +83,7 @@ func TestAdaptiveABIValidation(t *testing.T) {
 			}
 		})
 	}
-	if err := (&v1.SuggestResult{SuggestionId: "sg_1", Code: "ABCD"}).Validate(); err != nil {
+	if err := (&v1.SuggestResult{SuggestionId: "sg_1"}).Validate(); err != nil {
 		t.Fatal(err)
 	}
 	if err := (&v1.ModelCapabilitiesArgs{Provider: "p", Model: "m"}).Validate(); err != nil {

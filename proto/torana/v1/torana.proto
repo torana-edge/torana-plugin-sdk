@@ -920,7 +920,7 @@ message SuggestAction {
 
 message SuggestResult {
   string suggestion_id = 1;
-  string code = 2;
+  reserved 2; // Confirmation codes stay in the host's user-delivery channel.
 }
 
 // SetIdentityArgs is the argument body for env.set_identity.

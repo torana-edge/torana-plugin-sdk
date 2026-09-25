@@ -188,8 +188,8 @@ func validSuggestionText(value string, max int) bool {
 }
 
 func (x *SuggestResult) Validate() error {
-	if x == nil || x.SuggestionId == "" || x.Code == "" {
-		return fmt.Errorf("suggest result needs an id and code")
+	if x == nil || x.SuggestionId == "" {
+		return fmt.Errorf("suggest result needs an id")
 	}
 	return nil
 }
