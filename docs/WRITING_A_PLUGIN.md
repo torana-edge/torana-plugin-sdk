@@ -1010,7 +1010,8 @@ an `agent.json` and it needs approving again — which is the point.
 ## 9. Optional agent-facing operations
 
 Plugins that already vend a page through `run_on_http_request` can also expose
-machine-readable operations. Add a language-neutral `agent.json` descriptor and
+machine-readable operations. Add a language-neutral `agent.json` descriptor
+(schema version 2 for new plugins) and
 handle the advertised path beneath `/agent` in the same HTTP hook. Torana
 aggregates enabled operations in `GET /_torana/api/v1/`, enforces JSON
 responses, and includes the descriptor in the digest-bound approval.
