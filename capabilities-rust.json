@@ -13,6 +13,9 @@
   "metadata_grants": [
     "env.request_headers"
   ],
+  "extra_permissions": [
+    "env.route_request.effort"
+  ],
   "write_permissions": [
     "ir.cache_control.write",
     "ir.messages.write.assistant",

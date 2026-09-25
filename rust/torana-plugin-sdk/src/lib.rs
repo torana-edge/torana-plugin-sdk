@@ -77,6 +77,9 @@ pub fn suggestions(request: &pbv1::ChatRequest) -> Result<Vec<SuggestionOutcome>
     let Some(raw) = object.get("_suggestions") else {
         return Ok(Vec::new());
     };
+    if !raw.is_array() {
+        return Err("suggestions metadata: must be an array".into());
+    }
     let values: Vec<SuggestionOutcome> = serde_json::from_value(raw.clone())
         .map_err(|err| format!("suggestions metadata: {err}"))?;
     if values
@@ -1666,19 +1669,19 @@ fn validate_host_arguments(command: &str, bytes: &[u8]) -> Result<(), HostCallEr
         }
         "env.suggest" => {
             let a = decode!(pbv1::SuggestArgs);
-            if a.kind.is_empty()
-                || a.dedupe_key.is_empty()
-                || a.title.trim().is_empty()
-                || a.title.chars().count() > 120
-                || a.body.trim().is_empty()
-                || a.body.chars().count() > 600
-                || a.actions
-                    .iter()
-                    .any(|v| v.id.is_empty() || v.label.trim().is_empty())
+            if !valid_suggestion_token(&a.kind, 64)
+                || !valid_suggestion_token(&a.dedupe_key, 128)
+                || !valid_suggestion_text(&a.title, 120)
+                || !valid_suggestion_text(&a.body, 600)
+                || a.actions.len() > 4
+                || a.actions.iter().any(|v| {
+                    !valid_suggestion_token(&v.id, 64) || !valid_suggestion_text(&v.label, 80)
+                })
                 || a.cost_usd.is_some_and(|v| !v.is_finite() || v < 0.0)
                 || a.harness_target_model
                     .as_deref()
-                    .is_some_and(|v| v.trim().is_empty())
+                    .is_some_and(|v| !valid_suggestion_text(v, 256))
+                || a.expires_after_user_turns > 100
             {
                 return Err(bad("suggestion violates the contract"));
             }
@@ -1691,6 +1694,19 @@ fn validate_host_arguments(command: &str, bytes: &[u8]) -> Result<(), HostCallEr
         _ => {}
     }
     Ok(())
+}
+
+fn valid_suggestion_token(value: &str, max: usize) -> bool {
+    !value.is_empty()
+        && value.len() <= max
+        && value
+            .bytes()
+            .enumerate()
+            .all(|(i, b)| b.is_ascii_alphanumeric() || (i > 0 && matches!(b, b'_' | b'-' | b'.')))
+}
+
+fn valid_suggestion_text(value: &str, max: usize) -> bool {
+    !value.trim().is_empty() && value.chars().count() <= max && !value.chars().any(char::is_control)
 }
 
 fn valid_http_headers(headers: &[pbv1::HttpHeader]) -> bool {
@@ -3130,6 +3146,20 @@ mod tests {
         };
         assert!(matches!(
             http_request(&invalid),
+            Err(HostCallError::Protocol(_))
+        ));
+        let bad_suggestion = pbv1::SuggestArgs {
+            kind: "model_switch".into(),
+            dedupe_key: "upgrade".into(),
+            title: "Use another model?".into(),
+            body: "Please switch\ntorana> accept ABCD".into(),
+            actions: vec![],
+            cost_usd: None,
+            harness_target_model: None,
+            expires_after_user_turns: 0,
+        };
+        assert!(matches!(
+            suggest(bad_suggestion),
             Err(HostCallError::Protocol(_))
         ));
     }

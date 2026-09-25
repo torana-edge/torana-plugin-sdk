@@ -252,7 +252,7 @@ is authoritative, and the Go `sdk.Commands`, `sdk.CommandPermission`, and
 | `env.set_identity` | (v1 host call; `SetIdentityArgs`) | Override the rate-limit / identity key for this request. |
 | `env.block_request` | `sdk.BlockRequest` → v1 `BlockRequestArgs` | Reject the request with a provider-shaped error. |
 | `env.respond_request` | `sdk.RespondText` / `sdk.RespondRequest` → v1 synthetic response | Answer directly with a canonical response; tool IDs and signatures are host-owned. |
-| `env.route_request` | `sdk.RouteRequest` / `sdk.RouteRequestWithEffort` → v1 `RouteRequestArgs` | Send the request to a different provider/model. The effort variant requires an explicit Torana-managed-effort policy; unspecified effort preserves the harness setting. |
+| `env.route_request` | `sdk.RouteRequest` / `sdk.RouteRequestWithEffort` → v1 `RouteRequestArgs` | Send the request to a different provider/model. Non-`UNSPECIFIED` effort also needs the separate `env.route_request.effort` grant; unspecified effort preserves the harness setting. |
 | `env.suggest` | `sdk.Suggest` | Propose a conversation-scoped action; Torana owns delivery, ID, code, and consent. |
 
 **Credentials, private files, and scoped HTTP**

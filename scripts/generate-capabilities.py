@@ -15,12 +15,15 @@ for c in commands:
     md.append(f"| `{c['command']}` | `{c['permission']}` | `{c['arguments']}` | `{c['result']}` | {', '.join(f'`{h}`' for h in c['hooks'])} | {', '.join(f'`{h}`' for h in c['helpers'])} |")
 md += ["", "## IR write permissions", ""]
 md += [f"- `{p}`" for p in sorted(catalog.get("write_permissions", []))]
+md += ["", "## Additional grants", ""]
+md += [f"- `{p}`" for p in sorted(catalog.get("extra_permissions", []))]
 reference = "\n".join(md) + "\n"
 
 rust = {
     "hooks": catalog["hooks"],
     "hook_grants": dict(sorted(catalog.get("hook_grants", {}).items())),
     "metadata_grants": sorted(catalog.get("metadata_grants", [])),
+    "extra_permissions": sorted(catalog.get("extra_permissions", [])),
     "write_permissions": sorted(catalog.get("write_permissions", [])),
     "commands": [{k: c[k] for k in ("command", "permission", "arguments", "result", "hooks", "helpers")} for c in commands],
 }
