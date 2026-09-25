@@ -1406,7 +1406,7 @@ pub fn decode_host_call_result(bytes: &[u8]) -> Result<Vec<u8>, HostCallError> {
     match result.result {
         Some(ResultArm::Value(value)) => Ok(value),
         Some(ResultArm::Error(error)) => {
-            if !matches!(error.code, 1..=6) {
+            if !matches!(error.code, 1..=7) {
                 return Err(HostCallError::Protocol(format!(
                     "HostError code {} is not classified by this SDK",
                     error.code
