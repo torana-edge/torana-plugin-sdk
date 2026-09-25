@@ -48,8 +48,8 @@ func RouteRequest(provider, model string) error {
 }
 
 // RouteRequestWithEffort routes a request with an explicitly chosen effort.
-// UNSPECIFIED leaves the harness's effort unchanged. Operators should not
-// grant this to a router that is not explicitly managing effort.
+// UNSPECIFIED leaves the harness's effort unchanged. A non-UNSPECIFIED effort
+// also requires the separate env.route_request.effort grant in the host.
 func RouteRequestWithEffort(provider, model string, effort pbv1.Effort) error {
 	return checkedHostCall("env.route_request", &pbv1.RouteRequestArgs{
 		Provider: provider,

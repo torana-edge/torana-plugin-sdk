@@ -75,3 +75,7 @@ Generated from `capabilities.json`; run `scripts/generate-capabilities.py` after
 - `ir.tool_result_errors.write`
 - `ir.tool_results.write`
 - `ir.tools.write`
+
+## Additional grants
+
+- `env.route_request.effort`
