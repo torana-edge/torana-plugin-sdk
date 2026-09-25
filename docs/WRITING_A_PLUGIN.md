@@ -253,7 +253,7 @@ is authoritative, and the Go `sdk.Commands`, `sdk.CommandPermission`, and
 | `env.block_request` | `sdk.BlockRequest` → v1 `BlockRequestArgs` | Reject the request with a provider-shaped error. |
 | `env.respond_request` | `sdk.RespondText` / `sdk.RespondRequest` → v1 synthetic response | Answer directly with a canonical response; tool IDs and signatures are host-owned. |
 | `env.route_request` | `sdk.RouteRequest` / `sdk.RouteRequestWithEffort` → v1 `RouteRequestArgs` | Send the request to a different provider/model. Non-`UNSPECIFIED` effort also needs the separate `env.route_request.effort` grant; unspecified effort preserves the harness setting. |
-| `env.suggest` | `sdk.Suggest` | Propose a conversation-scoped action; Torana owns delivery, ID, code, and consent. |
+| `env.suggest` | `sdk.Suggest` | Propose a conversation-scoped action; Torana returns only its ID and keeps confirmation codes in the user-delivery channel. |
 
 **Credentials, private files, and scoped HTTP**
 

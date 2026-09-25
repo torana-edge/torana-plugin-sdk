@@ -2482,11 +2482,12 @@ pub fn get_model_capabilities(
     Ok(result)
 }
 
-/// Submit a conversation-scoped suggestion; the host issues the ID and code.
+/// Submit a conversation-scoped suggestion; the host returns its ID and keeps
+/// the confirmation code in the user-delivery channel.
 pub fn suggest(args: pbv1::SuggestArgs) -> Result<pbv1::SuggestResult, HostCallError> {
     let value = host_call("env.suggest", &args)?;
     let result: pbv1::SuggestResult = decode_host_value(&value, ".torana.v1.SuggestResult")?;
-    if result.suggestion_id.is_empty() || result.code.is_empty() {
+    if result.suggestion_id.is_empty() {
         return Err(HostCallError::Protocol("invalid suggestion result".into()));
     }
     Ok(result)

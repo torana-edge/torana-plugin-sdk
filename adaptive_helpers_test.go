@@ -13,7 +13,7 @@ import (
 func TestAdaptiveHostHelpers(t *testing.T) {
 	h := sdktest.New(t)
 	h.StubHostCall("env.suggest", func(string) (string, error) {
-		value, err := proto.Marshal(&pbv1.SuggestResult{SuggestionId: "sg_1", Code: "ABCD"})
+		value, err := proto.Marshal(&pbv1.SuggestResult{SuggestionId: "sg_1"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -28,7 +28,7 @@ func TestAdaptiveHostHelpers(t *testing.T) {
 	})
 	h.Run(func() {
 		result, err := sdk.Suggest(&pbv1.SuggestArgs{Kind: "model_switch", DedupeKey: "up", Title: "Try a stronger model", Body: "Repeated tool failures"})
-		if err != nil || result.Code != "ABCD" {
+		if err != nil || result.SuggestionId != "sg_1" {
 			t.Fatalf("suggest = %+v, %v", result, err)
 		}
 		caps, err := sdk.GetModelCapabilities("anthropic", "m")
