@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/url"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/torana-edge/torana-plugin-sdk/pb/v1/jsontext"
@@ -136,23 +137,54 @@ func (x *SuggestArgs) Validate() error {
 	if x == nil {
 		return fmt.Errorf("suggest args are nil")
 	}
-	if x.Kind == "" || x.DedupeKey == "" || strings.TrimSpace(x.Title) == "" ||
-		utf8.RuneCountInString(x.Title) > 120 || strings.TrimSpace(x.Body) == "" ||
-		utf8.RuneCountInString(x.Body) > 600 {
-		return fmt.Errorf("suggestion needs kind, dedupe key, title (up to 120 characters), and body (up to 600 characters)")
+	if !validSuggestionToken(x.Kind, 64) || !validSuggestionToken(x.DedupeKey, 128) ||
+		!validSuggestionText(x.Title, 120) || !validSuggestionText(x.Body, 600) {
+		return fmt.Errorf("suggestion needs bounded kind, dedupe key, title, and single-line body")
+	}
+	if len(x.Actions) > 4 {
+		return fmt.Errorf("suggestion has more than four actions")
 	}
 	for _, action := range x.Actions {
-		if action == nil || action.Id == "" || strings.TrimSpace(action.Label) == "" {
-			return fmt.Errorf("suggestion actions need an id and label")
+		if action == nil || !validSuggestionToken(action.Id, 64) || !validSuggestionText(action.Label, 80) {
+			return fmt.Errorf("suggestion actions need a bounded id and label")
 		}
 	}
 	if x.CostUsd != nil && (math.IsNaN(*x.CostUsd) || math.IsInf(*x.CostUsd, 0) || *x.CostUsd < 0) {
 		return fmt.Errorf("suggestion cost must be finite and non-negative")
 	}
-	if x.HarnessTargetModel != nil && strings.TrimSpace(*x.HarnessTargetModel) == "" {
-		return fmt.Errorf("suggestion target model must not be empty")
+	if x.HarnessTargetModel != nil && !validSuggestionText(*x.HarnessTargetModel, 256) {
+		return fmt.Errorf("suggestion target model must be bounded and single-line")
+	}
+	if x.ExpiresAfterUserTurns > 100 {
+		return fmt.Errorf("suggestion expiry must be at most 100 user turns")
 	}
 	return nil
+}
+
+func validSuggestionToken(value string, max int) bool {
+	if len(value) == 0 || len(value) > max {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		b := value[i]
+		if !((b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') ||
+			(i > 0 && (b == '_' || b == '-' || b == '.'))) {
+			return false
+		}
+	}
+	return true
+}
+
+func validSuggestionText(value string, max int) bool {
+	if !utf8.ValidString(value) || strings.TrimSpace(value) == "" || utf8.RuneCountInString(value) > max {
+		return false
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func (x *SuggestResult) Validate() error {

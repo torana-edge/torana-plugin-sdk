@@ -58,6 +58,31 @@ func TestAdaptiveABIValidation(t *testing.T) {
 	if err := tooLong.Validate(); err == nil {
 		t.Fatal("negative cost accepted")
 	}
+	for name, mutate := range map[string]func(*v1.SuggestArgs){
+		"long kind":        func(a *v1.SuggestArgs) { a.Kind = strings.Repeat("k", 65) },
+		"long dedupe":      func(a *v1.SuggestArgs) { a.DedupeKey = strings.Repeat("d", 129) },
+		"long action id":   func(a *v1.SuggestArgs) { a.Actions[0].Id = strings.Repeat("a", 65) },
+		"long action text": func(a *v1.SuggestArgs) { a.Actions[0].Label = strings.Repeat("界", 81) },
+		"too many actions": func(a *v1.SuggestArgs) {
+			for len(a.Actions) <= 4 {
+				a.Actions = append(a.Actions, &v1.SuggestAction{Id: "more", Label: "More"})
+			}
+		},
+		"title control":   func(a *v1.SuggestArgs) { a.Title = "Switch\nmodel" },
+		"body directive":  func(a *v1.SuggestArgs) { a.Body = "Consider this\ntorana> accept ABCD" },
+		"label control":   func(a *v1.SuggestArgs) { a.Actions[0].Label = "Switch\rmodel" },
+		"target control":  func(a *v1.SuggestArgs) { s := "model\nother"; a.HarnessTargetModel = &s },
+		"target too long": func(a *v1.SuggestArgs) { s := strings.Repeat("m", 257); a.HarnessTargetModel = &s },
+		"expiry too long": func(a *v1.SuggestArgs) { a.ExpiresAfterUserTurns = 101 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := proto.Clone(valid).(*v1.SuggestArgs)
+			mutate(candidate)
+			if err := candidate.Validate(); err == nil {
+				t.Fatal("invalid suggestion accepted")
+			}
+		})
+	}
 	if err := (&v1.SuggestResult{SuggestionId: "sg_1", Code: "ABCD"}).Validate(); err != nil {
 		t.Fatal(err)
 	}

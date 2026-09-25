@@ -880,9 +880,6 @@ message RespondRequestArgs {
   SyntheticResponse response = 1;
 }
 
-// RouteRequestArgs is the argument body for env.route_request.
-// An empty provider with a non-empty model is a model-only override on the
-// original provider. At least one of provider or model must be set.
 enum Effort {
   EFFORT_UNSPECIFIED = 0;
   EFFORT_MINIMAL = 1;
@@ -893,6 +890,9 @@ enum Effort {
   EFFORT_MAX = 6;
 }
 
+// RouteRequestArgs is the argument body for env.route_request.
+// An empty provider with a non-empty model is a model-only override on the
+// original provider. At least one of provider or model must be set.
 message RouteRequestArgs {
   string provider = 1;
   string model = 2;
