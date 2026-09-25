@@ -1934,6 +1934,7 @@ pub fn route_request(provider: &str, model: &str) -> Result<(), HostCallError> {
         &pbv1::RouteRequestArgs {
             provider: provider.into(),
             model: model.into(),
+            effort: 0,
         },
     )
     .map(|_| ())

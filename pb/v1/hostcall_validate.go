@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/url"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/torana-edge/torana-plugin-sdk/pb/v1/jsontext"
@@ -30,6 +31,7 @@ var knownErrorCodes = map[ErrorCode]bool{
 	ErrorCode_ERROR_CODE_UNAVAILABLE:       true,
 	ErrorCode_ERROR_CODE_INVALID_ARGUMENT:  true,
 	ErrorCode_ERROR_CODE_INTERNAL:          true,
+	ErrorCode_ERROR_CODE_UNSUPPORTED:       true,
 }
 
 // Validate reports whether a HostError carries a classified failure.
@@ -121,6 +123,74 @@ func (x *RouteRequestArgs) Validate() error {
 	}
 	if x.Provider == "" && x.Model == "" {
 		return fmt.Errorf("route request args need a provider and/or model")
+	}
+	if !validEffort(x.Effort) {
+		return fmt.Errorf("route request has unknown effort %d", x.Effort)
+	}
+	return nil
+}
+
+func validEffort(value Effort) bool {
+	return value >= Effort_EFFORT_UNSPECIFIED && value <= Effort_EFFORT_MAX
+}
+
+func (x *SuggestArgs) Validate() error {
+	if x == nil {
+		return fmt.Errorf("suggest args are nil")
+	}
+	if !validSuggestionToken(x.Kind, 64) || !validSuggestionToken(x.DedupeKey, 128) ||
+		!validSuggestionText(x.Title, 120) || !validSuggestionText(x.Body, 600) {
+		return fmt.Errorf("suggestion needs bounded kind, dedupe key, title, and single-line body")
+	}
+	if len(x.Actions) > 4 {
+		return fmt.Errorf("suggestion has more than four actions")
+	}
+	for _, action := range x.Actions {
+		if action == nil || !validSuggestionToken(action.Id, 64) || !validSuggestionText(action.Label, 80) {
+			return fmt.Errorf("suggestion actions need a bounded id and label")
+		}
+	}
+	if x.CostUsd != nil && (math.IsNaN(*x.CostUsd) || math.IsInf(*x.CostUsd, 0) || *x.CostUsd < 0) {
+		return fmt.Errorf("suggestion cost must be finite and non-negative")
+	}
+	if x.HarnessTargetModel != nil && !validSuggestionText(*x.HarnessTargetModel, 256) {
+		return fmt.Errorf("suggestion target model must be bounded and single-line")
+	}
+	if x.ExpiresAfterUserTurns > 100 {
+		return fmt.Errorf("suggestion expiry must be at most 100 user turns")
+	}
+	return nil
+}
+
+func validSuggestionToken(value string, max int) bool {
+	if len(value) == 0 || len(value) > max {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		b := value[i]
+		if !((b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') ||
+			(i > 0 && (b == '_' || b == '-' || b == '.'))) {
+			return false
+		}
+	}
+	return true
+}
+
+func validSuggestionText(value string, max int) bool {
+	if !utf8.ValidString(value) || strings.TrimSpace(value) == "" || utf8.RuneCountInString(value) > max {
+		return false
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func (x *SuggestResult) Validate() error {
+	if x == nil || x.SuggestionId == "" {
+		return fmt.Errorf("suggest result needs an id")
 	}
 	return nil
 }
@@ -455,6 +525,33 @@ func (x *ModelPricing) Validate() error {
 		if rate.value != nil && (math.IsNaN(*rate.value) || math.IsInf(*rate.value, 0) || *rate.value < 0) {
 			return fmt.Errorf("model pricing %s must be finite and non-negative", rate.name)
 		}
+	}
+	return nil
+}
+
+func (x *ModelCapabilitiesArgs) Validate() error {
+	if x == nil || strings.TrimSpace(x.Provider) == "" || strings.TrimSpace(x.Model) == "" {
+		return fmt.Errorf("model capabilities args need a provider and model")
+	}
+	return nil
+}
+
+func (x *ModelCapabilities) Validate() error {
+	if x == nil || strings.TrimSpace(x.Format) == "" {
+		return fmt.Errorf("model capabilities need a format")
+	}
+	if x.ContextWindowTokens != nil && *x.ContextWindowTokens == 0 {
+		return fmt.Errorf("model context window must be positive")
+	}
+	seen := make(map[Effort]bool, len(x.EffortLevels))
+	for _, level := range x.EffortLevels {
+		if !validEffort(level) || level == Effort_EFFORT_UNSPECIFIED || seen[level] {
+			return fmt.Errorf("model capabilities contain an invalid or repeated effort level")
+		}
+		seen[level] = true
+	}
+	if x.Pricing != nil {
+		return x.Pricing.Validate()
 	}
 	return nil
 }

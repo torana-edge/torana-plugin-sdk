@@ -294,8 +294,11 @@ message ToolDef {
   repeated string namespace_path = 8;
 }
 
-// Token accounting reported by the provider.
+// Token accounting. The meaning of input_tokens depends on the surface;
+// consult the usage field comment on ChatResponse, ModelCompleteResult, or
+// StreamEvent before doing cost arithmetic.
 message Usage {
+  // Input/prompt tokens under the containing field's accounting convention.
   int32 input_tokens = 1;
   int32 output_tokens = 2;
   // Input tokens served from the provider's prompt cache.
@@ -369,7 +372,9 @@ message ChatResponse {
   // Host-owned: observed provider stop reason. Not ir.messages.write.assistant —
   // the first-cut host applies content and in-place tool name/arguments only.
   string finish_reason = 4;
-  // Host-owned: forging usage forges the bill / observability.
+  // Host-owned: forging usage forges the bill / observability. Here input_tokens
+  // is total prompt input, including cache reads and writes reported separately
+  // by the provider. Cache counts are subsets, not additions.
   Usage usage = 5;
   // Upstream HTTP status. Non-2xx responses reach observational hooks too.
   // Host-owned: host-measured fact.
@@ -564,6 +569,9 @@ message StreamEvent {
     string text_delta = 1;
     string thinking_delta = 2;
     ToolCallDelta tool_call_delta = 3;
+    // Provider-native stream usage. Anthropic input_tokens excludes its
+    // separately reported cache tokens; OpenAI/Gemini include cached input.
+    // Do not treat this as the normalized ChatResponse usage convention.
     Usage usage = 4;
     StreamError error = 5;
     // Opaque provider signature. When emitted with open text/thinking content
@@ -822,6 +830,9 @@ enum ErrorCode {
   ERROR_CODE_INVALID_ARGUMENT = 5;
   // The host failed for a reason the plugin cannot act on.
   ERROR_CODE_INTERNAL = 6;
+  // The operation exists, but this host version does not implement the
+  // requested variant yet (for example a routed effort override).
+  ERROR_CODE_UNSUPPORTED = 7;
 }
 
 message HostError {
@@ -880,12 +891,47 @@ message RespondRequestArgs {
   SyntheticResponse response = 1;
 }
 
+enum Effort {
+  EFFORT_UNSPECIFIED = 0;
+  EFFORT_MINIMAL = 1;
+  EFFORT_LOW = 2;
+  EFFORT_MEDIUM = 3;
+  EFFORT_HIGH = 4;
+  EFFORT_XHIGH = 5;
+  EFFORT_MAX = 6;
+}
+
 // RouteRequestArgs is the argument body for env.route_request.
 // An empty provider with a non-empty model is a model-only override on the
 // original provider. At least one of provider or model must be set.
 message RouteRequestArgs {
   string provider = 1;
   string model = 2;
+  // UNSPECIFIED preserves the request's existing effort behavior.
+  Effort effort = 3;
+}
+
+// A plugin suggestion is scoped by the host to the current conversation.
+// The host owns IDs, confirmation codes, deduplication and delivery.
+message SuggestArgs {
+  string kind = 1;
+  string dedupe_key = 2;
+  string title = 3;
+  string body = 4;
+  repeated SuggestAction actions = 5;
+  optional double cost_usd = 6;
+  optional string harness_target_model = 7;
+  uint32 expires_after_user_turns = 8;
+}
+
+message SuggestAction {
+  string id = 1;
+  string label = 2;
+}
+
+message SuggestResult {
+  string suggestion_id = 1;
+  reserved 2; // Confirmation codes stay in the host's user-delivery channel.
 }
 
 // SetIdentityArgs is the argument body for env.set_identity.
@@ -1132,6 +1178,10 @@ message ModelCompleteResult {
   ResponseMessage message = 1;
   string reported_model = 2;
   string finish_reason = 3;
+  // Model-service accounting: input_tokens excludes cache reads. The host
+  // subtracts reported cache reads from inclusive OpenAI/Gemini input totals;
+  // Anthropic already reports them separately. Cache-write counts are passed
+  // through without assuming they overlap input_tokens.
   Usage usage = 4;
 }
 
@@ -1150,6 +1200,21 @@ message ModelPricing {
   optional double output_usd_per_mtok = 2;
   optional double cache_read_usd_per_mtok = 3;
   optional double cache_write_usd_per_mtok = 4;
+}
+
+// A capability query is restricted by the host to an operator-declared model.
+message ModelCapabilitiesArgs {
+  string provider = 1;
+  string model = 2;
+}
+
+message ModelCapabilities {
+  // Empty means the model has no declared portable effort support.
+  repeated Effort effort_levels = 1;
+  optional uint32 context_window_tokens = 2;
+  string format = 3;
+  // Absence means pricing is unknown, not free.
+  ModelPricing pricing = 4;
 }
 
 // PromptCachePolicyGetArgs resolves one operator-bound prompt-cache policy.
