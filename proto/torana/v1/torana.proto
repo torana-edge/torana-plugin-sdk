@@ -294,11 +294,11 @@ message ToolDef {
   repeated string namespace_path = 8;
 }
 
-// Token accounting reported by the provider.
+// Token accounting. The meaning of input_tokens depends on the surface;
+// consult the usage field comment on ChatResponse, ModelCompleteResult, or
+// StreamEvent before doing cost arithmetic.
 message Usage {
-  // Total input/prompt tokens, including cache reads and writes. Provider
-  // adapters normalize Anthropic's separately reported cache counts before
-  // response plugins see this value; OpenAI and Gemini already report totals.
+  // Input/prompt tokens under the containing field's accounting convention.
   int32 input_tokens = 1;
   int32 output_tokens = 2;
   // Input tokens served from the provider's prompt cache.
@@ -372,7 +372,9 @@ message ChatResponse {
   // Host-owned: observed provider stop reason. Not ir.messages.write.assistant —
   // the first-cut host applies content and in-place tool name/arguments only.
   string finish_reason = 4;
-  // Host-owned: forging usage forges the bill / observability.
+  // Host-owned: forging usage forges the bill / observability. Here input_tokens
+  // is total prompt input, including cache reads and writes reported separately
+  // by the provider. Cache counts are subsets, not additions.
   Usage usage = 5;
   // Upstream HTTP status. Non-2xx responses reach observational hooks too.
   // Host-owned: host-measured fact.
@@ -567,6 +569,9 @@ message StreamEvent {
     string text_delta = 1;
     string thinking_delta = 2;
     ToolCallDelta tool_call_delta = 3;
+    // Provider-native stream usage. Anthropic input_tokens excludes its
+    // separately reported cache tokens; OpenAI/Gemini include cached input.
+    // Do not treat this as the normalized ChatResponse usage convention.
     Usage usage = 4;
     StreamError error = 5;
     // Opaque provider signature. When emitted with open text/thinking content
@@ -1173,6 +1178,10 @@ message ModelCompleteResult {
   ResponseMessage message = 1;
   string reported_model = 2;
   string finish_reason = 3;
+  // Model-service accounting: input_tokens excludes cache reads. The host
+  // subtracts reported cache reads from inclusive OpenAI/Gemini input totals;
+  // Anthropic already reports them separately. Cache-write counts are passed
+  // through without assuming they overlap input_tokens.
   Usage usage = 4;
 }
 

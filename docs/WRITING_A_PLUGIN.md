@@ -279,6 +279,18 @@ the caller-facing plugin pipeline. This prevents a scanner or compactor from
 calling itself, while retaining the same host-side provider adapters,
 credential isolation, limits, and observability as other model traffic.
 
+`Usage.input_tokens` has a different accounting convention on each surface:
+
+| Where you read usage | Meaning of `input_tokens` |
+| --- | --- |
+| `ChatResponse.usage` in an after-response hook | Total prompt input. Reported cache reads and writes are subsets; do not add them again. |
+| `ModelCompleteResult.usage` from `env.model_complete` | Excludes cache reads. Cache-write overlap is not assumed; use the model-service budget and pricing rules for costs. |
+| `StreamEvent.usage` in a stream hook | Provider-native. Anthropic reports cache tokens separately; OpenAI and Gemini include cached tokens in input. |
+
+Do not compare or add these input counts without checking which surface
+produced them. The host preserves native stream usage because the stream is
+also serialized back to the client.
+
 Build model requests from canonical `Message` blocks, optional canonical
 `ToolDef` values, and `OutputFormat`; read `ModelCompleteResult.Message`, a
 canonical `ResponseMessage`, rather than a legacy flat content string. For a

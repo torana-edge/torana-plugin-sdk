@@ -1714,12 +1714,12 @@ func (x *ToolDef) GetNamespacePath() []string {
 	return nil
 }
 
-// Token accounting reported by the provider.
+// Token accounting. The meaning of input_tokens depends on the surface;
+// consult the usage field comment on ChatResponse, ModelCompleteResult, or
+// StreamEvent before doing cost arithmetic.
 type Usage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Total input/prompt tokens, including cache reads and writes. Provider
-	// adapters normalize Anthropic's separately reported cache counts before
-	// response plugins see this value; OpenAI and Gemini already report totals.
+	// Input/prompt tokens under the containing field's accounting convention.
 	InputTokens  int32 `protobuf:"varint,1,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`
 	OutputTokens int32 `protobuf:"varint,2,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
 	// Input tokens served from the provider's prompt cache.
@@ -2121,7 +2121,9 @@ type ChatResponse struct {
 	// Host-owned: observed provider stop reason. Not ir.messages.write.assistant —
 	// the first-cut host applies content and in-place tool name/arguments only.
 	FinishReason string `protobuf:"bytes,4,opt,name=finish_reason,json=finishReason,proto3" json:"finish_reason,omitempty"`
-	// Host-owned: forging usage forges the bill / observability.
+	// Host-owned: forging usage forges the bill / observability. Here input_tokens
+	// is total prompt input, including cache reads and writes reported separately
+	// by the provider. Cache counts are subsets, not additions.
 	Usage *Usage `protobuf:"bytes,5,opt,name=usage,proto3" json:"usage,omitempty"`
 	// Upstream HTTP status. Non-2xx responses reach observational hooks too.
 	// Host-owned: host-measured fact.
@@ -3096,6 +3098,9 @@ type StreamEvent_ToolCallDelta struct {
 }
 
 type StreamEvent_Usage struct {
+	// Provider-native stream usage. Anthropic input_tokens excludes its
+	// separately reported cache tokens; OpenAI/Gemini include cached input.
+	// Do not treat this as the normalized ChatResponse usage convention.
 	Usage *Usage `protobuf:"bytes,4,opt,name=usage,proto3,oneof"`
 }
 
@@ -5611,7 +5616,11 @@ type ModelCompleteResult struct {
 	Message       *ResponseMessage       `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
 	ReportedModel string                 `protobuf:"bytes,2,opt,name=reported_model,json=reportedModel,proto3" json:"reported_model,omitempty"`
 	FinishReason  string                 `protobuf:"bytes,3,opt,name=finish_reason,json=finishReason,proto3" json:"finish_reason,omitempty"`
-	Usage         *Usage                 `protobuf:"bytes,4,opt,name=usage,proto3" json:"usage,omitempty"`
+	// Model-service accounting: input_tokens excludes cache reads. The host
+	// subtracts reported cache reads from inclusive OpenAI/Gemini input totals;
+	// Anthropic already reports them separately. Cache-write counts are passed
+	// through without assuming they overlap input_tokens.
+	Usage         *Usage `protobuf:"bytes,4,opt,name=usage,proto3" json:"usage,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
