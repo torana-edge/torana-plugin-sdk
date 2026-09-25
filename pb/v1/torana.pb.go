@@ -1711,9 +1711,12 @@ func (x *ToolDef) GetNamespacePath() []string {
 
 // Token accounting reported by the provider.
 type Usage struct {
-	state        protoimpl.MessageState `protogen:"open.v1"`
-	InputTokens  int32                  `protobuf:"varint,1,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`
-	OutputTokens int32                  `protobuf:"varint,2,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Total input/prompt tokens, including cache reads and writes. Provider
+	// adapters normalize Anthropic's separately reported cache counts before
+	// response plugins see this value; OpenAI and Gemini already report totals.
+	InputTokens  int32 `protobuf:"varint,1,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`
+	OutputTokens int32 `protobuf:"varint,2,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
 	// Input tokens served from the provider's prompt cache.
 	CacheReadTokens int32 `protobuf:"varint,3,opt,name=cache_read_tokens,json=cacheReadTokens,proto3" json:"cache_read_tokens,omitempty"`
 	// Input tokens written to the cache this turn; 0 if unreported.

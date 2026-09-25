@@ -296,6 +296,9 @@ message ToolDef {
 
 // Token accounting reported by the provider.
 message Usage {
+  // Total input/prompt tokens, including cache reads and writes. Provider
+  // adapters normalize Anthropic's separately reported cache counts before
+  // response plugins see this value; OpenAI and Gemini already report totals.
   int32 input_tokens = 1;
   int32 output_tokens = 2;
   // Input tokens served from the provider's prompt cache.
