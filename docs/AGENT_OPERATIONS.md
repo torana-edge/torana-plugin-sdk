@@ -11,7 +11,7 @@ is a working example. For calling and administering operations, see the
 ## Contract
 
 `agent.json` is optional. For a plugin that wants its operations in Torana's
-MCP server and `torana>` commands, use schema version 2:
+MCP server, use schema version 2:
 
 ```json
 {
@@ -19,7 +19,6 @@ MCP server and `torana>` commands, use schema version 2:
   "namespace": {
     "title": "My plugin",
     "summary": "Explains and controls this plugin.",
-    "alias": "mine",
     "categories": ["workflow"]
   },
   "operations": [
@@ -40,8 +39,8 @@ MCP server and `torana>` commands, use schema version 2:
 }
 ```
 
-The plugin's manifest name is its canonical namespace. The optional short
-`alias` is for typing directives; MCP always uses the canonical name. Namespace
+The plugin's manifest name is its canonical namespace. MCP always uses that
+name. Namespace
 title (up to 60 characters), summary (up to 300), and categories help people
 and agents find the plugin's operations. Torana also adds standard operations
 to every namespace, such as `_info`, `_status`, `_enable`, and `_disable`;
@@ -68,21 +67,17 @@ verified evidence to the plugin.
 
 Each operation can also add:
 
-- `directive`: for a user-typed `torana> <namespace> <command> ...` form, with
-  `command`, ordered property names in `args` (`?` marks an optional argument),
-  and optional `user_direct`. Set `user_direct` only for low-risk reversible
-  writes; the host disallows it on protected plugins and protected operations.
-- `examples`: short phrases to help operation search and `torana> ask`.
+- `examples`: short phrases to help agents find an operation through search.
 - `deprecated` and `replaced_by`: keep an older operation callable while
   directing people to its replacement; deprecated operations leave search.
 
-For example, a route pin may declare `"directive": {"command": "pin",
-"args": ["step", "user_turns?"], "user_direct": true}`. The host still checks
-the input schema and access policy before dispatch. The plugin itself must
-implement the operation's `/agent/...` HTTP path.
+The host checks input schemas and access policy before dispatch. Changes require
+explicit user confirmation through MCP elicitation or Torana's UI/CLI. The
+plugin itself must implement the operation's `/agent/...` HTTP path. In-chat
+commands, descriptor directives and namespace aliases are not part of v2.
 
 Version-1 descriptors remain valid for existing integrations, but have no
-declared namespace title, alias, directives, or explicit model access. New
+declared namespace title or explicit model access. New
 plugins should use version 2.
 
 Each operation must use JSON input and output. `input_schema` is optional;
