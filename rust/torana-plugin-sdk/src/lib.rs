@@ -2039,7 +2039,11 @@ pub fn route_request(provider: &str, model: &str) -> Result<(), HostCallError> {
     .map(|_| ())
 }
 /// Route with an explicitly operator-authorized effort. UNSPECIFIED leaves
-/// the harness's effort untouched.
+/// the harness's effort untouched. The route is atomic: if the host refuses
+/// the effort, it does not apply the provider or model change either.
+/// Handle a refusal explicitly, for example by retrying with route_request
+/// (no effort) or passing. Return the error only if the request should fail
+/// under the plugin's failure_mode.
 pub fn route_request_with_effort(
     provider: &str,
     model: &str,

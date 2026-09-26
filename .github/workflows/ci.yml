@@ -32,6 +32,8 @@ jobs:
       - name: Generated capability contracts are current
         run: ./scripts/check-capabilities.sh
       - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1
+        with:
+          github_token: ${{ github.token }}
       - run: buf lint
       - name: GitHub Actions use immutable commits
         run: ./scripts/check-actions-pinned.sh
