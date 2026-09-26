@@ -51,7 +51,9 @@ func RouteRequest(provider, model string) error {
 // UNSPECIFIED leaves the harness's effort unchanged. A non-UNSPECIFIED effort
 // also requires the separate env.route_request.effort grant in the host.
 // The route is atomic: if the host refuses the effort, it does not apply the
-// provider or model change either. Return the error so failure_mode can apply.
+// provider or model change either. Handle a refusal explicitly, for example by
+// retrying with RouteRequest (no effort) or passing. Return the error only if
+// the request should fail under the plugin's failure_mode.
 func RouteRequestWithEffort(provider, model string, effort pbv1.Effort) error {
 	return checkedHostCall("env.route_request", &pbv1.RouteRequestArgs{
 		Provider: provider,
