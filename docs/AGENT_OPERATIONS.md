@@ -56,6 +56,18 @@ Each operation can add:
 - `conversation_binding`: `none`, `preferred`, or `required`. Use `required`
   whenever the result or change belongs to the current conversation. A model
   cannot name a different conversation through an operation.
+
+For MCP calls, Torana supplies `X-Torana-MCP-Binding` as `bound` or `unbound`.
+Only a verified `bound` call also receives `X-Torana-Conversation-Id` and
+`X-Torana-Tool-Use-Id`. A missing binding header means this is **not an MCP
+call** (for example, a UI, CLI, or agent API request), rather than an unbound
+MCP call. An operation requiring conversation binding must refuse both a
+missing header and `unbound`; never infer identity from operation input or
+caller-supplied headers. Torana strips those headers and supplies its own
+verified evidence to the plugin.
+
+Each operation can also add:
+
 - `directive`: for a user-typed `torana> <namespace> <command> ...` form, with
   `command`, ordered property names in `args` (`?` marks an optional argument),
   and optional `user_direct`. Set `user_direct` only for low-risk reversible
