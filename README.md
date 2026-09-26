@@ -47,7 +47,7 @@ versions and Edge releases are separate. Use the SDK version documented by
 your target host. Go uses the module tag, and Rust uses the matching crate
 release.
 
-The upcoming **v0.7.0** adds typed suggestion and declared-model-capability
+**v0.7.0** adds typed suggestion and declared-model-capability
 calls plus optional route effort. Those calls require a host that implements
 them; `UNSPECIFIED` effort leaves the harness request unchanged. Neither SDK
 version injects provider-specific conversation history to preserve an effort
