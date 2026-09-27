@@ -60,6 +60,29 @@ func TestCanonicalStateCASScanAndCacheSemantics(t *testing.T) {
 	}
 }
 
+func TestSeedStateHasARealNonReusableVersion(t *testing.T) {
+	h := sdktest.New(t).SeedState("session/thread", "")
+	var previous string
+	h.Run(func() {
+		value, found, err := sdk.StateGetVersioned("session/thread")
+		if err != nil || !found || value.Version == "" || value.Value != "" {
+			t.Fatalf("seeded state=%+v found=%v err=%v", value, found, err)
+		}
+		previous = value.Version
+		page, err := sdk.StateScan("session/", "", 1)
+		if err != nil || len(page.Entries) != 1 || page.Entries[0].Value.Version != previous {
+			t.Fatalf("seeded scan=%+v err=%v", page, err)
+		}
+	})
+	h.SeedState("session/thread", "new")
+	h.Run(func() {
+		result, err := sdk.StateCompareAndSet("session/thread", "stale", &previous)
+		if err != nil || result.Applied {
+			t.Fatalf("stale version applied=%+v err=%v", result, err)
+		}
+	})
+}
+
 func TestCanonicalHarnessResetAndDeniedCalls(t *testing.T) {
 	h := sdktest.New(t)
 	h.DenyPermission("env.block_request")
