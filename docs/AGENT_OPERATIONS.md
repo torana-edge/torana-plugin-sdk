@@ -137,7 +137,9 @@ use that ID to make a retried forward call idempotent as well as to key the
 saved prior value.
 
 Version-1 descriptors remain valid for existing integrations, but have no
-declared namespace title or explicit model access. New
+declared namespace title, explicit model access, or safe undo companion. Their
+read operations remain discoverable; write operations are not model-reachable.
+Declare version 2 with `undo_operation` to let a model request a change. New
 plugins should use version 2.
 
 Each operation must use JSON input and output. `input_schema` is optional;
