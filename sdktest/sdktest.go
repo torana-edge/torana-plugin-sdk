@@ -511,6 +511,8 @@ func (h *Harness) SeedState(key, value string) *Harness {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.state[key] = value
+	h.stateSeq++
+	h.stateVersion[key] = strconv.FormatUint(h.stateSeq, 10)
 	return h
 }
 
