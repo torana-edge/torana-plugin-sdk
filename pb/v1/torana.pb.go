@@ -4276,7 +4276,7 @@ func (x *RouteRequestArgs) GetEffort() Effort {
 }
 
 // A plugin suggestion is scoped by the host to the current conversation.
-// The host owns IDs, confirmation codes, deduplication and delivery.
+// The host owns IDs, confirmation state, deduplication and delivery.
 type SuggestArgs struct {
 	state                 protoimpl.MessageState `protogen:"open.v1"`
 	Kind                  string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
