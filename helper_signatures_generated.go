@@ -20,6 +20,7 @@ var helperErrorResults = map[string]int{
 	"GetModelPricing":              1,
 	"GetPromptCachePolicy":         1,
 	"GetResourceInfo":              1,
+	"HTTPConversation":             2,
 	"HTTPRequest":                  1,
 	"HostCall":                     1,
 	"HostCallExtension":            1,

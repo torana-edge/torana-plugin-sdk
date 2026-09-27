@@ -65,6 +65,17 @@ The existing control-plane loopback, host, and request-origin protections still
 apply. Plugin HTTP handling also requires the `run_on_http_request` hook and an
 approved `env.serve_http` grant.
 
+## Conversation-scoped operations
+
+In an MCP dispatch, the host strips caller-supplied binding headers and injects
+its own evidence. Go authors can read it with `sdk.HTTPConversation(req)`;
+Rust authors use `http_conversation(&req)`. Both distinguish absent, explicitly
+unbound and bound calls, rejecting malformed or ambiguous identities.
+Use only the HTTP callback's request, not headers or IDs copied from tool input.
+If your operation needs a conversation, decline an absent or unbound result;
+never fall back to an ID supplied by the model. A bound session ID still does
+not distinguish side threads inside that session.
+
 ## Packaging and approval
 
 `agent.json` is included in the bundle digest. Changing an operation, schema,

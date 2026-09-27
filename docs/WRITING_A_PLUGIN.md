@@ -518,6 +518,14 @@ grants: a caller-supplied `headers_json` is never authoritative, and plugin B
 does not inherit sensitive-header access merely because plugin A holds the
 grant.
 
+For MCP-dispatched operations, Torana additionally injects verified binding
+headers. Use `sdk.HTTPConversation(req)` in Go or `http_conversation(&req)` in
+Rust rather than parsing them yourself. An absent binding means ordinary HTTP;
+an explicitly unbound call carries no conversation or tool-call ID. Only a
+bound result may select conversation-scoped state. The session label does not
+replace your plugin's own side-thread/state-key derivation. These helpers read
+only the request supplied to the HTTP callback, never model arguments.
+
 **State — pick the right one; the wrong choice fails silently**
 
 | Capability | SDK | Scope |
