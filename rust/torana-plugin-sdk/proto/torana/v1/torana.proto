@@ -912,7 +912,7 @@ message RouteRequestArgs {
 }
 
 // A plugin suggestion is scoped by the host to the current conversation.
-// The host owns IDs, confirmation codes, deduplication and delivery.
+// The host owns IDs, confirmation state, deduplication and delivery.
 message SuggestArgs {
   string kind = 1;
   string dedupe_key = 2;

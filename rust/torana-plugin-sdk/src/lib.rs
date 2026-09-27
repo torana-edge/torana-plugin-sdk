@@ -2489,7 +2489,7 @@ pub fn get_model_capabilities(
 }
 
 /// Submit a conversation-scoped suggestion; the host returns its ID and keeps
-/// the confirmation code in the user-delivery channel.
+/// confirmation in Torana's trusted UI, CLI, or harness elicitation flow.
 pub fn suggest(args: pbv1::SuggestArgs) -> Result<pbv1::SuggestResult, HostCallError> {
     let value = host_call("env.suggest", &args)?;
     let result: pbv1::SuggestResult = decode_host_value(&value, ".torana.v1.SuggestResult")?;
