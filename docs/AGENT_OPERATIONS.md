@@ -55,6 +55,8 @@ Each operation can add:
 - `conversation_binding`: `none`, `preferred`, or `required`. Use `required`
   whenever the result or change belongs to the current conversation. A model
   cannot name a different conversation through an operation.
+- `undo_operation`: required when `model_access` resolves to `confirm`. It
+  names the companion operation Torana calls if the user later chooses Undo.
 
 For MCP calls, Torana supplies `X-Torana-MCP-Binding` as `bound` or `unbound`.
 Only a verified `bound` call also receives `X-Torana-Conversation-Id` and
@@ -75,6 +77,64 @@ The host checks input schemas and access policy before dispatch. Changes require
 explicit user confirmation through MCP elicitation or Torana's UI/CLI. The
 plugin itself must implement the operation's `/agent/...` HTTP path. In-chat
 commands, descriptor directives and namespace aliases are not part of v2.
+
+## Make confirmed changes reversible
+
+A confirmed operation must declare a separate undo operation:
+
+```json
+{
+  "id": "route.set",
+  "method": "POST",
+  "path": "/route",
+  "risk": "write",
+  "idempotent": true,
+  "model_access": "confirm",
+  "conversation_binding": "required",
+  "undo_operation": "route.set.undo",
+  "input_schema": {
+    "type": "object",
+    "required": ["route"],
+    "properties": {"route": {"type": "string"}},
+    "additionalProperties": false
+  },
+  "output_schema": {"type": "object"}
+},
+{
+  "id": "route.set.undo",
+  "method": "POST",
+  "path": "/route/undo",
+  "risk": "write",
+  "idempotent": true,
+  "model_access": "never",
+  "conversation_binding": "required",
+  "input_schema": {
+    "type": "object",
+    "required": ["route"],
+    "properties": {"route": {"type": "string"}},
+    "additionalProperties": false
+  },
+  "output_schema": {"type": "object"}
+}
+```
+
+The companion must be an idempotent `write`, use `model_access: never`, require
+conversation binding, and accept the same input schema. It never appears in
+model-facing operation search. Torana retains the confirmed operation's input
+and verified binding in encrypted host state, then supplies the same
+conversation and tool-call ID to the companion.
+
+The plugin owns the external side effect, so it also owns safe restoration. On
+the forward call, store the previous value under the verified tool-call ID. On
+undo, restore it only if the current value still matches what that call wrote;
+otherwise refuse rather than overwriting a later change. Never accept an undo
+ID or previous value from operation input.
+
+Make the forward write atomic: a guest error marks the change failed and does
+not currently offer Undo, so do not leave a partial side effect behind. Torana
+replays the original verified tool-call ID when it applies a confirmed change;
+use that ID to make a retried forward call idempotent as well as to key the
+saved prior value.
 
 Version-1 descriptors remain valid for existing integrations, but have no
 declared namespace title or explicit model access. New
