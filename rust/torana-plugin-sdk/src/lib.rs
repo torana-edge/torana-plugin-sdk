@@ -9,7 +9,9 @@ use core::{ptr, slice};
 use prost::Message;
 mod capability_contract;
 mod http_binding;
+mod tool_result_release;
 pub use http_binding::{http_conversation, HttpConversationBinding};
+pub use tool_result_release::{tool_result_release, ToolResultReleaseInfo};
 
 #[cfg(not(target_arch = "wasm32"))]
 type NativeTransport = dyn Fn(&str, &[u8]) -> Result<Vec<u8>, HostCallError>;

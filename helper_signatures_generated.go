@@ -66,6 +66,7 @@ var helperErrorResults = map[string]int{
 	"Suggest":                      1,
 	"Suggestions":                  1,
 	"ToolResultContentFingerprint": 1,
+	"ToolResultRelease":            1,
 	"ToranaMCP":                    2,
 	"WriteFile":                    0,
 }

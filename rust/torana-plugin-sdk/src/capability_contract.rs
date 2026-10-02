@@ -214,6 +214,11 @@ pub(crate) const COMMANDS: &[CommandContract] = &[
         result: "compaction-json",
     },
     CommandContract {
+        command: "torana_tool_result_release",
+        arguments: "tool-result-release-json",
+        result: "tool-result-release-json",
+    },
+    CommandContract {
         command: "torana_plugin_counter",
         arguments: "counter-json",
         result: "empty",

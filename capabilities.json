@@ -722,6 +722,15 @@
       "implemented": true
     },
     {
+      "command": "torana_tool_result_release",
+      "arguments": "tool-result-release-json",
+      "result": "tool-result-release-json",
+      "permission": "env.host_call.torana_tool_result_release",
+      "hooks": ["run_before_request"],
+      "helpers": ["ToolResultRelease"],
+      "implemented": true
+    },
+    {
       "command": "torana_plugin_counter",
       "arguments": "counter-json",
       "result": "empty",
