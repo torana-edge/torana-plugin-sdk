@@ -54,6 +54,7 @@ Generated from `capabilities.json`; run `scripts/generate-capabilities.py` after
 | `env.state_scan` | `env.state_keys` | `StateScanArgs` | `StateScanResult` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `StateScan` |
 | `env.state_set` | `env.state_set` | `StateSetArgs` | `empty` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `StateSet`, `StateSetJSON` |
 | `torana_evaluate_compaction` | `env.host_call.torana_evaluate_compaction` | `compaction-json` | `compaction-json` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `EvaluateCompaction` |
+| `torana_tool_result_release` | `env.host_call.torana_tool_result_release` | `tool-result-release-json` | `tool-result-release-json` | `run_before_request` | `ToolResultRelease` |
 | `torana_plugin_counter` | `env.host_call.torana_plugin_counter` | `counter-json` | `empty` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `RecordCounter` |
 | `torana_record_savings` | `env.host_call.torana_record_savings` | `savings-json` | `empty` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `RecordSavings` |
 | `torana_send_request` | `env.host_call.torana_send_request` | `egress-json` | `egress-json` | `run_before_request`, `run_after_response`, `run_on_stream_chunk`, `run_on_http_request`, `run_on_tick` | `SendRequest` |
