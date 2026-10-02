@@ -596,23 +596,32 @@ extension helpers such as `sdk.SendRequest` own their extension framing.
 
 ### User-reviewed tool-result exceptions
 
-`sdk.ToolResultRelease(messageIndex, blockIndex, register)` is available only
+`sdk.ToolResultRelease(messageIndex, blockIndex, reason)` is available only
 inside `run_before_request`, with `env.host_call.torana_tool_result_release`.
 The Rust equivalent is `tool_result_release`. The host resolves the exact
 input result, conversation, plugin bundle digest, call ID and content hash.
 The guest cannot choose scope or approve anything. No original output is stored.
 
-After withholding a result, use `register=true` and include its opaque
+After withholding a result, pass a `*sdk.ToolResultReleaseReason` and include its opaque
 `Reference` in the safe diagnostic. A model can request review through
 `torana_invoke` in namespace `torana`, operation `redactions.request_release`,
 with `{"reference":"<reference>"}`. Only the operator approves through Torana's
-Approvals UI or CLI. Before replaying a saved replacement, use `register=false`:
+Approvals UI or CLI. Before replaying a saved replacement, pass `nil`:
 an `Approved` result means pass this exact original input unchanged, without
 rescanning. This does not authorize another call or changed content. Approval
 is an exception, not a cached clean classification; keep the saved replacement
 so revocation can reinstate it. Allowing history changes the cached prefix once;
 subsequent replay must remain deterministic. Torana cannot reconstruct content
 that the harness no longer sends.
+
+Registration needs a value-free reason: `Kind: "scan_failure"` with no findings,
+or `Kind: "findings"` with 1–20 `ToolResultReleaseFinding` entries. Each finding
+uses a documented category and a returned-output line number (zero means not
+reported). Never attach values, raw model output or arbitrary prose. The Rust
+helper takes `Option<&ToolResultReleaseReason>`: `None` queries a decision,
+`Some(&reason)` registers it. The host captures tool/path context from the
+accepted input and freezes the initial reason with the record. This reason is
+the plugin's report, not proof of a secret or a verified file location.
 
 **Acting outside a request**
 

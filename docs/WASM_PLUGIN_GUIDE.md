@@ -9,6 +9,12 @@ accepted input and derives all scope itself. It never exposes or stores tool
 content, and guests cannot approve. Use the Go/Rust typed helper rather than
 constructing this envelope yourself. See the author guide's
 [user-reviewed exceptions](WRITING_A_PLUGIN.md#user-reviewed-tool-result-exceptions).
+Registration additionally requires a closed `reason`: either
+`{"kind":"scan_failure"}` or `{"kind":"findings","findings":[{"type":"api_key","line":2}]}`.
+Only documented categories and at most 20 findings are accepted; never send
+actual values or scanner prose. These are plugin-reported classifications, not
+host-verified file positions. The host independently captures the matching
+tool name and known read-tool path from its accepted input.
 
 This is the low-level ABI-v1 reference for humans or language-SDK authors. Go
 and Rust plugin authors should normally start with
