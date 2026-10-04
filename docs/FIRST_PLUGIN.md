@@ -69,21 +69,45 @@ Use SDK mutation helpers and request the specific write permissions you need.
 ## 3. Approve, enable, try
 
 Create `approval.json` from the exact digest and permission set shown by
-inspect. The [CLI approval guide](https://github.com/torana-edge/torana-edge/blob/main/docs/CLI.md#plugins-install-is-not-approval-and-approval-is-not-enablement)
-shows the JSON shape and resource bindings. Approve the entire declared set
+inspect. For the unchanged Go starter, which requests no permissions, use:
+
+```json
+{
+  "digest": "sha256:REPLACE_WITH_THE_DIGEST_FROM_INSPECT",
+  "permissions": [],
+  "failure_mode": "pass"
+}
+```
+
+Replace the digest before saving. If you changed the starter or chose Rust,
+use the permission set and failure mode shown by inspect instead. The
+[CLI approval guide](https://github.com/torana-edge/torana-edge/blob/main/docs/CLI.md#plugins-install-is-not-approval-and-approval-is-not-enablement)
+covers resource bindings. Approve the entire declared set
 or leave the plugin disabled; resource budgets can be narrowed separately.
 
 ```bash
 torana plugin approve my-plugin --file approval.json --yes
 torana plugin enable my-plugin --yes
 torana plugin status
-torana feed --follow
+torana feed
 ```
 
-You can also inspect, approve and enable in the local Web UI at
-`http://127.0.0.1:8080/_torana/`.
+You can also run `torana open` to inspect, approve and enable in the local Web
+UI. It opens the running instance's address, including your chosen port.
 
-Send the same inference request from the Torana quickstart. Status should show
+With an already signed-in Claude Code session, send a small request:
+
+```bash
+ANTHROPIC_BASE_URL="$(torana endpoint anthropic)" claude -p --model haiku 'Reply with exactly: hello from Torana'
+torana feed
+```
+
+For another harness or an API key, follow the
+[harness setup guide](https://github.com/torana-edge/torana-edge/blob/main/docs/HARNESS_SETUP.md).
+For a live view, run `torana feed --follow` in a separate terminal and stop it
+with Ctrl-C; plain `torana feed` returns a snapshot and exits.
+
+Status should show
 the bundle loaded, and its name should appear among the invoked plugins in the
 request feed. Pass-through leaves the provider request unchanged. If it does
 not load, inspect the reported digest, hook, permission or configuration error;
